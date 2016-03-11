@@ -1,34 +1,34 @@
-oracle ����ִ�мƻ�
+﻿oracle 交换执行计划
 
-0��׼��������
+0、准备环境：
 SQL> create table test1 as select * from dba_objects;
 Table created.
 SQL> create index idx_test1_object_id on test1(object_id);
 Index created.
-1��ִ��������䲢�鿴ִ�мƻ���
-select * from test1 where object_id=20535������
-select /*+full(test1)*/ * from test1 where object_id=20535��ȫ��ɨ��
-2����v$sql���ҵ�ÿ������hash_value,child_number
-���select * from test1 where object_id=20535��hash_value,child_number��3805445378,0��
-���select /*+full(test1)*/ * from test1 where object_id=20535��1970577185,0
-3������outline
+1、执行两条语句并查看执行计划：
+select * from test1 where object_id=20535走索引
+select /*+full(test1)*/ * from test1 where object_id=20535走全表扫描
+2、从v$sql中找到每条语句的hash_value,child_number
+语句select * from test1 where object_id=20535的hash_value,child_number是3805445378,0，
+语句select /*+full(test1)*/ * from test1 where object_id=20535是1970577185,0
+3、创建outline
 SQL> exec dbms_outln.create_outline(1970577185,0,'MYCAT1');
 PL/SQL procedure successfully completed
 SQL> exec dbms_outln.create_outline(3805445378,0,'MYCAT1');
 PL/SQL procedure successfully completed
-4���鿴dba_outlines���ֱ������ɵ�����������������OUTLINE����
+4、查看dba_outlines，分别将新生成的与这两个语句相符的OUTLINE改名
 SQL> ALTER OUTLINE SYS_OUTLINE_10052616391800813 RENAME TO OL11;
 Outline altered.
 SQL> ALTER OUTLINE SYS_OUTLINE_10052616395727514 RENAME TO OL12;
 Outline altered.
-5��select * from outln.ol$ where ol_name in('OL11','OL12')
-����hintcountֵ����5�����Բ��޸ĸ��е�ֵ
-6������ִ�мƻ�������ͨ������outln.ol$��ol_name��ֵʵ��
+5、select * from outln.ol$ where ol_name in('OL11','OL12')
+发现hintcount值都是5，可以不修改该列的值
+6、交换执行计划，这里通过交换outln.ol$的ol_name的值实现
 update outln.ol$ set ol_name='OL13' where ol_name='OL11';
 update outln.ol$ set ol_name='OL11' where ol_name='OL12';
 update outln.ol$ set ol_name='OL12' where ol_name='OL13';
 commit;
-7���鿴ִ�мƻ��Ƿ񱻸���
+7、查看执行计划是否被更改
 SQL> ALTER SESSION SET USE_STORED_OUTLINES=MYCAT1;
 Session altered.
 SQL> set autotrace on
@@ -85,22 +85,22 @@ Statistics
           0  sorts (disk)
           1  rows processed
 
-��������Կ����������ִ��ʹ����outline OL11
-���ǲ�û����ȫ��ɨ�裬������������
+从上面可以看到，该语句执行使用了outline OL11
+但是并没有走全表扫描，而是走了索引
 
-����
-���select OL_NAME,HINT#,CATEGORY,HINT_TYPE,HINT_TEXT from outln.ol$hints where ol_name in ('OL11','OL12');�������
+附：
+语句select OL_NAME,HINT#,CATEGORY,HINT_TYPE,HINT_TEXT from outln.ol$hints where ol_name in ('OL11','OL12');的输出：
 
 OL11 1 MYCAT1 2 FULL(@"SEL$1" [email=]"TEST1"@"SEL$1[/email]")
 OL11 2 MYCAT1 111 OUTLINE_LEAF(@"SEL$1")
 OL11 3 MYCAT1 113 ALL_ROWS
 OL11 4 MYCAT1 109 OPTIMIZER_FEATURES_ENABLE('10.2.0.4')
-OL11 5 MYCAT1 108 IGNORE_OPTIM_����DED_HINTS
+OL11 5 MYCAT1 108 IGNORE_OPTIM_××DED_HINTS
 OL12 1 MYCAT1 52 INDEX_RS_ASC(@"SEL$1" [email=]"TEST1"@"SEL$1[/email]" ("TEST1"."OBJECT_ID"))
 OL12 2 MYCAT1 111 OUTLINE_LEAF(@"SEL$1")
 OL12 3 MYCAT1 113 ALL_ROWS
 OL12 4 MYCAT1 109 OPTIMIZER_FEATURES_ENABLE('10.2.0.4')
-OL12 5 MYCAT1 108 IGNORE_OPTIM_����DED_HINTS
+OL12 5 MYCAT1 108 IGNORE_OPTIM_××DED_HINTS
 
 
 root.sh
@@ -150,22 +150,22 @@ esac
 echo "######end make db soft for db version######"
 
 
-��ʵ,�������Ѿ��ᵽ�����������,������ֻ�Ǿ�һ���򵥵�������ʾһ���������̶���
+其实,许多人已经提到过这个东西了,我这里只是举一个简单的例子演示一遍具体的流程而已
 
-����˵�Ż�������:
+比如说优化这个语句:
 SELECT MAX(P.PAGEVIEW)
   FROM PRODUCT P, CATALOGRELATEPRODUCT CATAP
 WHERE CATAP.CATALOGID = 291
    AND P.ID = CATAP.PRODUCTID
    AND PUBLISHSTATUS = 3;
-���ռ�����ʱ��ͳ����Ϣ:
+我收集运行时的统计信息:
 SELECT /*+ gather_plan_statistics ZHAOSJ1*/max(P.PAGEVIEW)
   FROM PRODUCT P, CATALOGRELATEPRODUCT CATAP
 WHERE CATAP.CATALOGID = 291
    AND P.ID = CATAP.PRODUCTID
    AND PUBLISHSTATUS = 3;
 
-ʵ�ʵ��������SQL���,gather_plan_statistics���ռ�����ʱ��ͳ����Ϣ����ʾ,ZHAOSJ1 ����һ����ͨ��ע��,��Ϊ��Ψһ�ı�ʶ����α��.
+实际的运行这个SQL语句,gather_plan_statistics是收集运行时的统计信息的提示,ZHAOSJ1 就是一个普通的注释,是为了唯一的标识这个游标的.
 
 SQL> SELECT SQL_ID,CHILD_NUMBER FROM V$SQL  WHERE SQL_TEXT LIKE '%ZHAOSJ1%' AND SQL_TEXT NOT LIKE '%V$SQL%';
 
@@ -173,7 +173,7 @@ SQL_ID        CHILD_NUMBER
 ------------- ------------
 79gcyuucwuzwg            0
 
-���Ҹղŵ��α�.
+查找刚才的游标.
 SET PAGESIZE 200;
 SET LINESIZE 200;
 COL PLAN_TABLE_OUTPUT FOR A195;
@@ -214,17 +214,17 @@ Column Projection Information (identified by operation id):
    4 - "P"."PAGEVIEW"[NUMBER,22]
 
 
-������ʾ:�������ܵ��߼�IO��:17210(buffers ��ʵ�ʵ��߼�IO����,�������ۼ�ֵ,�����Ӳ�����ֵ)
-starts �Ƕ�Ӧ�Ķ���ִ�еĴ���
-E-ROWS ���Ż���������һ�����ص���������
-A-Rows  ����һ��ʵ�ʷ��ص���������
+这里显示:这个语句总的逻辑IO是:17210(buffers 是实际的逻辑IO数量,这里是累计值,包括子操作的值)
+starts 是对应的动作执行的次数
+E-ROWS 是优化器估算这一步返回的数据行数
+A-Rows  是这一步实际返回的数据行数
 
-����INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT   ��һ�����㷵��50��.��ʵ�ʷ�����8567��
-��Ϊ���㷵��50��,���Թ���INDEX RANGE SCAN| INDEX2_PRODUCT ��һ����ִ��50��,��ʵ����ִ����8567��.
-��Ȼ������ʵ��ִ���ϴ����ž޴�Ĳ���.
+明显INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT   这一步估算返回50行.但实际返回了8567行
+因为估算返回50行,所以估算INDEX RANGE SCAN| INDEX2_PRODUCT 这一步会执行50次,但实际它执行了8567次.
+显然估算与实际执行上存在着巨大的差异.
 
-���Ż�������INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT ��һ������8567�еĻ�,ִ�мƻ�����ʲô�� ʵ�ʵ�ִ��Ч���������� 
-ʹ��cardinality(t n) ��ʾ���Ϳ������� !
+那优化器估算INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT 这一步返回8567行的话,执行计划会是什么呢 实际的执行效果会怎样呢 
+使用cardinality(t n) 提示不就可以了吗 !
 
 SQL> SELECT /*+ CARDINALITY(CATAP 8500) gather_plan_statistics ZHAOSJ6*/max(P.PAGEVIEW)
   2    FROM PRODUCT P, CATALOGRELATEPRODUCT CATAP
@@ -279,89 +279,89 @@ Column Projection Information (identified by operation id):
    3 - "CATAP"."PRODUCTID"[NUMBER,22]
    4 - "P"."ID"[NUMBER,22], "P"."PAGEVIEW"[NUMBER,22]
 
-����hash join����������8511��ʵ�ʷ��ص�����8557�Ĳ���Ѿ���С��.
-ִ�мƻ��ı���.�����߼�IO��1.7W�½�����1400.�߼�IO���½����Ǻ����Ե�
+明显hash join后估算的行数8511与实际返回的行数8557的差距已经很小了.
+执行计划改变了.而且逻辑IO从1.7W下降到了1400.逻辑IO的下降还是很明显的
 
-����Ҫ���ľ���ͨ��ʹ����ʾʹ�������������ִ�мƻ�:
+下面要做的就是通过使用提示使得它可以走这个执行计划:
 SELECT /*+ use_hash(p catap)*/max(P.PAGEVIEW)
   FROM PRODUCT P, CATALOGRELATEPRODUCT CATAP
 WHERE CATAP.CATALOGID = 291
    AND P.ID = CATAP.PRODUCTID
    AND PUBLISHSTATUS = 3;
 
-��,��ʵ����Ҫ�����ǲ���һ���Ż���Ϊʲô���㷵�ص�����,��������� 
+但,事实上你要做的是查找一下优化器为什么估算返回的行数,估算错了呢 
 SQL> select a.num_distinct,a.num_buckets,a.num_nulls,a.histogram,b.num_rows,round(b.num_rows/a.num_distinct) rows_per_key
   2  from user_tab_columns a,user_tables b where a.table_name='CATALOGRELATEPRODUCT' and a.column_name='CATALOGID' and b.table_name='CATALOGRELATEPRODUCT';
 
 NUM_DISTINCT NUM_BUCKETS  NUM_NULLS HISTOGRAM         NUM_ROWS ROWS_PER_KEY
 ------------ ----------- ---------- --------------- ---------- ------------
        17943           1          0 NONE                904362           50
-����,������ϲ�û���ռ���״ͼͳ����Ϣ.���Զ���min~max�ڵ��������ֵ,������ķ�����������:num_rows/num_distinct =50
-����CATAP.CATALOGID = 291,����ȷʵ����׼ȷ.��������������:
-1.Ӧ�ó�������ʹ�ð󶨱�����.
-2.���ڵ�������ֵ��˵,ȷʵ���ز��˼�������(nl��ִ�мƻ�ȷʵ�Ǻõ�,���ռ���״ͼͳ����Ϣʱ,ȷʵ��NL��).291��ʵ������һ����������ֵ(��������ǵ�������ֵ��˵,hash joinȷʵ��һ���õ�ִ�мƻ�,��nl����).��������ռ�����״ͼͳ����Ϣ�Ļ�,ÿ��Ӳ������ʱ��,����peeking,����кܴ�������,���peeking�ĸպ���291����ǵ�������ֵ,����hash join�Ļ�,����һ�������ֵ��˵,��������ʵ�ǲ��õ�.����,��ʵ�Ͳ�Ӧ���ռ���״ͼͳ����Ϣ:������Ȼ���ڼ�����������ֵ��˵,ִ�мƻ�������,�����ھ������������ֵ��˵,ִ�мƻ��Ǻܺõ�.���ڼ������ķǵ�������ֵ��˵,���ʹ������ֵ�Ļ�,�����ʹ��use_hash֮�����ʾ����������ִ�мƻ�.
+明显,这个列上并没有收集柱状图统计信息.所以对于min~max内的任意给定值,它估算的返回行数都是:num_rows/num_distinct =50
+对于CATAP.CATALOGID = 291,估算确实不够准确.但问题在于两点:
+1.应用程序中是使用绑定变量的.
+2.对于典型输入值来说,确实返回不了几行数据(nl的执行计划确实是好的,不收集柱状图统计信息时,确实走NL了).291其实并不是一个典型输入值(对于这个非典型输入值来说,hash join确实是一个好的执行计划,而nl不是).所以如果收集了柱状图统计信息的话,每次硬分析的时候,都会peeking,这带有很大的随机性,如果peeking的刚好是291这个非典型输入值,采用hash join的话,对于一般的输入值来说,性能上其实是不好的.所以,其实就不应该收集柱状图统计信息:这样虽然对于极少数的输入值来说,执行计划并不好,但对于绝大多数的输入值来说,执行计划是很好的.对于极少数的非典型输入值来说,如果使用字面值的话,你可以使用use_hash之类的提示来纠正它的执行计划.
 
 
-[1][2]������ѡ��ȣ��� ��������Ϊһ��ν���ִ�в���Ԥ�ڻ�ȡ����������������һ��������ֵ���ȷֲ������ϵļ򵥵�ʽν�ͨ�����е��������������Ψһֵ�ĸ������������� �������磬��Sales���У���918K�����ݶ�Prod_id����72��Ψһֵ�����Prod_id���ϵĵ�ʽν���������918K/72=12 750����ô�����仰˵��ν��Prod_id=:b1Ԥ�ƽ�ȡ��12750�����ݡ����нϵͻ������и��ʺ���Ϊ�����ĺ�ѡ����Ϊ������ѡ���Ҫ���á����� ÿ��ֵ����Ψһ���У���ʽν��Ļ���Ϊ1��ѡ�����һ����0��1�Ķ���ֵ���򵥶���Ϊ1/NDV������NDV��ʾΨһֵ����Ŀ����ˣ�һ��λ�ڵ����ݿ��� ����Ϊѡ��ȳ��Ա��е�����������
+[1][2]基数、选择度：基 数被定义为一个谓语或执行步骤预期获取的数据行数。考虑一个假设列值均匀分布的列上的简单等式谓语。通过表中的数据行数与表中唯一值的个数相除来算出基 数。例如，在Sales表中，有918K行数据而Prod_id列上72个唯一值，因此Prod_id列上的等式谓语基数就是918K/72=12 750。那么，换句话说，谓语Prod_id=:b1预计将取出12750行数据。具有较低基数的列更适合作为索引的候选，因为索引的选择度要更好。对于 每个值都是唯一的列，等式谓语的基数为1。选择度是一个从0到1的度量值，简单定义为1/NDV，其中NDV表示唯一值的数目。因此，一个位于的数据可以 定义为选择度乘以表中的数据行数。
 
-moveһ����������һ�����ռ�ʱ,�����������һ��move�����һ�ʧЧ����LOB�������⣩
+move一个表到另外一个表空间时,索引不会跟着一起move，而且会失效。（LOB类型例外）
 
-SQL>set colsep' ';�������� //-������ָ���
-SQL>set echo off;�������� //��ʾstart�����Ľű��е�ÿ��sql���ȱʡΪon
-SQL> set echo on               //���������������Ƿ���ʾ���
-SQL> set feedback on;       //������ʾ����ѡ��XX�С�
-SQL>set feedback off;��     //���Ա���sql������ļ�¼������ȱʡΪon
-SQL>set heading off;����   //�������⣬ȱʡΪon
-SQL>set pagesize 0;����    //���ÿҳ������ȱʡΪ24,Ϊ�˱����ҳ�����趨Ϊ0��
-SQL>set linesize 80;����    //���һ���ַ�������ȱʡΪ80
-SQL>set numwidth 12;��    //���number�����򳤶ȣ�ȱʡΪ10
-SQL>set termout off;����   //��ʾ�ű��е������ִ�н����ȱʡΪon
-SQL>set trimout on;������//ȥ����׼���ÿ�е���β�ո�ȱʡΪoff
-SQL>set trimspool on;����//ȥ���ض���spool�����ÿ�е���β�ո�ȱʡΪoff
-SQL>set serveroutput on;  //����������ʾ�������dbms_output
-SQL> set timing on;          //������ʾ������ʱ�䣺XXXX��
-SQL> set autotrace on-;    //����������ִ�е�sql���з���
-SQL> set verify off                     //���Թرպʹ���ʾȷ����Ϣold 1��new 1����ʾ.
+SQL>set colsep' ';　　　　 //-域输出分隔符
+SQL>set echo off;　　　　 //显示start启动的脚本中的每个sql命令，缺省为on
+SQL> set echo on               //设置运行命令是是否显示语句
+SQL> set feedback on;       //设置显示“已选择XX行”
+SQL>set feedback off;　     //回显本次sql命令处理的记录条数，缺省为on
+SQL>set heading off;　　   //输出域标题，缺省为on
+SQL>set pagesize 0;　　    //输出每页行数，缺省为24,为了避免分页，可设定为0。
+SQL>set linesize 80;　　    //输出一行字符个数，缺省为80
+SQL>set numwidth 12;　    //输出number类型域长度，缺省为10
+SQL>set termout off;　　   //显示脚本中的命令的执行结果，缺省为on
+SQL>set trimout on;　　　//去除标准输出每行的拖尾空格，缺省为off
+SQL>set trimspool on;　　//去除重定向（spool）输出每行的拖尾空格，缺省为off
+SQL>set serveroutput on;  //设置允许显示输出类似dbms_output
+SQL> set timing on;          //设置显示“已用时间：XXXX”
+SQL> set autotrace on-;    //设置允许对执行的sql进行分析
+SQL> set verify off                     //可以关闭和打开提示确认信息old 1和new 1的显示.
 
-��move�����Ƿ�Ϊ��
+表move，我们分为：
 
-*��ͨ��move
+*普通表move
 
-*������move
+*分区表move
 
-*LONG,LOB���ֶ�����move�����в��Ժ�˵����
+*LONG,LOB大字段类型move来进行测试和说明。
 
 
 
-������move������ͨ��rebuild��ʵ��
+索引的move，我们通过rebuild来实现
 
-һ��move��ͨ�������������﷨��
+一：move普通表、索引基本语法：
 
 alter table tab_name move tablespace tbs_name;
 
-move������ͨ�����ڲ��õ�ʧЧ�������Ĳ�������У����ִ�����������������������õ�����������������Ψһ�����������ʱ�����õ�������ʧЧ�����ִ��ʧ�ܣ�������������ǿ�Լ����ȱʡֵ�Ȳ���ʧЧ��
+move过的普通表，在不用到失效的索引的操作语句中，语句执行正常，但如果操作的语句用到了索引（主键当做唯一索引），则此时报告用到的索引失效，语句执行失败，其他如外键，非空约束，缺省值等不会失效。
 
-������Ҫ���´��������������������﷨Ϊ��
+我们需要重新创建主键或索引，基本语法为：
 
 1
 2
 alter index index_name rebuild;
 alter index pk_name rebuild;
-���������Ҫmove��������ʹ��rebuild�﷨��
+如果我们需要move索引，则使用rebuild语法：
 
 1
 2
 alter index index_name rebuild tablespace tbs_name;
 alter index pk_name rebuild tablespace tbs_name;
-��ʾ����ѯ�������е�����������ʹ��user_indexes��ͼ���������������������ͼ����ҵ�����
+提示：查询表所具有的索引，可以使用user_indexes视图（索引和主键都在这个视图里可找到）。
 
 
 
-����move����������������ͨ��һ����������ʧЧ������Ľ������﷨���ѡ�
+二：move分区表及索引和普通表一样，索引会失效，区别的仅仅是语法而已。
 
-���������﷨���ر�����ע�⣬����ǵ�����������ʹ�ùؼ���PARTITION������Ƕ༶��������ʹ��SUBPARTITION���PARTITION��
+分区基本语法：特别提醒注意，如果是单级分区，则使用关键字PARTITION，如果是多级分区，则使用SUBPARTITION替代PARTITION。
 
-�����������������Ƚϴ󣬿���ʹ�ò���move��rebuild��PARALLEL (DEGREE 2);�磺
+如果分区或分区索引比较大，可以使用并行move或rebuild，PARALLEL (DEGREE 2);如：
 
 1
 2
@@ -369,27 +369,27 @@ alter index pk_name rebuild tablespace tbs_name;
 ALTER TABLE PART_ALARMTEXTDATA move SUBPARTITION ALARMTEXTDATA_050910_ATD01 TABLESPACE users PARALLEL (DEGREE 2);
 ALTER INDEX GLOBAL_ALARMTEXTDATA REBUILD tablespace users PARALLEL (DEGREE 2);
 ALTER INDEX LOCAL_ALARMTEXTDATA REBUILD SUBPARTITION ALARMTEXTDATA_050910_ATD01 TABLESPACE users PARALLEL (DEGREE 2);
-�ƶ�����ĳ��������
+移动表的某个分区：
 
 1
 ALTER TABLE tab_name move PARTITION partition_name TABLESPACE tbs_name;
-�ؽ�ȫ��������
+重建全局索引：
 
 1
 2
-ALTER INDEX global_index REBUILD;��
+ALTER INDEX global_index REBUILD;或
 ALTER INDEX global_index REBUILD tablespace tbs_name;
-ע: ��������ʱ���Դ���with update global indexesѡ�����ȫ������
+注: 分区操作时可以带上with update global indexes选项更新全局索引
 
-�ؽ��ֲ�������
+重建局部索引：
 
 1
 ALTER TABLE tab_name MODIFY PARTITION partition_name REBUILD UNUSABLE LOCAL INDEXES;
 1
-��
+或
 1
 ALTER INDEX local_index_name REBUILD PARTITION partition_name TABLESPACE tbs_name;
-��ʾ��
+提示：
 
 USER_PART_TABLES
 
@@ -403,17 +403,17 @@ USER_LOB_SUBPARTITIONS
 
 USER_PART_INDEXES
 
-USER_PART_LOBS�ɲ�ѯ����������ݣ�ͬʱ����������Ҳ��segment������Ҳ����dba_segments���ĵ���
+USER_PART_LOBS可查询分区相关内容，同时，分区对象，也是segment，所以也可在dba_segments里查的到。
 
 
 
-����move LONG,LOB���ͣ���˵DBMS_REDEFINITION�������ṩһЩ���㣬û�ù�����
+三：move LONG,LOB类型（据说DBMS_REDEFINITION包可以提供一些方便，没用过。）
 
-I:LONG����  ---����
+I:LONG类型  ---废弃不用
 
-LONG���Ͳ���ͨ��MOVE�������ر���ʾ��������Ҫ��LONG���ͣ����ѹ������ο���http://www.anysql.net/2005/12/long_vs_lob.html
+LONG类型不能通过MOVE来传输特别提示，尽量不要用LONG类型，特难管理。参考：http://www.anysql.net/2005/12/long_vs_lob.html
 
-LONG����ʹ��insert into �� select ���ȴ�select��ģʽ����
+LONG不能使用insert into … select …等带select的模式。如
 
 1
 2
@@ -429,8 +429,8 @@ LONG����ʹ��insert into �� select ���ȴ�select��ģʽ����
 12
 13
 14
-create table t123 (id int,en long);��
-insert into t123(id,en) select * from t123;������󣬿�����pl/sql������������磺
+create table t123 (id int,en long);则
+insert into t123(id,en) select * from t123;报告错误，可以用pl/sql来帮助解决，如：
 declare
 cursor cur_t123 is select * from t123;
 use_t123 cur_t123%rowtype;
@@ -443,39 +443,39 @@ insert into t123(id,en) values (use_t123.id,use_t123.en);
 end loop;
 close cur_t123;
 end;
-����LONG�����ֶεı���ת�ƣ�����ʹ�ã�
+对有LONG类型字段的表的转移，可以使用：
 
-create�±��ķ�����
+create新表的方法。
 
-* createһ���µı����洢����Ҫת�Ƶı��ռ䡣
+* create一个新的表，存储在需要转移的表空间。
 
-* �����µ�������ʹ��tablespace �Ӿ�ָ���µı��ռ䣩��
+* 创建新的索引（使用tablespace 子句指定新的表空间）。
 
-* ������ת�ƹ���
+* 把数据转移过来
 
-����һ����COPY�ķ�����
+方法一：用COPY的方法：
 
 1
 copy from bigboar/bigboar@bigboar_sid insert t123(id,en) using select id,en from t123;
-��������PL/SQL�����ϣ�
+方法二：PL/SQL（如上）
 
-��������ֱ�ӾͰ�LONGת����CLOB����
+方法三：直接就把LONG转换成CLOB类型
 
 1
 2
 create table t321(id int,en clob) tablespace users;
 insert into t321(id,en) select id,to_lob(en) from t123;
-�����ģ�exp/imp
+方法四：exp/imp
 
 1
 2
 exp bigboar/bigboar file=a.dat tables=t123
 imp bigboar/bigboar file=a.dat full=y IGNORE =y
-* drop���ɱ���
+* drop掉旧表。
 
-* rename �±�Ϊ�ɱ�������
+* rename 新表为旧表表名。
 
-II:LOB�����ڽ�������lob�ֶεı�ʱ��oracle���Զ�Ϊlob�ֶν�������������segment,һ������������ݣ�segment_type=LOBSEGMENT������һ���������������segment_type=LOBINDEX����Ĭ�����ǻ�洢�ںͱ�һ��ı��ռ䡣���ǶԱ�MOVEʱ��LOG�����ֶκ͸��ֶε������������MOVE������Ҫ����������MOVE���﷨�����磺
+II:LOB类型在建立含有lob字段的表时，oracle会自动为lob字段建立两个单独的segment,一个用来存放数据（segment_type=LOBSEGMENT），另一个用来存放索引（segment_type=LOBINDEX）。默认它们会存储在和表一起的表空间。我们对表MOVE时，LOG类型字段和该字段的索引不会跟着MOVE，必须要单独来进行MOVE，语法如下如：
 
 1
 2
@@ -486,14 +486,14 @@ select   s.sid,s.username,s.sql_id,t.used_ublk*8/1014/1024 from v$transaction t 
  where t.addr=s.taddr order by 4 desc;
 
 
- ���鿴����lock�����
+ 。查看锁（lock）情况
  select /*+ RULE */ ls.osuser os_user_name, ls.username user_name, decode(ls.type, 'RW', 'Row wait enqueue lock', 'TM', 'DML enqueue lock', 'TX', 'Transaction enqueue lock', 'UL', 'User supplied lock') lock_type, o.object_name object, decode(ls.lmode, 1, null, 2, 'Row Share', 3, 'Row Exclusive', 4, 'Share', 5, 'Share Row Exclusive', 6, 'Exclusive', null) lock_mode, o.owner, ls.sid, ls.serial# serial_num, ls.id1, ls.id2
  from sys.dba_objects o, ( select s.osuser, s.username, l.type, l.lmode, s.sid, s.serial#, l.id1, l.id2 from v$session s, v$lock l where s.sid = l.sid ) ls where o.object_id = ls.id1 and o.owner <> 'SYS' order by o.owner, o.object_name
- --�鿴��Ч�ʵ�SQL���
+ --查看低效率的SQL语句
  SELECT EXECUTIONS , DISK_READS, BUFFER_GETS, ROUND((BUFFER_GETS-DISK_READS)/BUFFER_GETS,2) Hit_radio, ROUND(DISK_READS/EXECUTIONS,2) Reads_per_run, SQL_TEXT FROM V$SQLAREA WHERE EXECUTIONS>0 AND BUFFER_GETS > 0 AND (BUFFER_GETS-DISK_READS)/BUFFER_GETS < 0.8 ORDER BY 4 DESC
 
 
-Ȼ��鿴��Щռ�� CPU ��Դ�ܸߵ� Oracle ���̾���������ʲô������ʹ������ SQL ��䣺
+然后查看这些占用 CPU 资源很高的 Oracle 进程究竟是在做什么操作，使用如下 SQL 语句：
 select sql_text,sql_fulltext,spid,v$session.program,process  from
 v$sqlarea,v$session,v$process
 where v$sqlarea.address=v$session.sql_address
@@ -501,25 +501,25 @@ and v$sqlarea.hash_value=v$session.sql_hash_value
 and v$session.paddr=v$process.addr
 and v$process.spid in (PID);
 
-�����Ͽ��Կ϶������ SQL ������ϵͳ CPU ��Դ������ռ�ã��Ǿ�����ʲôԭ��������
-SQL ��ô������ռ�� CPU ��Դ�أ������������ݿ�Ľ��̵ȴ��¼�����Щʲô��
+基本上可以肯定是这个 SQL 引起了系统 CPU 资源大量被占用，那究竟是什么原因造成这个
+SQL 这么大量地占用 CPU 资源呢，先来看看数据库的进程等待事件都有些什么：
 SQL> select sid,event,p1,p1text from v$session_wait;
 
 
-������Ĳ�ѯ���Կ��������� latch free �ĵȴ��¼���Ȼ����Ų�һ����Щ latch �ĵȴ���
-��ʲô���̲����ģ�
+从上面的查询可以看出，大都是 latch free 的等待事件，然后接着查一下这些 latch 的等待都
+是什么进程产生的：
 SQL> select spid from v$process where addr in
 
     (select paddr from v$session where sid in(84,102,101,106,155,151));
-�ɴ˿��� latch  free ����ȴ��¼�������������Ǹ� SQL ����ڵȴ���ռ���˴����� CPU ��
-Դ������������������Ҫ���������͵� latch �ȴ������������ SQL ��䣺
+由此看出 latch  free 这个等待事件导致了上面的那个 SQL 语句在等待，占用了大量的 CPU 资
+源。下面来看看究竟主要是哪种类型的 latch 等待，根据下面的 SQL 语句：
 SQL> SELECT latch#, name, gets, misses, sleeps
      FROM v$latch
      WHERE sleeps>0
      ORDER BY sleeps;
 
-     ������Ĳ�ѯ���Կ�������Ҫ�� latch �ȴ��� cache buffers chains����� latch �ȴ���������
-����ڵ����� block ����������������� latch ���ڵ��� latch �����Ӧ�����ͣ�
+     由上面的查询可以看出最主要的 latch 等待是 cache buffers chains，这个 latch 等待表明数据
+库存在单独的 block 竞争，下面来看这个 latch 存在的子 latch 及其对应的类型：
 SQL> SELECT addr, latch#, gets, misses, sleeps
      FROM v$latch_children
      WHERE sleeps>0
@@ -537,8 +537,8 @@ SPID
 25725
 26014
 26016
-�ɴ˿��� latch  free ����ȴ��¼�������������Ǹ� SQL ����ڵȴ���ռ���˴����� CPU ��
-Դ������������������Ҫ���������͵� latch �ȴ������������ SQL ��䣺
+由此看出 latch  free 这个等待事件导致了上面的那个 SQL 语句在等待，占用了大量的 CPU 资
+源。下面来看看究竟主要是哪种类型的 latch 等待，根据下面的 SQL 语句：
 SQL> SELECT latch#, name, gets, misses, sleeps
      FROM v$latch
      WHERE sleeps>0
@@ -556,8 +556,8 @@ LATCH#  NAME                          GETS     MISSES      SLEEPS
    156   shared pool                    2771629     6184        662
    157   library cache                  5637573     25246       801
     98   cache buffers chains           1722750424  758400      109837
-������Ĳ�ѯ���Կ�������Ҫ�� latch �ȴ��� cache buffers chains����� latch �ȴ���������
-����ڵ����� block ����������������� latch ���ڵ��� latch �����Ӧ�����ͣ�
+由上面的查询可以看出最主要的 latch 等待是 cache buffers chains，这个 latch 等待表明数据
+库存在单独的 block 竞争，下面来看这个 latch 存在的子 latch 及其对应的类型：
 SQL> SELECT addr, latch#, gets, misses, sleeps
      FROM v$latch_children
      WHERE sleeps>0
@@ -575,9 +575,9 @@ ADDR                 LATCH#       GETS     MISSES     SLEEPS
 000004000A36B250         98    1083351        199         96
 000004000A79EC70         98     257970         64         35
 000004000A356AD0         98    1184810        160         34
-����
-�������鿴 sleep �϶���� latch ����Ӧ��Щ����
-SQL> select distinct a.owner,a.segment_name,a.segment_type from  294  Oracle ���ݿ������Ż�
+……
+接着来查看 sleep 较多的子 latch 都对应哪些对象：
+SQL> select distinct a.owner,a.segment_name,a.segment_type from  294  Oracle 数据库性能优化
 
      dba_extents a,
  (select dbarfil,dbablk
@@ -593,23 +593,23 @@ where hladdr in
 
 
 
-     ���ݿ�ʼ�鵽������ latch free �ȴ��еĶ���� SQL ����ִ�мƻ������� SERVICE ���ϵ�
-���������⣬�ƺ������˹����ɨ�裬���ǽ�ͬ���� SQL �����������ͬ�������ݿ���ִ��һ�£�
-�鿴��Ӧ��ִ�мƻ���
+     根据开始查到的引起 latch free 等待中的对象和 SQL 语句的执行计划，觉得 SERVICE 表上的
+索引有问题，似乎存在了过多的扫描，于是将同样的 SQL 语句在其他的同样的数据库上执行一下，
+查看相应的执行计划：
 
-���ִ�����������ݿ��е�  SERVICE  ���ϲ�֪��ô�����  I_SERVICE_PRICEPLANID��
-I_SERVICE_SERVICESPECID �� I_SERVICE_SUBSIDIARYID ��������������Щ�������ǵ����˿�ʼ��
-�� SQL ������˲����õ����������� latch  free �ȴ��� CPU ռ�úܸߵ�������ף�����ɾ������
-��������������ִ����Ӧ�� SQL ��䣬�ܿ�͵ó��˽����CPU ��������Ҳ�����½�Ϊ�����ˣ�
+发现存在问题的数据库中的  SERVICE  表上不知怎么多出了  I_SERVICE_PRICEPLANID、
+I_SERVICE_SERVICESPECID 和 I_SERVICE_SUBSIDIARYID 三个索引，而这些索引就是导致了开始那
+个 SQL 语句用了不该用的索引，引起 latch  free 等待和 CPU 占用很高的罪魁祸首，于是删除了这
+三个索引，重新执行相应的 SQL 语句，很快就得出了结果，CPU 的利用率也马上下降为正常了，
 
 
 
-�����Ƽ�һ�ַ��������ֵ�ǰ˭����ʹ��ĳ�� Package/Procedure/Function/View��
+这里推荐一种方法来发现当前谁正在使用某个 Package/Procedure/Function/View：
 SQL> create or replace procedure who_is_using(obj_name varchar2) is
   2  begin
   3   dbms_output.enable(1000000);
-  4     for i in (SELECT distinct b.username �� b.sid
-  5               FROM SYS.x$kglpn a �� v$session b �� SYS.x$kglob c
+  4     for i in (SELECT distinct b.username ， b.sid
+  5               FROM SYS.x$kglpn a ， v$session b ， SYS.x$kglob c
   6               WHERE a.KGLPNUSE = b.saddr
   7                 and upper(c.KGLNAOBJ)  like upper(OBJ_NAME)
   8                 and a.KGLPNHDL = c.KGLHDADR) loop
@@ -627,58 +627,58 @@ SQL> execute who_is_using('STANDARD%');
 
 
 
-��v$sort_segment �ֵ���� temp ���ռ�Ƚ���ϸ��ʹ��������� v$sort_usage �ֵ佫����� DBA ��˭����ʲô������� SQL ����
-Ҫ�����ӹ����ſ��Եó�����ϸ�Ľ����
+，v$sort_segment 字典记载 temp 表空间比较详细的使用情况，而 v$sort_usage 字典将会告诉 DBA 是谁在做什么，具体的 SQL 还需
+要稍做加工，才可以得出更详细的结果。
 select se.username,p.spid,su.blocks*8192/1024/1024 Space,sql_text
     from v$sort_usage su,v$session se,v$sql s,v$process p
 where su.session_addr=se.saddr and s.hash_value=su.sqlhash
     and s.address=su.sqladdr and p.addr = se.paddr
 order by se.username,se.sid;
 
-�������¼�ָ Oracle ���ڵȴ�ĳ�ֹ����������Ŀ��еȴ��¼���
-client message��
-null event��
-pipe get��
-pmon/smon timer��
+，空闲事件指 Oracle 正在等待某种工作，常见的空闲等待事件有
+client message、
+null event、
+pipe get、
+pmon/smon timer、
 rdbms rpc message
 
-�� SQL*Net �ȣ��ǿ��еȴ��¼���
-buffer busy waits��
-db file scattered read��
-db file sequential read��
-enqueue��
-free buffer waits��
-latch free��
-log file sync��
-log file paralle write �ȡ�
+及 SQL*Net 等；非空闲等待事件有
+buffer busy waits、
+db file scattered read、
+db file sequential read、
+enqueue、
+free buffer waits、
+latch free、
+log file sync、
+log file paralle write 等。
 
 
 Buffer Busy Wait
-����Ի������ĵȴ������ڸû������ķǹ���������ʽ�����������ڸû���������ͨ����
-���Ự��ȡ���ݿ��е��������¡�������æ�ȴ���Ӧ���� 1%�Ķ�ȡ����� Statspack �Ļ���
-���ȴ��Ĳ��֣����߼��  v$waitstat  ��ͼ���������ȴ��Ƿ����ڶ�ͷ�ϡ����ǣ���Ӧ���Ӹ�
-�ε� Freelist  Groups �������� PCTFREE �� PCTUSED ֮��Ĳ����ȴ������� undo  header
-�ϣ������ͨ�����ӻع�����������⣻����ȴ������� undo block �ϣ�����Կ��Ǽ�������
-��һ���Զ��ı�����������ܶȣ��������� DB_CACHE_SIZE������ȴ������� data block �ϣ�
-����԰Ѹÿ��ϵ����ݰᵽ��һ���ݿ����Ա��⡰�ȵ㡱��������� Freelists ���߲��ñ��ع���
-�ı��ռ䣨LMT��s��������ȴ������� index block �ϣ�������ؽ��������������������߲��÷�
-��ؼ���������Ϊ���������ݿ���صĻ�����æ�ȴ�������ת�����ý�С�� blocksize��ÿһ��
-������ֻ�����ɽ��ٵļ�¼���ÿ�Ҳ�Ͳ���������ǰ�������ȡ��ˡ���ִ��һ�� DML������ɾ
-��ģ�ʱ��Oracle ���ݿ�������ݿ���д��Ϣ�����а����Ը����ݿ�״̬������Ȥ�����û���
-Ϣ��Interested Transaction List����� ITL����Ϊ��������һ�����ϵĵȴ����������� initrans ��
-�����Ӷ������ݿ���Ϊ����� ITL ��Ԥ���ռ䣻������������� PCTFREE ��������������  initrans
-û��Ϊ�㹻�� ITL ��Ԥ���ռ������£����� ITL �ۣ��� maxtrans �ķⶥ���ƣ����Ա���̬��
-������ռ䡣
+此类对缓冲区的等待是由于该缓冲区的非共享工作方式，或者是由于该缓冲区正在通过其
+他会话读取数据块中的内容所致。缓冲区忙等待不应超过 1%的额度。请检查 Statspack 的缓冲
+区等待的部分（或者检查  v$waitstat  视图），看看等待是否发生于段头上。若是，则应增加该
+段的 Freelist  Groups 或者增大 PCTFREE 和 PCTUSED 之间的差。如果等待发生于 undo  header
+上，则可以通过增加回滚段来解决问题；如果等待发生于 undo block 上，则可以考虑减少驱动
+此一致性读的表上面的数据密度，或者增大 DB_CACHE_SIZE。如果等待发生于 data block 上，
+则可以把该块上的数据搬到另一数据块上以避免“热点”，增大表的 Freelists 或者采用本地管理
+的表空间（LMT’s）。如果等待发生于 index block 上，则可以重建索引、将索引分区或者采用反
+向关键字索引。为避免与数据块相关的缓冲区忙等待，可以转而采用较小的 blocksize：每一块
+里现在只能容纳较少的记录，该块也就不会再像以前那样“热”了。当执行一条 DML（增、删
+或改）时，Oracle 数据库会向数据块里写信息，其中包括对该数据块状态“感兴趣”的用户信
+息（Interested Transaction List，简称 ITL）。为减少在这一部分上的等待，可以增大 initrans 参
+数，从而在数据块中为更多的 ITL 槽预留空间；还可以增大表的 PCTFREE 参数，这样，在  initrans
+没有为足够多 ITL 槽预留空间的情况下，更多 ITL 槽（受 maxtrans 的封顶限制）可以被动态地
+分配给空间。
 
 
--- ��ȴ��¼������Ӧ�� latch
+-- 求等待事件及其对应的 latch
 col event format a32
 col name format a32
 select sid,event,p1 as file_id, p2 as "block_id/latch", p3 as blocks,l.name
   from v$session_wait sw,v$latch l
 where event not like '%SQL%' and event not like '%rdbms%'
 and event not like '%mon%' and sw.p2 = l.latch#(+);
--- ��ȴ��¼������ȵ����
+-- 求等待事件及其热点对象
 col owner format a18
 col segment_name format a32
 col segment_type format a32
@@ -686,13 +686,13 @@ select owner,segment_name,segment_type
   from DBA_extents
 where file_id = &file_id and &block_id between block_id
 and block_id + &blocks - 1;
--- �ۺ��������� SQL ��ͬʱ��ʾ latch ���ȵ�����ٶȽ�����
+-- 综合以上两条 SQL ，同时显示 latch 及热点对象（速度较慢）
 select sw.sid,event,l.name,de.segment_name
   from v$session_wait sw,v$latch l,DBA_extents de
 where event not like '%SQL%' and event not like '%rdbms%'
 and event not like '%mon%' and sw.p2 = l.latch#(+) and sw.p1 = de.file_id(+) and p2 between
 de.block_id and de.block_id + de.blocks - 1;
--- ����Ƿǿ��еȴ��¼���ͨ���ȴ��Ự�� SID ��������ûỰ��ִ�е� SQL
+-- 如果是非空闲等待事件，通过等待会话的 SID 可以求出该会话在执行的 SQL
 select sql_text
  from v$sqltext_with_newlines st,v$session se
 where st.address=se.sql_address and st.hash_value=se.sql_hash_value
@@ -701,13 +701,13 @@ and se.sid =&wait_sid order by piece;
 
 
 
-session�����õ�С�ˣ����޸����session�������ͻ�Ҫ��ʷ���ӵ����session����Ȼ��ο����ֵ��������
-��û�����������������  ���һ�� ��ô�鿴�����ʷ�������session��
+session数设置的小了，想修改最大session参数，客户要历史连接的最大session数，然后参考这个值进行设置
+我没查出来这个最大连接数  请教一下 怎么查看这个历史最大连接session数
 select * from dba_high_water_mark_statistics;
 
 
 
-ͨ������sql �� pace ���7���latch free �ȴ�������ʱ������ͼ��pa �ϵ��������ݣ�
+通过如下sql 看 pace 最近7天的latch free 等待总量和时间趋势图及pa 上的性能数据，
 
 with
 e as (
@@ -724,15 +724,15 @@ where t1.snap_id = t2.snap_id
  from e where snap_id not in ('66314','66414') order by snap_time asc;
 
 
-���ҹ���Ƶ�����:
+查找过度频繁语句:
 select t1.sid,  t1.value,    t2.name from v$sesstat t1,     v$statname t2
 where t2.name  like  '%user commits%'
      and t1.statistic#  = t2.statistic#
      and   value >=10000
      order by value desc;
-������־�������ϣ�
+跟踪日志暴增故障：
 select  *  from  (
-   select  to_char(begin_interval_time,  'YYYY_MM_DD HH24:MI'��  snap_time, dhsso.object_name,sum(db_block_changs_delta)
+   select  to_char(begin_interval_time,  'YYYY_MM_DD HH24:MI'）  snap_time, dhsso.object_name,sum(db_block_changs_delta)
    from dba_hist_seg_stat dhss, dba_hist_seg_stat_obj dhsso,  dba_hist_snapshot dhs
     where  dhs.snap_id=dhss.snap_id
     and  dhs.instance_number =dhss.instance_number  and dhss.obj# = dhsso.obj# and dhss.dataobj#=dhsso.dataobj#
@@ -750,121 +750,121 @@ and dhss.instance_number = dhs.instance_number  and dhss.sql_id=dhst.sql_id;
 
 /********************************************
 
-    ����˵���� ���ݿ��ճ���������sql�ű�
-    ����˵����
-    �����ˣ�   ���
-    �������ڣ� 2008-6-3
-    �����ˣ�
-    �޸��ˣ�
-    �޸����ڣ�
-    �޸�˵����
+    功能说明： 数据库日常管理常用sql脚本
+    参数说明：
+    创建人：   李兵
+    创建日期： 2008-6-3
+    复核人：
+    修改人：
+    修改日期：
+    修改说明：
 
-    Ŀ¼�� ###########��ѯ��###########
+    目录： ###########查询类###########
 
-           ����session:
-               kill session��kill -9
-               ��ѯsession��Ϣ�Լ�process��Ϣ
-               ���Ҳ��������������Ľ���
-               ���Ҳ���redo log����Ľ���
-               ��ȡ���������ݲ������Եĺķ�ʱ��Ͳ���redo��
-               ��ѯtmep���ռ��ʹ�����
-               ��ѯ��Щ�ع��α�����ռ�� for 8i
+           关于session:
+               kill session和kill -9
+               查询session信息以及process信息
+               查找产生大量物理读的进程
+               查找产生redo log过快的进程
+               获取大批量数据操作测试的耗费时间和产生redo量
+               查询tmep表空间的使用情况
+               查询哪些回滚段被大量占用 for 8i
 
-           ����sql��ִ�мƻ�:
-               �鿴ĳ�û���ǰִ�е�sql���
-               �鿴ĳ�û�֮ǰִ�е�sql���
-               ����sid��spid��ѯִ�е�sql���
-               ��ѯִ�мƻ�����ʽ�����
-               ����δʹ�ð󶨱�����������Ӳ���������
-               ���ҵ�ǰӲ���������session
-               ��ѯ���ֵȴ��¼���Ӧ��sql���
+           关于sql和执行计划:
+               查看某用户当前执行的sql语句
+               查看某用户之前执行的sql语句
+               根据sid或spid查询执行的sql语句
+               查询执行计划并格式化输出
+               查找未使用绑定变量产生大量硬解析的语句
+               查找当前硬解析过多的session
+               查询各种等待事件对应的sql语句
 
-           ������:
-               ��ѯ��
-               ��session����package�����޷�����
-               �ֲ�ʽ�������Ĵ���
+           关于锁:
+               查询锁
+               有session调用package导致无法编译
+               分布式事务锁的处理
 
-           ���ڵȴ��¼�
-               ��ѯ�ȴ��¼�
-               library cache pin�ȴ��¼��Ĵ���
-               cache buffers chains�ȴ��¼��Ĵ���
-               db file sequential read�ȴ��¼��ķ���
-               db file scattered read�ȴ��¼��ķ���
+           关于等待事件
+               查询等待事件
+               library cache pin等待事件的处理
+               cache buffers chains等待事件的处理
+               db file sequential read等待事件的分析
+               db file scattered read等待事件的分析
 
-           ����trace��event:
-               ����trace��event
-               ��ѯaudit��Ƽ�¼
+           关于trace和event:
+               设置trace和event
+               查询audit审计记录
 
-           ���ڼ��Ѳ����䣺
-               mon_long_session �����ӵ�session���
-               mon_rbs ռ�ô����ع��εļ��
-               mon_ckpt active redo log�������session��sql�ļ��
-               mon_xatrans �ֲ�ʽ�������ļ��
-               mon_swait �ȴ��¼��ļ��
-               mon_sqlarea δʹ�ð󶨱�����sql���
-               mon_sharepool ռ�ô����ڴ��sql���
-               mon_redo ��������redo log��session��sql���
-               mon_temp ռ�ô���temp���ռ��session��sql���
+           关于监控巡检语句：
+               mon_long_session 长连接的session监控
+               mon_rbs 占用大量回滚段的监控
+               mon_ckpt active redo log及其相关session和sql的监控
+               mon_xatrans 分布式事务锁的监控
+               mon_swait 等待事件的监控
+               mon_sqlarea 未使用绑定变量的sql监控
+               mon_sharepool 占用大量内存的sql监控
+               mon_redo 产生大量redo log的session和sql监控
+               mon_temp 占用大量temp表空间的session和sql监控
 
-           �������ݿ�ʵ����
-               �˽⵱ǰASMM �Զ��������ڴ�������
+           关于数据库实例：
+               了解当前ASMM 自动调整的内存参数情况
 
 
-           ###########������###########
-           ����redo log��archive log��checkpoint
-               �Ӵ󣨻���٣�redo log�ߴ�Ĳ�������
+           ###########操作类###########
+           关于redo log、archive log、checkpoint
+               加大（或减少）redo log尺寸的操作步骤
 
-           ���ڱ��ݺͻָ�:
-               �ӿ�ʵ��crash��Ļָ��ٶ�
-               redo log header corrupt��������
-               recover�����ȫ�ָ�
-               recover�������ȫ�ָ�
-               recover����ָ������ļ�����ռ�
+           关于备份和恢复:
+               加快实例crash后的恢复速度
+               redo log header corrupt处理方法
+               recover命令：完全恢复
+               recover命令：不完全恢复
+               recover命令：恢复数据文件或表空间
 
-           ����cboͳ����Ϣ
-               ���ٻָ��ɵ�ͳ����Ϣ for 9i
-               ���ٻָ��ɵ�ͳ����Ϣ for 10g
-               �Ѽ�ͳ����Ϣ
-               ����ͳ����Ϣ
+           关于cbo统计信息
+               快速恢复旧的统计信息 for 9i
+               快速恢复旧的统计信息 for 10g
+               搜集统计信息
+               导入统计信息
 
-           ���ڱ����ֳ���Ϣ��oradebug
-               ʹ��oradebug�Ѽ��ֳ���Ϣ
-               ʹ��rda�Ѽ���ǰϵͳ��Ϣ��GCS����ʦ��������
+           关于保留现场信息或oradebug
+               使用oradebug搜集现场信息
+               使用rda搜集当前系统信息供GCS工程师分析问题
 
-           ����OUTLN��������ȷ��ִ�мƻ��������������뵽������
+           采用OUTLN技术将正确的执行计划从其它环境导入到生产库
 
-           ###########����ϵͳ��###########
-           ����������Դ����
-               CPUʹ�����
-               �豸ʹ�����
-               �����ڴ�ʹ�����
+           ###########操作系统类###########
+           关于主机资源消耗
+               CPU使用情况
+               设备使用情况
+               虚拟内存使用情况
 
 ********************************************/
 
 
 
-######################################��ѯ��#######################################
+######################################查询类#######################################
 
 
-#################################����session#################################
+#################################关于session#################################
 
-*********************************kill session��kill -9***********************************
---kill���ݿ��ڲ���session     immediate  IMMEDIATE 
+*********************************kill session和kill -9***********************************
+--kill数据库内部的session     immediate  IMMEDIATE 
 alter system kill session '&SID,&SERIAL#';
 
---����kill����active session�Ľű�
+--生成kill所有active session的脚本
 select 'alter system kill session ' || '''' || sid || ',' || serial# || '''' || ';'from v$session where status='ACTIVE' and username is not null;
 
---���ɰ��û���kill����session�Ľű�
+--生成按用户名kill所有session的脚本
 select 'alter system kill session ' || '''' || sid || ',' || serial# || '''' || ';'from v$session where username=upper('&USERNAME';
 
---kill��̨����LOCAL=NO��session
+--kill后台所有LOCAL=NO的session
 kill -9 `ps -ef|grep oplpms|grep LOCAL=NO|awk '{print $2}'`
 
---�����ݿ�����kill���л�ĺ�̨���̵Ľű�
+--从数据库生成kill所有活动的后台进程的脚本
 select ' kill -9 ' || spid from (select spid from v$process where addr in(select paddr from v$session where status='ACTIVE' and username is not null));
 
---kill�����ĳһ��ȴ��¼������лsession
+--kill掉造成某一类等待事件的所有活动session
 select 'alter system kill session ' || '''' || sid || ',' || serial# || '''' || ';'
   from v$session
  where status = 'ACTIVE'
@@ -876,24 +876,24 @@ select 'alter system kill session ' || '''' || sid || ',' || serial# || '''' || 
 
 
 
-*********************************��ѯsession��Ϣ�Լ�process��Ϣ*********************************
---����username��ѯsid�ͺ�̨spid
+*********************************查询session信息以及process信息*********************************
+--根据username查询sid和后台spid
 select a.username,a.sid,a.serial#,b.spid,a.STATUS,a.OSUSER,a.MACHINE,a.PROGRAM from v$session a,v$process b where a.PADDR=b.ADDR and a.username=&USERNAME;
 
---���ݺ�̨spid��ѯsid
+--根据后台spid查询sid
 select username,sid,serial#,STATUS,OSUSER,MACHINE,PROGRAM from v$session where paddr = (select addr from v$process where spid = &SPID);
 
---����sid��ѯ��̨spid
+--根据sid查询后台spid
 select spid from v$process where addr = (select paddr from v$session where sid = &SID);
 
---��ѯ�Լ�session�ĺ�̨spid
+--查询自己session的后台spid
 select a.username,a.sid,a.serial#,b.spid,a.STATUS,a.OSUSER,a.MACHINE,a.PROGRAM from v$session a,v$process b where a.PADDR=b.ADDR and a.sid=(select distinct sid from v$mystat);
 ************************************************************************************************
 
 
 
 
-*********************************���Ҳ��������������Ľ���*********************************
+*********************************查找产生大量物理读的进程*********************************
  select * from (select * from (select st.sid,st.value,sn.name,s.username,s.logon_time
     from v$sesstat st,v$statname sn ,v$session s
      where st.sid=s.sid AND st.statistic#=sn.statistic# and st.value>100000 and s.username is not null
@@ -903,7 +903,7 @@ select a.username,a.sid,a.serial#,b.spid,a.STATUS,a.OSUSER,a.MACHINE,a.PROGRAM f
 
 
 
-*********************************���Ҳ���redo log����Ľ���*********************************
+*********************************查找产生redo log过快的进程*********************************
 col machine format a20
 col osuser format a20
 set lines 150
@@ -931,7 +931,7 @@ select sysdate,
 
 
 
-*********************************��ȡ���������ݲ������Եĺķ�ʱ��Ͳ���redo��*********************************
+*********************************获取大批量数据操作测试的耗费时间和产生redo量*********************************
 set serveroutput on;
 DECLARE
 start_time NUMBER;
@@ -944,7 +944,7 @@ SELECT VALUE INTO start_redo_size FROM v$mystat m,v$statname s
 WHERE m.STATISTIC#=s.STATISTIC#
 AND s.NAME='redo size';
 --transaction start
-�û��ű�
+用户脚本
 --transaction end
 end_time := dbms_utility.get_time;
 SELECT VALUE INTO end_redo_size FROM v$mystat m,v$statname s
@@ -956,10 +956,10 @@ END;
 /
 
 
---����û��Ľű��޷�Ƕ�뵽���ϵ��������У���ʹ�����½ű���ȡʱ����redoֵǰ��������ɣ�
+--如果用户的脚本无法嵌入到如上的匿名块中，则使用如下脚本获取时间点和redo值前后相减即可：
 SELECT to_char(sysdate,'yyyy-mm-dd hh24:mi:ss'),VALUE||' bytes' FROM v$mystat m,v$statname s WHERE m.STATISTIC#=s.STATISTIC# AND s.NAME='redo size';
 --transaction start
-ִ���û��ű�
+执行用户脚本
 --transaction end
 SELECT to_char(sysdate,'yyyy-mm-dd hh24:mi:ss'),VALUE||' bytes' FROM v$mystat m,v$statname s WHERE m.STATISTIC#=s.STATISTIC# AND s.NAME='redo size';
 **************************************************************************************************************
@@ -967,14 +967,14 @@ SELECT to_char(sysdate,'yyyy-mm-dd hh24:mi:ss'),VALUE||' bytes' FROM v$mystat m,
 
 
 
-*********************************��ѯtmep���ռ��ʹ�����*********************************
---�ĸ�����ռ����ʱ���ռ�
+*********************************查询tmep表空间的使用情况*********************************
+--哪个进程占用临时表空间
 select s.username, u.tablespace, u.contents, u.extents, u.blocks
 from v$session s, v$sort_usage u
 where s.saddr = u.session_addr
 and u.contents = 'TEMPORARY'
 
---temp�ռ�ʹ����
+--temp空间使用率
 select (s.tot_used_blocks/f.total_blocks)*100 as pctused
 from (select sum(used_blocks) tot_used_blocks
       from v$sort_segment
@@ -983,7 +983,7 @@ from (select sum(used_blocks) tot_used_blocks
        from dba_temp_files
        where tablespace_name='TEMP') f;
 
---���temp���ռ���������
+--监控temp表空间的增长情况
 select su.extents, su.segtype, su.sqlhash, s.sid, s.serial#, s.last_call_et,
        s.username, s.machine,
  from v$sort_usage su, v$session s
@@ -993,15 +993,15 @@ and su.extents>10;
 select su.segtype, sum(su.extents) from v$sort_usage su group by su.segtype;
 
 9i:
-   V$TEMPSEG_USAGE    This view describes temporary segment usage.��9i R2��ʼv$sort_usage�͸���ΪV$TEMPSEG_USAGE
+   V$TEMPSEG_USAGE    This view describes temporary segment usage.从9i R2开始v$sort_usage就改名为V$TEMPSEG_USAGE
    V$TEMPSTAT         This view contains information about file read/write statistics.
 *******************************************************************************************
 
 
 
 
-*********************************��ѯ��Щ�ع��α�����ռ�� for 8i*********************************
---����ʹ�ûع��εĽ���
+*********************************查询哪些回滚段被大量占用 for 8i*********************************
+--查找使用回滚段的进程
 SELECT s.sid "sid", s.serial# "serial#",s.username "username",s.status, t.start_time,
    t.xidusn "xidusn", drs.segment_name "segment_name",ds. header_file "file_h",
    ds.header_block "blk_h"
@@ -1014,27 +1014,27 @@ AND ((r.curext=t.start_uext-1) OR
 ((r.curext=r.extents-1) AND t.start_uext=0))
 order by r.usn;
 
---��ѯ��Щ�ع��α�����ռ��
+--查询哪些回滚段被大量占用
   select segment_name, tablespace_name, r.status,
   (initial_extent/1024) InitialExtent,(next_extent/1024) NextExtent,
   max_extents, v.curext CurExtent From dba_rollback_segs r,
   v$rollstat v
   Where r.segment_id = v.usn(+) order by segment_name;
 
---���������Ժ󿴸�rbs�Ƿ�ȷʵ̫С����������������С��
+--查出来结果以后看该rbs是否确实太小，用如下语句调整大小：
   alter rollback segment r13 storage(maxextents 32765);
 
---����� 100 ������ extent �Ļع���
+--查出有 100 个以上 extent 的回滚段
 Select usn, extents, curext from v$rollstat where extents>100;
 
---�����з��ص�ÿ�� usn ������е������������ĳ���ع����е��������
+--对其中返回的每个 usn 检查其中的事务情况：查某个回滚段中的事务情况
 select t.start_uext, t.used_ublk, t.start_time, s.sid, s.serial#, s.last_call_et,
        s.username, s.machine
  from v$transaction t, v$session s
 where t.ses_addr=s.saddr
 and t.xidusn=&usn;
 
---�������Ϊ����ܵ��»ع��γ��������ĻỰ
+--以下语句为查可能导致回滚段持续增长的会话
 select s.sid, s.serial#, t.start_time, t.xidusn, s.username
 from v$session s, v$transaction t , v$rollstat r
 where s.saddr=t.ses_addr
@@ -1048,9 +1048,9 @@ and ((r.curext=t.start_uext-1) or
 
 
 
-########################################����sql��ִ�мƻ�########################################
+########################################关于sql和执行计划########################################
 
-*********************************�鿴ĳ�û���ǰִ�е�sql���*********************************
+*********************************查看某用户当前执行的sql语句*********************************
   set pages 500
   set lines 160
   break on sid nodup on serial# nodup on user nodup on machine nodup on logontime nodup
@@ -1072,7 +1072,7 @@ and ((r.curext=t.start_uext-1) or
 
 
 
-*********************************�鿴ĳ�û�֮ǰִ�е�sql���*********************************
+*********************************查看某用户之前执行的sql语句*********************************
   set pages 500
   set lines 120
   break on sid nodup on serial# nodup on machine nodup
@@ -1088,8 +1088,8 @@ and ((r.curext=t.start_uext-1) or
 
 
 
-*********************************��ѯִ�мƻ�����ʽ�����*********************************
---ֱ�Ӳ�ѯlibrary cache�е�sql��ʵ��ִ�мƻ���9i���ϣ���sql_hash_value �� v$session �в鵽��
+*********************************查询执行计划并格式化输出*********************************
+--直接查询library cache中的sql真实的执行计划（9i以上），sql_hash_value 从 v$session 中查到：
 select '| Operation                         | PHV/Object Name               |  Rows | Bytes|   Cost |'
 as "Optimizer Plan:" from dual
 union all
@@ -1115,15 +1115,15 @@ select
 from v$sql_plan sp
 where sp.hash_value=&SQL_HASH_VALUE;
 
---����Ԥ����ִ�мƻ���
+--或者预生成执行计划：
 EXPLAIN PLAN set statement_id='MYSQL1' FOR
---(��ʾΪ����sql�������ִ�мƻ�,����ִ�и����)
-&SQL���
+--(表示为以下sql语句生成执行计划,不会执行该语句)
+&SQL语句
 
---��ʽ�������
+--格式化输出：
 select plan_table_output from table(dbms_xplan.display('plan_table',null,'serial'));
 
---����ִ�мƻ��汾����10����sql���
+--查找执行计划版本超过10个的sql语句
 select sa.sql_text,sa.version_count ,ss.*from v$sqlarea sa,v$sql_shared_cursor ss where
 sa.address=ss.KGLHDPAR and sa.version_count > 10 order by sa.version_count ;
 ******************************************************************************************
@@ -1131,7 +1131,7 @@ sa.address=ss.KGLHDPAR and sa.version_count > 10 order by sa.version_count ;
 
 
 
-*********************************����δʹ�ð󶨱�����������Ӳ���������*********************************
+*********************************查找未使用绑定变量产生大量硬解析的语句*********************************
 SELECT substr(sql_text, 1, 40) "SQL", count(*), sum(executions) "TotExecs"
   FROM v$sqlarea
  WHERE executions <5
@@ -1139,7 +1139,7 @@ SELECT substr(sql_text, 1, 40) "SQL", count(*), sum(executions) "TotExecs"
 HAVING count(*) > 100
  ORDER BY 2;
 
---ִ��������Ӳ�����ĵ�ǰ�Ự
+--执行了许多硬解析的当前会话
 select c.sid||','||c.serial#,c.username,b.name,a.value,
        round((sysdate-c.logon_time)*24) hours_connected
 from v$sesstat a,v$statname b,v$session c
@@ -1153,8 +1153,8 @@ order by a.value desc;
 
 
 
-*********************************����sid��spid��ѯִ�е�sql���*********************************
---����sid��ѯִ�е�sql���
+*********************************根据sid或spid查询执行的sql语句*********************************
+--根据sid查询执行的sql语句
 select se.username,
        se.sid,
        se.serial#,
@@ -1168,7 +1168,7 @@ select se.username,
    and se.SQL_HASH_VALUE = sa.HASH_VALUE
    and se.sid = '&SID';
 
---����spid��ѯִ�е�sql���
+--根据spid查询执行的sql语句
 select se.username,
        se.sid,
        se.serial#,
@@ -1187,7 +1187,7 @@ select se.username,
 
 
 
-*********************************���ҵ�ǰӲ���������session*********************************
+*********************************查找当前硬解析过多的session*********************************
 select c.username,
        c.sid,
        c.serial#,
@@ -1205,7 +1205,7 @@ select c.username,
 
 
 
-*********************************��ѯ���ֵȴ��¼���Ӧ��sql���*********************************
+*********************************查询各种等待事件对应的sql语句*********************************
 set pages 500
 set lines 160
 break on sid nodup on serial# nodup on user nodup on machine nodup on logontime nodup
@@ -1232,21 +1232,21 @@ order by a.sid,a.serial#,b.piece;
 
 
 
-#######################################������#######################################
-���䣺latch
-      ������
-*******************************************��ѯ��****************************************
---�鿴����instance�������
+#######################################关于锁#######################################
+补充：latch
+      到对象
+*******************************************查询锁****************************************
+--查看整个instance的锁情况
 select * from dba_locks;
 
---�鿴����instance��dml�����
+--查看整个instance的dml锁情况
 select * from v$lock where type in ('TX','TM');
 select * from v$lock where type in ('TX','TM') and sid='&SID';
 
---�鿴session�����Ķ���
+--查看session锁定的对象
 select * from v$locked_object;
 
---��ѯ����holder��waiter��
+--查询锁的holder和waiter：
 select decode(request, 0, 'Holder:', 'Waiter:') || sid,
        id1,
        id2,
@@ -1258,21 +1258,21 @@ select decode(request, 0, 'Holder:', 'Waiter:') || sid,
        (select id1, id2, type from v$lock where request > 0)
  order by id1, request;
 
---��ѯ���Ƿ�������
+--查询表是否有锁：
   select oracle_username,owner,object_name,object_type,session_id,locked_mode
   from v$locked_object v, dba_objects d
   where v.object_id = d.object_id
   and object_name=upper('&1')
   order by object_name ;
 
---�������б����Ķ���
+--查找所有被锁的对象：
   select oracle_username,owner,object_name,object_type,session_id,locked_mode,l.type,l.block
   from v$locked_object v, dba_objects d,v$lock l
   where l.block>0 and v.session_id=l.sid
   and d.object_id=v.object_id
   order by object_name,l.block ;
 
---�鿴DML LOCK����������Ķ��������
+--查看DML LOCK情况和锁定的对象情况：
 select a.sid,
    decode(a.type,
    'MR', 'Media Recovery',
@@ -1326,7 +1326,7 @@ from v$lock a,dba_objects c
      and a.type in ('TX','TM')
      and a.id1=c.object_id(+);
 
---���ڶ��BLOCKERʱ�����Դͷ��BLOCKER��
+--存在多个BLOCKER时，查出源头的BLOCKER：
 SELECT *
   FROM V$LOCK
  WHERE SID IN (SELECT SID SESSION_ID
@@ -1337,7 +1337,7 @@ SELECT *
                  FROM V$SESSION_WAIT W
                 WHERE W.EVENT = 'enqueue');
 
---�鿴BLOCKER��Ӧ��SESSION��״̬�͵ȴ��¼���
+--查看BLOCKER对应的SESSION的状态和等待事件：
 SELECT S.SID,
        S.USERNAME,
        S.STATUS,
@@ -1353,8 +1353,8 @@ SELECT S.SID,
     AND S.SID = L.SID
     AND L.BLOCK > 0;
 
---���WAITER�ȴ��ļ�¼�У�
- --���Ȳ��WAITER�ȴ�����Դ��
+--查出WAITER等待的记录行：
+ --首先查出WAITER等待的资源：
  SELECT ROW_WAIT_OBJ# ,
        ROW_WAIT_FILE# ,
        ROW_WAIT_BLOCK# ,
@@ -1362,9 +1362,9 @@ SELECT S.SID,
     FROM V$SESSION
     WHERE SID IN (SELECT DISTINCT SID FROM V$LOCK WHERE REQUEST > 0 )
     AND ROW_WAIT_OBJ# <> -1;
---�ٸ���OBJECT_ID�ó�����Ķ������������ƣ�
+--再根据OBJECT_ID得出具体的对象属主和名称：
 SELECT OWNER,OBJECT_NAME,OBJECT_TYPE FROM DBA_OBJECTS WHERE OBJECT_ID=< ROW_WAIT_OBJ#>
---�������ϵõ���OBJECT_ID,FILE_ID,BLOCK_ID,ROW#���͹��ɱ�׼��ROWID�������¼�У�
+--根据以上得到的OBJECT_ID,FILE_ID,BLOCK_ID,ROW#，就构成标准的ROWID，查出记录行：
    SELECT *
   FROM < OWNER > . < OBJECT_NAME >
  WHERE ROWID = DBMS_ROWID.ROWID_CREATE(1,
@@ -1377,8 +1377,8 @@ SELECT OWNER,OBJECT_NAME,OBJECT_TYPE FROM DBA_OBJECTS WHERE OBJECT_ID=< ROW_WAIT
 
 
 
-*********************************��session����package�����޷�����*********************************
---����package����,���Բ�ѯv$access��v$sessionȷ���ĸ��û��ڵ������package
+*********************************有session调用package导致无法编译*********************************
+--编译package被锁,可以查询v$access和v$session确定哪个用户在调用这个package
 select b.sql_text text,a.sid sid ,a.serial# sria#,a.username username, c.type type,a.machine machine
 from v$session a ,v$sqltext b ,v$access c
 where c.object=upper('&OBJECT_NAME')
@@ -1388,7 +1388,7 @@ and b.address = a.sql_address
 and b.hash_value = a.sql_hash_value
 order by a.sid,a.serial#,b.piece;
 
---ֱ������kill session�ű�
+--直接生成kill session脚本
 select username,'alter system kill session '''||sid||','||serial#||''';' from v$session where sid in(
 select distinct sid from v$access where object in
 ('&OBJECT_NAME')
@@ -1398,9 +1398,9 @@ select distinct sid from v$access where object in
 
 
 
-*********************************�ֲ�ʽ�������Ĵ���*********************************
+*********************************分布式事务锁的处理*********************************
 select a.local_tran_id,statu from dba_2pc_pending a where state='prepared';
-������
+处理：
 rollback force '&LOCAL_TRAN_ID';
 commit;
 execute DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('&LOCAL_TRAN_ID');
@@ -1411,9 +1411,9 @@ commit;
 
 
 
-#######################################���ڵȴ��¼�#######################################
+#######################################关于等待事件#######################################
 
-*******************************************��ѯ�ȴ��¼�****************************************
+*******************************************查询等待事件****************************************
 select sw.seq#,
        sw.sid || ',' || s.serial# sids,
        s.username,
@@ -1445,8 +1445,8 @@ select sw.seq#,
 
 
 
-*********************************library cache pin�ȴ��¼��Ĵ���*********************************
-�ں�̨sys�û���ִ�У�
+*********************************library cache pin等待事件的处理*********************************
+在后台sys用户下执行：
 select s.sid || ',' || s.serial# sid_serial,
        kglpnmod "mode held",
        kglpnreq "request"
@@ -1456,7 +1456,7 @@ select s.sid || ',' || s.serial# sid_serial,
                      from v$session_wait
                     where sid = &SID_IN_LIBRARY_CACHE_PIN);
 
-���ߣ�
+或者：
 select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  from x$kglpn , v$session
  where KGLPNHDL in (select p1raw from v$session_wait
@@ -1464,7 +1464,7 @@ select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  and KGLPNMOD <> 0
  and v$session.saddr=x$kglpn.kglpnuse ;
 
-���ߣ�
+或者：
  select sql_text from v$sqlarea
   where (v$sqlarea.address,v$sqlarea.hash_value)
       in (select sql_address,sql_hash_value from v$session where sid in (
@@ -1475,14 +1475,14 @@ select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  and KGLPNMOD <> 0
  and v$session.saddr=x$kglpn.kglpnuse );
 
-�鵽held>0 ��sid�����local=no ���빵ͨ�Ƿ����kill���������
+查到held>0 的sid，如果local=no ，请沟通是否可以kill掉这个进程
 *************************************************************************************************
 
 
 
 
-*********************************cache buffers chains�ȴ��¼��Ĵ���*********************************
-��ѯ�ȴ��¼��������Ƿ���latch free��
+*********************************cache buffers chains等待事件的处理*********************************
+查询等待事件的类型是否是latch free：
 select sw.sid || ',' || s.serial# sids,
        s.username,
        sw.event,
@@ -1502,11 +1502,11 @@ select sw.sid || ',' || s.serial# sids,
    and sw.event not like 'PX Deq%'
  order by sw.event;
 
-�����latch free��������p2�ֶε�ֵ��ʾlatch number���ݴ˿��Բ����ʲôԭ�������latch free��
+如果是latch free，则其中p2字段的值表示latch number，据此可以查出是什么原因引起的latch free：
 select * from v$latchname where latch#=&P2;
 
-����ȴ���latch��cache buffers chains������Ҫ����p1raw��������õ�hot block��segment���ƣ�
---�ں�̨sys�û���ִ�У������ȿ�
+如果等待的latch是cache buffers chains，则需要根据p1raw查出被争用的hot block和segment名称：
+--在后台sys用户下执行，查找热块
 select /*+ RULE */
        e.owner || '.' || e.segment_name segment_name,
        e.extent_id extent#,
@@ -1528,7 +1528,7 @@ from dba_extents e,
     and e.block_id<=b.dbablk
     and e.block_id+e.blocks>b.dbablk;
 
---���Ҳ����ȿ��sql��
+--查找产生热块的sql：
 column segment_name format a35
 select /*+ rule */ hash_value,sql_text from v$sqltext
 where (hash_value,address ) in (
@@ -1543,8 +1543,8 @@ where (hash_value,address ) in (
     and b.segment_type='TABLE')
     order by hash_value,address,piece;
 
-�ҵ�latch holder����session��sid��serial#�������Ƿ����kill�����������ݿ��ѹ����
---���latchhold�仯�÷ǳ��죬ÿˢ��һ�ζ���仯
+找到latch holder所在session的sid和serial#，考虑是否可以kill掉，缓解数据库的压力：
+--这个latchhold变化得非常快，每刷新一次都会变化
 select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
   from v$session a, v$latchholder b
  where a.sid = b.sid;
@@ -1553,9 +1553,9 @@ select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
 
 
 
-*********************************db file sequential read�ȴ��¼��ķ���*********************************
---���ȴ��¼�Ϊdb file sequential readʱ��P1��Ӧfile_id��P2��Ӧ&block_id
---ͨ��������������Բ�ѯ�����ڵȴ�ʲô����
+*********************************db file sequential read等待事件的分析*********************************
+--当等待事件为db file sequential read时，P1对应file_id，P2对应&block_id
+--通过下面这个语句可以查询到正在等待什么对象
    select owner,segment_name,segment_type
    from dba_extents
    where file_id = &file_id
@@ -1565,8 +1565,8 @@ select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
 
 
 
-*********************************db file scattered read�ȴ��¼��ķ���*********************************
---���ȴ��¼���db file scattered readʱ�������������ִ�мƻ���
+*********************************db file scattered read等待事件的分析*********************************
+--当等待事件是db file scattered read时，用以下语句检查执行计划：
    select hash_value,child_number,
    lpad(' ',2*depth)||operation||' '||options||decode(id,0,substr(optimizer,1,6)||' Cost='||to_char(cost)) operation,
    object_name object,cost,cardinality,round(bytes/1024) kbytes
@@ -1586,18 +1586,18 @@ select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
 
 
 
-#############################################����trace��event#############################################
+#############################################关于trace和event#############################################
 
-*********************************����trace��event*********************************
---����autotrace
+*********************************设置trace和event*********************************
+--设置autotrace
 set autotrace on
 SET AUTOT[RACE] {OFF | ON | TRACE[ONLY] } [EXP[LAIN]] [STAT[ISTICS] ]
 
---����sql trace
+--设置sql trace
 alter session set sql_trace=true;    --my session
 execute dbms_system.set_sql_trace_in_session(&SID,&SERIAL#,true);  --other session
 
---����10046 event
+--设置10046 event
 Alter session set events '10046 trace name context forever,level 12';  --my session
 alter session set events '10046 trace name context off';   --close
 
@@ -1610,19 +1610,19 @@ ALTER SYSTEM SET EVENTS='10046 trace name context forever, level 4' SCOPE=spfile
 
 
 
-*********************************��ѯaudit��Ƽ�¼*********************************
-�鿴���ݱ��޸ĵ���Ƽ�¼
+*********************************查询audit审计记录*********************************
+查看数据表修改的审计记录
 Select * from dba_audit_object where obj_name='&OBJ_NAME';
 
-�鿴�û���½����Ƽ�¼
+查看用户登陆的审计记录
 Select * from dba_audit_session where username='&USERNAME';
 
-�鿴��Ʋ���
+查看审计策略
 SELECT * FROM DBA_STMT_AUDIT_OPTS;
 
-��ѯĳ��ʱ��ĳ�û��ĵ�½��¼
+查询某段时间某用户的登陆记录
 --conn dbqua@cmmrep
---�����������ǰ�����ݣ�Ҫ��isw���Ŀ�ȡ(DBQDATA.DBQC$SESSION_COLLECT)
+--如果是两周以前的数据，要到isw中心库取(DBQDATA.DBQC$SESSION_COLLECT)
 Select SNAP_ID,
        SNAP_TIME,
        SID,
@@ -1642,9 +1642,9 @@ Select SNAP_ID,
 
 
 
-#####################################################���ڼ��Ѳ�����#####################################################
+#####################################################关于监控巡检语句#####################################################
 
-*********************************mon_long_session �����ӵ�session���*********************************
+*********************************mon_long_session 长连接的session监控*********************************
 select a.sid,
        a.serial#,
        a.machine,
@@ -1667,7 +1667,7 @@ select a.sid,
 
 
 
-*********************************mon_rbs ռ�ô����ع��εļ��*********************************
+*********************************mon_rbs 占用大量回滚段的监控*********************************
 select s.sid,
        s.serial#,
        s.machine,
@@ -1700,16 +1700,16 @@ select s.sid,
 
 
 
-*********************************mon_ckpt active redo log�������session��sql�ļ��*********************************
+*********************************mon_ckpt active redo log及其相关session和sql的监控*********************************
 select status,count(*) from v$log where status in ('ACTIVE','CURRENT') group by status;
 ********************************************************************************************************************
 
 
 
 
-*********************************mon_xatrans �ֲ�ʽ�������ļ��*********************************
+*********************************mon_xatrans 分布式事务锁的监控*********************************
 select a.local_tran_id,statu from dba_2pc_pending a where state='prepared';
-������
+处理：
 rollback force '&LOCAL_TRAN_ID';
 commit;
 execute DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('&LOCAL_TRAN_ID');
@@ -1719,7 +1719,7 @@ commit;
 
 
 
-*********************************mon_swait �ȴ��¼��ļ��*********************************
+*********************************mon_swait 等待事件的监控*********************************
 select sw.seq#,sw.sid||','||s.serial# sids,s.username,sw.event,sw.P1,sw.p2,sw.p3,sw.wait_time "WAIT",
    sw.state,sw.seconds_in_wait sec,s.status,to_char(s.logon_time,'dd/hh24:mi:ss') logon_time
    from v$session s,v$session_wait sw
@@ -1736,7 +1736,7 @@ select sw.seq#,sw.sid||','||s.serial# sids,s.username,sw.event,sw.P1,sw.p2,sw.p3
 
 
 
-*********************************mon_sqlarea δʹ�ð󶨱�����sql���*********************************
+*********************************mon_sqlarea 未使用绑定变量的sql监控*********************************
 select substr(sql_text, 1, 50) "SQL", count(*) cnt, sum(sharable_mem) "TotExecs"
   FROM v$sqlarea
  WHERE executions =1
@@ -1748,7 +1748,7 @@ HAVING count(*) > 5000
 
 
 
-*********************************mon_sharepool ռ�ô����ڴ��sql���*********************************
+*********************************mon_sharepool 占用大量内存的sql监控*********************************
 select se.sid,se.SERIAL#,pr.SPID,se.osuser,se.MACHINE,sq.SHARABLE_MEM/1024/1024 ,se.PROGRAM,sq.SQL_TEXT
 from v$sqlarea sq,v$session se,v$process pr
 where se.PADDR=pr.ADDR
@@ -1762,7 +1762,7 @@ order by sq.SHARABLE_MEM/1024/1024;
 
 
 
-*********************************mon_redo ��������redo log��session��sql���*********************************
+*********************************mon_redo 产生大量redo log的session和sql监控*********************************
 select se.username,
        se.sid,
        se.serial#,
@@ -1787,7 +1787,7 @@ select se.username,
 
 
 
-*********************************mon_temp ռ�ô���temp���ռ��session��sql���*********************************
+*********************************mon_temp 占用大量temp表空间的session和sql监控*********************************
 select su.extents, su.segtype, su.sqlhash, se.sid, se.serial#, se.last_call_et, se.username, se.machine ,sa.sql_text
  from v$sort_usage su, v$session se ,v$sqlarea sa
 where su.session_addr=se.saddr
@@ -1802,9 +1802,9 @@ select su.segtype, sum(su.extents) from v$sort_usage su group by su.segtype;
 
 
 
-#################################�������ݿ�ʵ��######################################
+#################################关于数据库实例######################################
 
-*********************************�˽⵱ǰASMM �Զ��������ڴ�������*********************************
+*********************************了解当前ASMM 自动调整的内存参数情况*********************************
 column "Parameter" format a20 truncate
 column size_m format 9999
 select a.ksppinm "Parameter",
@@ -1822,72 +1822,72 @@ and a.ksppinm in ('__shared_pool_size','shared_pool_size','__large_pool_size','l
 
 
 
-######################################������#######################################
+######################################操作类#######################################
 
-#################################����redo log��archive log��checkpoint######################################
+#################################关于redo log、archive log、checkpoint######################################
 
-*********************************�Ӵ󣨻���٣�redo log�ߴ�Ĳ�������*********************************
-(1)��ѯ�ĸ�redo log����drop
-�� ARCHIVED='YES' AND STATUS='INACTIVE'  �Ŀ���drop�����ʾ��redo log�Ѿ����鵵�ҵ�ǰδʹ�á�
-δ��ɹ鵵�ģ�����״̬ΪACTIVE��CURRENT�Ķ�������drop��
+*********************************加大（或减少）redo log尺寸的操作步骤*********************************
+(1)查询哪个redo log可以drop
+仅 ARCHIVED='YES' AND STATUS='INACTIVE'  的可以drop，这表示该redo log已经被归档且当前未使用。
+未完成归档的，或者状态为ACTIVE和CURRENT的都不允许drop。
 select * from v$log;
 
-(2)ɾ���ɵ�redo log
+(2)删除旧的redo log
 alter database drop logfile group 1;
 
-(3)������size��redo log
+(3)添加新size的redo log
 alter database add logfile <'/paic/sx/ims/data/oradata/ims/redo07.log'> size 400m;
 
-(4)���v$logȷ�ϲ���Ч��
+(4)检查v$log确认操作效果
 select * from v$log;
 ******************************************************************************************************
 
 
 
 
-#################################���ڱ��ݺͻָ�######################################
+#################################关于备份和恢复######################################
 
-*********************************�ӿ�ʵ��crash��Ļָ��ٶ�***********************************
-(1)�ɵ�ǰspfile�ļ������µĲ����ļ������������������ݿ������
+*********************************加快实例crash后的恢复速度***********************************
+(1)由当前spfile文件生成新的参数文件，并在其中设置数据库参数：
    Parallel_execution_message_size=16384
    _parallel_min_message_pool=8192000
 
-(2)�رղ��������ݿ��� mount ״̬
+(2)关闭并重启数据库至 mount 状态
 Shutdown abort
 Startup mount;
 recover database parallel 8;
 
-(3)�����ݿ�
+(3)打开数据库
 Alter database open;
 *********************************************************************************************
 
 
 
 
-*********************************redo log header corrupt��������***********************************
-(1)��ѯredo log�������ȷ���𻵵�log group
+*********************************redo log header corrupt处理方法***********************************
+(1)查询redo log的情况，确定损坏的log group
 select * from v$log;
 select * from v$logfile;
 
-(2)�л�redo log������ʣ����õ�redo log����Ҫ�л����
+(2)切换redo log，根据剩余可用的redo log，不要切换多次
 alter system switch logfile;
 
-(3)����Ѿ�����redo log
-alter database clear unarchived logfile group <&�𻵵�log group>;
---�����
+(3)清掉已经坏的redo log
+alter database clear unarchived logfile group <&损坏的log group>;
+--检查结果
 select * from v$log;
 
-(4)����log archive dest
+(4)重设log archive dest
 alter system archive log all;
 alter system set  log_archive_dest_1='LOCATION=/paic/hq/gccsu/log/gccsu';
---���
+--检查
 select * from v$log;
 
-(5)�ֹ��鵵
+(5)手工归档
 alter system archive log all;
 
-(6)�ؽ��𻵵�logfile group 5
-alter database drop logfile group <5��Ҫ�޸�>;
+(6)重建损坏的logfile group 5
+alter database drop logfile group <5需要修改>;
 select * from v$logfile;
 alter database add logfile '/paic/hq/gccsu/data/oradata/gccsu/redo11.log' size 100m;
 **************************************************************************************************
@@ -1895,31 +1895,31 @@ alter database add logfile '/paic/hq/gccsu/data/oradata/gccsu/redo11.log' size 1
 
 
 
-*********************************recover�����ȫ�ָ�***********************************
-(1)ȷ����Ҫ�ָ��������ļ�
+*********************************recover命令：完全恢复***********************************
+(1)确定需要恢复的数据文件
 select file#,error,change# from v$recover_file;
 
-(2)�ָ���ԭ�������ļ�
+(2)恢复还原的数据文件
 Recover database;
 *****************************************************************************************
 
 
 
 
-*********************************recover�������ȫ�ָ�***********************************
---����ʱ��Ļָ�
+*********************************recover命令：不完全恢复***********************************
+--基于时间的恢复
 Alter database recover until time '2002-01-04:09:07:10';
---����SCN�Ļָ�
-Select * from v$log_history;  --����sequence#��first_timeȷ��change#
+--基于SCN的恢复
+Select * from v$log_history;  --根据sequence#和first_time确定change#
 Alter database recover until change 8175667922546 using backup controlfile;
---����ȡ���Ļָ�
+--基于取消的恢复
 Alter database recover until cancel using backup controlfile;
 *******************************************************************************************
 
 
 
 
-*********************************recover����ָ������ļ�����ռ�***********************************
+*********************************recover命令：恢复数据文件或表空间***********************************
 Alter database recover [from /path] datafile 5;
 Alter database recover tablespace tools;
 *****************************************************************************************************
@@ -1927,39 +1927,39 @@ Alter database recover tablespace tools;
 
 
 
-#####################################################����cboͳ����Ϣ#####################################################
+#####################################################关于cbo统计信息#####################################################
 
-*********************************���ٻָ��ɵ�ͳ����Ϣ for 9i*********************************
-(1)����ͳ����Ϣ���ݱ���������У������贴����
+*********************************快速恢复旧的统计信息 for 9i*********************************
+(1)创建统计信息备份表（如果已有，则无需创建）
 execute dbms_stats.create_stat_table(ownname => 'dbmgr',stattab => 'stat_bak_all');
 
-(2)���������е�ͳ����Ϣ
+(2)按备份现有的统计信息
 execute dbms_stats.export_table_stats(ownname => 'PA18CLM',tabname => 'T_DISPATCH',stattab => 'stat_bak_all',statown => 'dbmgr',cascade => true);
 
-(3)������ݵ����һ��ͳ����Ϣ�ռ���statid
+(3)查出备份的最近一次统计信息收集的statid
 select distinct statid from dbstats.stab__pa18clm where c1='T_DISPATCH';
 
-(4)��statid�ָ�����ͳ����Ϣ��ͬʱʧЧ���е�ִ�мƻ�
+(4)按statid恢复表的统计信息，同时失效现有的执行计划
 execute dbms_stats.import_table_stats(ownname => 'pa18clm',tabname => 'T_DISPATCH',stattab => 'stab__pa18clm',statown => 'dbstats',cascade => true,no_invalidate => false,statid => '640--07-12-22 01:31');
 
-(5)���ִ�мƻ�û�лָ��������Ϸ������ݺͻָ���������ͳ����Ϣ
+(5)如果执行计划没有恢复，则按以上方法备份和恢复其它表的统计信息
 execute dbms_stats.import_table_stats(ownname => 'pa18clm',tabname => 'T_DISPATCH_DETAIL',stattab => 'stab__pa18clm',statown => 'dbstats',cascade => true,no_invalidate => false,statid => '640--07-12-22 01:31');
 *********************************************************************************************
 
 
 
 
-*********************************���ٻָ��ɵ�ͳ����Ϣ for 10g*********************************
-(1)����table�������ͳ����Ϣ�ռ�����Ϣ
+*********************************快速恢复旧的统计信息 for 10g*********************************
+(1)检查该table最近几次统计信息收集的信息
 select owner,table_name,stats_update_time from dba_tab_stats_history where table_name ='SICS_INSCARD_CLIENT_INFO';
 OWNER        TABLE_NAME                   STATS_UPDATE_TIME
 ---------- -------------------------  -------------------------------
 SICSDATA    SICS_INSCARD_CLIENT_INFO   17-DEC-07 10.16.50.435300 PM +08:00
 SICSDATA    SICS_INSCARD_CLIENT_INFO   18-DEC-07 01.47.32.624219 PM +08:00
 SICSDATA    SICS_INSCARD_CLIENT_INFO   18-DEC-07 01.56.19.437726 PM +08:00
---����STATS_UPDATE_TIME��ʾ�����ռ���ʱ����ռ���ID(stat_id)
+--其中STATS_UPDATE_TIME表示的是收集的时间和收集的ID(stat_id)
 
-(2)Ҫ���ñ���ͳ����Ϣ�ָ���17�ŵ�״̬
+(2)要将该表的统计信息恢复到17号的状态
 dbms_stats.restore_table_stats(ownname => 'SICSDATA',
                                tabname => 'SICS_INSCARD_CLIENT_INFO',
                                as_of_timestamp => '17-DEC-07 10.16.50.435300 PM +08:00',
@@ -1969,23 +1969,23 @@ dbms_stats.restore_table_stats(ownname => 'SICSDATA',
 
 
 
-*********************************�Ѽ�ͳ����Ϣ for 10g*********************************
---����Ĭ���ռ�����Ϊ���ռ�ֱ��ͼ��
+*********************************搜集统计信息 for 10g*********************************
+--设置默认收集参数为不收集直方图：
 execute dbms_stats.set_param('METHOD_OPT','FOR ALL COLUMNS SIZE 1');
 select DBMS_STATS.GET_PARAM('METHOD_OPT') from dual;
 
---��һ��ʹ���ֹ��ռ�ͳ����Ϣ��
+--第一次使用手工收集统计信息：
 execute dbms_stats.gather_database_stats(method_opt=>'FOR ALL COLUMNS SIZE 1');
 
---�Ѽ�schema��ͳ����Ϣ
+--搜集schema的统计信息
 exec dbms_stats.gather_schema_stats(ownname     => '&USERNAME',
                                     method_opt  => 'FOR ALL COLUMNS SIZE 1',
                                     degree      => 8,
                                     cascade     => TRUE );
 
---�ռ��û�����������������ͳ����Ϣ��ͬʱ����Ϊ���ռ�ֱ��ͼ
+--收集用户表（包括索引）的统计信息，同时设置为不收集直方图
 exec DBMS_STATS.GATHER_TABLE_STATS(OWNNAME=>'&OWNER',TABNAME=>'&TABLE_NAME',METHOD_OPT=>'FOR ALL COLUMNS SIZE 1',NO_INVALIDATE=>FALSE,CASCADE=>TRUE);
---���������Ѽ��Ľű�
+--生成批次搜集的脚本
 select 'exec dbms_stats.gather_table_stats(''' || owner || ''', ''' || table_name || ''', method_opt=>''FOR ALL COLUMNS SIZE 1'',NO_INVALIDATE=>FALSE,CASCADE=>TRUE);'
 from dba_tables where owner not in ('SYS','SYSTEM');
 **************************************************************************************
@@ -1993,8 +1993,8 @@ from dba_tables where owner not in ('SYS','SYSTEM');
 
 
 
-*********************************����ͳ����Ϣ***************************************
-�ѽ�luhz0��imsqueue.ims_output_queue_table��ͳ����Ϣ����luzz0Ϊ����
+*********************************导入统计信息***************************************
+已将luhz0的imsqueue.ims_output_queue_table的统计信息导入luzz0为例：
 
 (1)  conn dbmgr@luhz0
 exec dbms_stats.create_stat_table('DBMGR','EXP_STATS_TMP');
@@ -2017,7 +2017,7 @@ exec dbms_stats.import_table_stats(ownname => 'IMSQUEUE',tabname => 'IMS_OUTPUT_
 
 select to_char(last_analyzed,'yyyy-mm-dd hh24:mi:ss') from dba_tab_statistics where owner='IMSQUEUE' and table_name='IMS_OUTPUT_QUEUE_TABLE';
 
---�Ƿ����������������exec dbms_stats.lock_table_stats('IMSQUEUE','IMS_OUTPUT_QUEUE_TABLE');
+--是否锁定视情况而定：exec dbms_stats.lock_table_stats('IMSQUEUE','IMS_OUTPUT_QUEUE_TABLE');
 **************************************************************************************
 
 
@@ -2025,9 +2025,9 @@ select to_char(last_analyzed,'yyyy-mm-dd hh24:mi:ss') from dba_tab_statistics wh
 
 
 
-#################################################���ڱ����ֳ���Ϣ��oradebug#################################################
+#################################################关于保留现场信息或oradebug#################################################
 
-*********************************ʹ��oradebug�Ѽ��ֳ���Ϣ***********************************
+*********************************使用oradebug搜集现场信息***********************************
 (1).	Systemstate dump
 -	login sqlplus internal
 -	oradebug setmypid
@@ -2054,30 +2054,30 @@ select to_char(last_analyzed,'yyyy-mm-dd hh24:mi:ss') from dba_tab_statistics wh
 
 
 
-*********************************ʹ��rda�Ѽ���ǰϵͳ��Ϣ��GCS����ʦ��������***********************************
-(1)��ȡrda���߲���ѹ�����Դ�metalink���أ�Doc ID:  Note:314422.1
+*********************************使用rda搜集当前系统信息供GCS工程师分析问题***********************************
+(1)获取rda工具并解压，可以从metalink下载，Doc ID:  Note:314422.1
 unzip rda.zip
 cd rda
 
-(2)�޸�Ȩ��
+(2)修改权限
 chmod +x rda.sh
 
-(3)��ʼ������Ҫ�ṩdbaȨ�޵��û����ܹ���connect user_name AS SYSDBA�������ݿ⣩
+(3)初始化，需要提供dba权限的用户（能够用connect user_name AS SYSDBA连接数据库）
 ./rda.sh -S
 
-(4)���нű����õ�html��������
+(4)运行脚本，得到html的输出结果
 ./rda.sh -v
 *************************************************************************************************************
 
 
 
 
-****************����OUTLN��������ȷ��ִ�мƻ���������������Կ⵼�뵽������************************************************************************************************************
-���²��������sqlplus�����н��У����������������н��С�
-1����������sql hash value�����һ�ȡ��ǰִ�мƻ�
-2 �ҵ��кõ�ִ�мƻ�������������Կ�
-3 ���û�кõ�ִ�мƻ���Ҫ��취����������������õ�ִ�мƻ�
-1 ���������ø�top sql��sql text
+****************采用OUTLN技术将正确的执行计划从其它环境如测试库导入到生产库************************************************************************************************************
+以下操作务必在sqlplus工具中进行，不能在其它工具中进行。
+1在生产库获得sql hash value，并且获取当前执行计划
+2 找到有好的执行计划其它环境如测试库
+3 如果没有好的执行计划需要想办法在其它环境制造出好的执行计划
+1 在生产库获得该top sql的sql text
 select sql_text ||to_char(length(sql_text)) sql_text from v$sqltext where hash_value=2092045661
 order by piece;
 SQL_TEXT
@@ -2101,43 +2101,43 @@ state_code          and     po.CLIENT_NO = :1                and64
      rs.ob_date > sysdate - :2               ORDER BY rs.ob_resu64
 lt_seq desc   14
 
-2 ȡ��SQL����UltraEdit������sql ��
-ȥ��ÿ��β�����ȵ����֣��ӵ�2�п�ʼ����ÿһ��ճ������һ�е�ĩβ��������sqlճ����һ�У�ע����β�ո���Բ��ܶ�ʧ����sqlβ������һ��;�ֺš�
+2 取到SQL后在UltraEdit中整理sql ：
+去掉每行尾部长度的数字，从第2行开始复制每一行粘贴到第一行的末尾，把整个sql粘贴成一行，注意首尾空格绝对不能丢失，在sql尾部增加一个;分号。
   SELECT OB_RESULT_SEQ obResultSeq,rs.TASK_CODE taskCode,     rs.SPECIAL_CASE_CODE specialCaseCode,rs.DATA_SEQ dataSeq,     rs.QUESTIONNAIRE_CODE questionnaireCode,to_char(rs.OB_DATE,'yyyy-mm-dd hh24:mi:ss') obDate ,     rs.OB_TSR obTsr,rs.OB_RESULT_STATE obResultState,     rs.REJECT_REASON rejectReason,rs.REMARK remark,rs.RECORD_NO recordNo,     rs.DATA_STATE dataState,rs.BEGIN_PROCESS_TIME beginProcessTime,     rs.END_PROCESS_TIME endProcessTime,rs.BEGIN_CALL_TIME beginCallTime,     rs.END_CALL_TIME endCallTime,rs.OB_TEL obTel,     rs.OB_TEL_TYPE obTelType,rs.OB_TYPE obType,rs.OB_TIMES obTimes ,           po.PARTY_NO partyNo ,sp.SPECIAL_CASE_NAME specialCaseName,      po.BATCH batch , po.TABLE_ID tableId , drs.state_name   FROM c_ob_result rs , c_obd_common_info po ,         c_special_case_info sp ,c_ob_data_result_tbl drs          WHERE rs.data_seq = po.data_seq    AND rs.special_case_code = sp.special_case_code   AND rs.ob_result_state = drs.state_code          and     po.CLIENT_NO = :1                and     rs.ob_date > sysdate - :2               ORDER BY rs.ob_result_seq desc   ;
 
-3 ��������������Կ��н���outln�û����޸����뼰��Ȩ
+3 在其它环境如测试库中解锁outln用户并修改密码及授权
 alter user outln identified by outln account unlock;
 grant create any outline to outln;
 grant drop any outline to outln;
 grant all on plan_table to outln;
---���û��plan_table������ sys �û�ִ�����²�����
+--如果没有plan_table，则以 sys 用户执行以下操作：
 --@ /rdbms/admin/utlxplan.sql;
 --create public synonym plan_table for plan_table;
 --grant select ,insert, update, delete on plan_table to public;
 
-4 ��������������Կ�ʹ��DBA��ɫ�û�dbmgr,dbaʵ��,sys,system��������û���Ȩ��SQL�漰�������б�����ͼ��selectȨ�޸�outln�û������磺
+4 在其它环境如测试库使用DBA角色用户dbmgr,dba实名,sys,system或表属主用户授权该SQL涉及到的所有表及视图的select权限给outln用户，例如：
 grant select on icssobdata.c_ob_result to outln;
 grant select on icssobdata.c_obd_common_info to outln;
 grant select on icssobdata.c_special_case_info to outln;
 grant select on icssobdata.c_ob_data_result_tbl to outln;
 
-3 ����������SQL��������������Կ�ȷ��ִ�мƻ��Ƿ��Ǻõ�ִ�мƻ���
-explain plan for ��������������,������
+3 将整理出的SQL在其它环境如测试库确认执行计划是否是好的执行计划：
+explain plan for 上面整理后的语句,举例：
 explain plan for
   SELECT OB_RESULT_SEQ obResultSeq,rs.TASK_CODE taskCode,     rs.SPECIAL_CASE_CODE specialCaseCode,rs.DATA_SEQ dataSeq,     rs.QUESTIONNAIRE_CODE questionnaireCode,to_char(rs.OB_DATE,'yyyy-mm-dd hh24:mi:ss') obDate ,     rs.OB_TSR obTsr,rs.OB_RESULT_STATE obResultState,     rs.REJECT_REASON rejectReason,rs.REMARK remark,rs.RECORD_NO recordNo,     rs.DATA_STATE dataState,rs.BEGIN_PROCESS_TIME beginProcessTime,     rs.END_PROCESS_TIME endProcessTime,rs.BEGIN_CALL_TIME beginCallTime,     rs.END_CALL_TIME endCallTime,rs.OB_TEL obTel,     rs.OB_TEL_TYPE obTelType,rs.OB_TYPE obType,rs.OB_TIMES obTimes ,           po.PARTY_NO partyNo ,sp.SPECIAL_CASE_NAME specialCaseName,      po.BATCH batch , po.TABLE_ID tableId , drs.state_name   FROM c_ob_result rs , c_obd_common_info po ,         c_special_case_info sp ,c_ob_data_result_tbl drs          WHERE rs.data_seq = po.data_seq    AND rs.special_case_code = sp.special_case_code   AND rs.ob_result_state = drs.state_code          and     po.CLIENT_NO = :1                and     rs.ob_date > sysdate - :2               ORDER BY rs.ob_result_seq desc   ;
 select * from table(dbms_xplan.display);
 
-6 ���кõ�ִ�мƻ���������������Կⴴ��outline ,�磺
-Create outline <outline����stg_OB_RESULT_SEQ> for category special on
+6 在有好的执行计划的其它环境如测试库创建outline ,如：
+Create outline <outline名字stg_OB_RESULT_SEQ> for category special on
   SELECT OB_RESULT_SEQ obResultSeq,rs.TASK_CODE taskCode,     rs.SPECIAL_CASE_CODE specialCaseCode,rs.DATA_SEQ dataSeq,     rs.QUESTIONNAIRE_CODE questionnaireCode,to_char(rs.OB_DATE,'yyyy-mm-dd hh24:mi:ss') obDate ,     rs.OB_TSR obTsr,rs.OB_RESULT_STATE obResultState,     rs.REJECT_REASON rejectReason,rs.REMARK remark,rs.RECORD_NO recordNo,     rs.DATA_STATE dataState,rs.BEGIN_PROCESS_TIME beginProcessTime,     rs.END_PROCESS_TIME endProcessTime,rs.BEGIN_CALL_TIME beginCallTime,     rs.END_CALL_TIME endCallTime,rs.OB_TEL obTel,     rs.OB_TEL_TYPE obTelType,rs.OB_TYPE obType,rs.OB_TIMES obTimes ,           po.PARTY_NO partyNo ,sp.SPECIAL_CASE_NAME specialCaseName,      po.BATCH batch , po.TABLE_ID tableId , drs.state_name   FROM c_ob_result rs , c_obd_common_info po ,         c_special_case_info sp ,c_ob_data_result_tbl drs          WHERE rs.data_seq = po.data_seq    AND rs.special_case_code = sp.special_case_code   AND rs.ob_result_state = drs.state_code          and     po.CLIENT_NO = :1                and     rs.ob_date > sysdate - :2               ORDER BY rs.ob_result_seq desc   ;
 
-7 ���кõ�ִ�мƻ���������������Կ���outline��sql ���Ⱥ�sql�ı�
+7 在有好的执行计划的其它环境如测试库检查outline的sql 长度和sql文本
 set long 10000
 set pagesize 100
 set linesize 120
 select OL_NAME,TEXTLEN,SQL_TEXT from outln.ol$;
-ȷ�ϳ��Ⱥ��ı��Ƿ���ȷ��outline���ܽ�SQL��ǰ��Ŀո�ص���������������Ժ��ԣ�����Ϊԭ���ȼ�ȥ����ȥǰ��ո�Ĵ�С��
-��������sql ԭ����Ϊ1102������outline��ĳ���Ϊ1100��ǰ�������ո񱻽�ȥ
+确认长度和文本是否正确（outline可能将SQL最前面的空格截掉，像这种情况可以忽略，长度为原长度减去被截去前面空格的大小）
+例如上面sql 原长度为1102，创建outline后的长度为1100，前面两个空格被截去
 
 STG_OB_RESULT_SEQ                    1100
 SELECT OB_RESULT_SEQ obResultSeq,rs.TASK_CODE taskCode,     rs.SPECIAL_CASE_CODE
@@ -2156,121 +2156,121 @@ ate_code          and     po.CLIENT_NO = :1                and     rs.ob_date >
 sysdate - :2               ORDER BY rs.ob_result_seq desc
 
 
-8 ��������������Կ�exp��outline
+8 在其它环境如测试库exp出outline
 exp outln/outln owner=outln file=ol.dmp log=ol_exp.log
 
-9 �������⽫������dmp�ļ�scp�Ӳ��Կ�ȡ������������
+9 在生产库将导出的dmp文件scp从测试库取到生产库主机
 scp padba@
 
-3 �����������outln�û����޸�����
+3 在生产库解锁outln用户并修改密码
 alter user outln identified by outln account unlock;
 
 
-10 ��������imp outline (8i��������ol$ ol$hints��9i��������)
+10 在生产库imp outline (8i是两个表ol$ ol$hints，9i是三个表)
 imp outln/outln file=ol.dmp full=y ignore=y log=ol_imp.log
 
-11 ������������outline
+11 在生产库启用outline
 exec dbms_outln.update_signatures;
 alter system set use_stored_outlines=special;
 
 
-12 ����������ִ�мƻ���
-explain plan for �������������䡣
+12 在生产库检查执行计划：
+explain plan for 上面整理后的语句。
 explain plan for
   SELECT OB_RESULT_SEQ obResultSeq,rs.TASK_CODE taskCode,     rs.SPECIAL_CASE_CODE specialCaseCode,rs.DATA_SEQ dataSeq,     rs.QUESTIONNAIRE_CODE questionnaireCode,to_char(rs.OB_DATE,'yyyy-mm-dd hh24:mi:ss') obDate ,     rs.OB_TSR obTsr,rs.OB_RESULT_STATE obResultState,     rs.REJECT_REASON rejectReason,rs.REMARK remark,rs.RECORD_NO recordNo,     rs.DATA_STATE dataState,rs.BEGIN_PROCESS_TIME beginProcessTime,     rs.END_PROCESS_TIME endProcessTime,rs.BEGIN_CALL_TIME beginCallTime,     rs.END_CALL_TIME endCallTime,rs.OB_TEL obTel,     rs.OB_TEL_TYPE obTelType,rs.OB_TYPE obType,rs.OB_TIMES obTimes ,           po.PARTY_NO partyNo ,sp.SPECIAL_CASE_NAME specialCaseName,      po.BATCH batch , po.TABLE_ID tableId , drs.state_name   FROM c_ob_result rs , c_obd_common_info po ,         c_special_case_info sp ,c_ob_data_result_tbl drs          WHERE rs.data_seq = po.data_seq    AND rs.special_case_code = sp.special_case_code   AND rs.ob_result_state = drs.state_code          and     po.CLIENT_NO = :1                and     rs.ob_date > sysdate - :2               ORDER BY rs.ob_result_seq desc   ;
 select * from table(dbms_xplan.display);
-ִ�мƻ�Ӧ������
+执行计划应该正常
 
-13 ��������kill����ʹ��ԭִ�мƻ���session���Ա�ʹ���¼ƻ�
+13 在生产库kill还在使用原执行计划的session，以便使用新计划
 
-14 ��������Ͳ��Կ��޸�outln����ɸ������벢����outln�û�
-alter user outln  identified by <����> account lock;
-
-
-######################################����ϵͳ��#######################################
+14 在生产库和测试库修改outln密码成复杂密码并锁定outln用户
+alter user outln  identified by <密码> account lock;
 
 
-#################################����������Դ����#################################
+######################################操作系统类#######################################
 
-*********************************CPUʹ�����***********************************
-top��glance
-��
+
+#################################关于主机资源消耗#################################
+
+*********************************CPU使用情况***********************************
+top或glance
+或
 sar -u 5 1000
 u:    about CPU
-5:    ����Ϊ��λ�Ĳ�������
-1000: �����������ظ������Ĵ���
+5:    以秒为单位的测量周期
+1000: 测量周期中重复测量的次数
 
-��������
+输出结果：
 11:32:42    %usr    %sys    %wio   %idle
 11:32:47       4       3       0      93
 11:32:53       5       5       0      91
 
-���ͣ�
-%usr:    ָ�û�����ʹ�õ�CPU����������oracle���û�
-%sys:    ָ����ϵͳ����Լ��Ĺ������л����жϵȣ�ʹ�õ�CPU����
-%wio:    Ϊ�ض����̵Ķ�������Щ���̵�ǰ��ʹ��CPUȴ�ڵȴ�IO�������
-%idle:   CPU������
+解释：
+%usr:    指用户进程使用的CPU比例，包括oracle的用户
+%sys:    指操作系统完成自己的工作（切换、中断等）使用的CPU比例
+%wio:    为特定进程的度量，这些进程当前正使用CPU却在等待IO请求服务
+%idle:   CPU空闲率
 
-%sys��%wioӦ��С��10%��15%
+%sys和%wio应该小于10%到15%
 
-�Ƿ�CPU������Ϊ0%��ϵͳ����CPUƿ����Ҫ���ж��ٽ����ڵȴ�CPU��ֻҪCPU��ƽ����ִ�ж���С��2*CPU��Ŀ����CPU������0%�ǿ��Խ��ܵġ�
-����ʹ��sar -q 5 1000�ⶨϵͳ�ϵĿ�ִ�ж���
+是否CPU空闲率为0%的系统存在CPU瓶颈？要看有多少进程在等待CPU，只要CPU的平均可执行队列小于2*CPU数目，则CPU空闲率0%是可以接受的。
+可以使用sar -q 5 1000测定系统上的可执行队列
 *******************************************************************************
 
 
 
 
-*******************************�豸ʹ�����************************************
-top��glance
-��
+*******************************设备使用情况************************************
+top或glance
+或
 sar -d 5 1000
 iostat
 
-��������
+输出结果：
 11:41:44   device        %busy   avque   r+w/s  blks/s  avwait  avserv
 11:41:49   md10              0     0.0       0       0     0.0     0.0
            md11              0     0.0       0       0     0.0     0.0
 
-���ͣ�
-device:    �豸��
-%busy��    �豸��æ�̶ȣ���õ���60%
-avque��    �豸���е�ƽ������
-r+w/s:     ÿ�����+д����
-blks/s:    ÿ�봫��Ŀ���(��512b�Ŀ����)
-avwait��   ����������ÿ��I/O������ƽ���ȴ�ʱ�䣬�Ժ���Ϊ��λ
-avserv:    ����I/O�������õ�ƽ��ʱ��
+解释：
+device:    设备名
+%busy：    设备繁忙程度，最好低于60%
+avque：    设备队列的平均长度
+r+w/s:     每秒读出+写入数
+blks/s:    每秒传输的块数(以512b的块计量)
+avwait：   五秒周期内每个I/O操作的平均等待时间，以毫秒为单位
+avserv:    服务I/O操作所用的平均时间
 *******************************************************************************
 
 
 
 
-*******************************�����ڴ�ʹ�����**********************************
+*******************************虚拟内存使用情况**********************************
 vmstat -S 5 1000
 
-��������
+输出结果：
  kthr      memory            page            disk          faults      cpu
  r b w   swap  free  si  so pi po fr de sr m1 m1 m1 m2   in   sy   cs us sy id
  0 0 0 65706952 19722504 0 0 729 272 271 0 0 1 1  1  0  992 29474 2978 1  1 98
  0 0 0 60526056 12733720 0 0 35324 0 0 0 0  0  0  0  0 1591 6047 3225  3  2 96
 
-���ͣ�
-kthr(r b w):    rָ��ִ�ж����еĽ��̣��ȴ�ʹ��CPUִ�У�
-                bָ��������I/O����ҳ����Դ�����Ľ���
-                wָ����ִ�е���ǰ�����������ܴ����ڴ漫Ϊȱ�����Ľ���
-memory(swap free):    swap��K�ֽ�ָ����ǰ���õĽ����ռ���
-                      free��K�ֽ�ָ���ڴ����ɱ��Ĵ�С
-page(si so pi po fr de sr):    si��soָ������ͻ����ڴ�K�ֽ���
-                               pi��poָ������ҳ�͵���ҳ���ڴ�K�ֽ���
-                               frָ�����е�K�ֽ���
-                               de��K�ֽ�ָ��Ԥ�ڵĶ����ڴ治��
-                               srָ����ʱ���㷨ɨ���ҳ�棨��ҳ��ߴ����ô�С����
-disk(m1 m1 m1 m2):    ����ṩ�ĸ�ֵ��ע����豸��Ϣ����Щ��ָ��ÿ��I/O���������ݡ����Ǻ����ã��ɴ�sar -d�õ����õ���Ϣ
-faults(in sy cs):     inָ���豸�ն˵���Ŀ
-                      syָ��ϵͳ���õ���Ŀ
-                      csָ��CPU�����л�����Ŀ
-cpu(us sy id):        usָ���û�����ʹ��ʱ��İٷֱ�
-                      syָ��ϵͳ����ʹ��ʱ��İٷֱ�
-                      idָ���ǵ�ǰʹ��ʱ��İٷֱȣ��������еȴ�I/O���ݣ�
+解释：
+kthr(r b w):    r指出执行队列中的进程（等待使用CPU执行）
+                b指出被诸如I/O、分页等资源阻塞的进程
+                w指出可执行单当前正交换（可能处于内存极为缺乏）的进程
+memory(swap free):    swap以K字节指出当前可用的交换空间量
+                      free以K字节指出内存自由表的大小
+page(si so pi po fr de sr):    si和so指出换入和换出内存K字节数
+                               pi和po指出调入页和调出页的内存K字节数
+                               fr指出空闲的K字节数
+                               de以K字节指出预期的短期内存不足
+                               sr指出以时钟算法扫描的页面（以页面尺寸设置大小）数
+disk(m1 m1 m1 m2):    最多提供四个值得注意的设备信息。这些数指出每秒I/O操作的数据。不是很有用，可从sar -d得到更好的信息
+faults(in sy cs):     in指出设备终端的数目
+                      sy指出系统调用的数目
+                      cs指出CPU环境切换的数目
+cpu(us sy id):        us指出用户进程使用时间的百分比
+                      sy指出系统进程使用时间的百分比
+                      id指出非当前使用时间的百分比（包括所有等待I/O数据）
 *******************************************************************************
 
 
@@ -2278,7 +2278,7 @@ cpu(us sy id):        usָ���û�����ʹ��ʱ��İٷֱ�
 
 
 TNS-12533: TNS:illegal ADDRESS parameters
-���Ӵ����������⡣
+连接串配置有问题。
 
 du -h -d / | egrep '[0-9]G'
 
@@ -2287,25 +2287,25 @@ du -h -d / | egrep '[0-9]G'
 
 
 
-�ع��εķ����ʹ��
+回滚段的分配和使用
 1 select segment_id,setgment_name from dba_rollback_segs;
-2 Ҫָ������ʹ��ĳ���ع��Σ�
+2 要指定事务使用某个回滚段：
 set transaction use rollback segment rbs6;
 
 
-CBO (cost-based optimizer)��ʹ������ֵ��histogram ���������ݵķֲ��о�ȷ�Ĺ��ơ�Histograms ������Ϊskew ʱ�������ѡ���ԵĹ��ƣ��Ӷ��ԷǾ�һ�����ݷֲ��������ŵ�ִ�мƻ���
-CBO ��һ����������Ϊ������ѯ�г��ֵ�predicates��ѡ���ԡ�ѡ���ԵĹ���Ϊ���ھ�����ʱʹ������������������˳����Щ�����в����Ǿ�һ�ֲ��ġ�CBOʹ���ض������ϵ� height-based histograms�������Ǿ�һ�ֲ����е����ݷֲ�������һ��height-based histogram, ��ֵ����ʹ��ÿ��band�����д�Լ��ͬ��Ŀ��ֵ�ķ�ʽ����ֵ����band �С������histogram�ṩ�����õ���ϢΪֵ��endpoints �ķ�Χ��
-Histograms ����Ӱ�����ܣ����Ӧ�����ڵ��佫��ֵظĽ���ѯ��ִ�мƻ�ʱ������histogram ͳ�����������ô�ŵģ��������������������Ŀռ�ȡ����sample�ߴ硣ͨ����Ӧ�Ծ��и߶�skewed ���ݷֲ��ģ���where �Ӿ���Ƶ��ʹ�õ����ռ�histograms�����ھ�һ�ֲ������ݣ�CBO�����ڲ�ʹ��histogram ������£�����ִ�гɱ����൱��ȷ�Ĺ��ơ�
-Histograms, �������Ż���ͳ��һ�����Ǿ�̬�ġ����ǽ����䷴ӳһ�еĵ�ǰ���ݷֲ�ʱ�����á� (ֻҪ�еķֲ����ֲ��䣬�е����ݿ��Ա仯��) ���е����ݷֲ�Ƶ���ظı䣬�������Ƶ�����ؼ�����histogram��
-Histograms ���������������ô�����
-�е�����predicates ʹ��bind����(������9i������bind peeking ���������룬����������histograms ��)
-������Ϊ��һ�ķֲ���
-������ΪΨһ���ҽ�����equality predicates �С�
-ʹ��DBMS_STATS �����ռ�histograms�� �����Ϊ������������ռ�histograms���磬������佫Ϊscott �û���emp ���� SAL �д���һ�� 10-bucket ��histogram��
+CBO (cost-based optimizer)可使用数据值的histogram 来对列数据的分布有精确的估计。Histograms 在数据为skew 时，提高了选择性的估计，从而对非均一的数据分布产生较优的执行计划。
+CBO 的一个基本任务为决定查询中出现的predicates的选择性。选择性的估计为用于决定何时使用索引，及关联表的顺序。有些表的列并不是均一分布的。CBO使用特定的列上的 height-based histograms来描述非均一分布的列的数据分布。对于一个height-based histogram, 列值按照使得每个band包含有大约相同数目的值的方式将列值分入band 中。因而，histogram提供的有用的信息为值的endpoints 的范围。
+Histograms 可能影响性能，因而应仅用于当其将充分地改进查询的执行计划时。由于histogram 统计数据是永久存放的，因而，保留该数据所需的空间取决于sample尺寸。通常，应对具有高度skewed 数据分布的，在where 子句中频繁使用的列收集histograms。对于均一分布的数据，CBO可以在不使用histogram 的情况下，对其执行成本有相当精确的估计。
+Histograms, 象其它优化器统计一样，是静态的。它们仅当其反映一列的当前数据分布时才有用。 (只要列的分布保持不变，列的数据可以变化。) 若列的数据分布频繁地改变，则你必须频繁地重计算其histogram。
+Histograms 对以下特征的列用处不大：
+列的所有predicates 使用bind变量(这项在9i中随着bind peeking 技术的引入，而可以利用histograms 了)
+列数据为均一的分布的
+列数据为唯一的且仅用在equality predicates 中。
+使用DBMS_STATS 包来收集histograms。 你可以为表或分区的列收集histograms。如，以下语句将为scott 用户的emp 表的 SAL 列创建一个 10-bucket 的histogram：
 EXECUTE DBMS_STATS.GATHER_TABLE_STATS
 ('scott','emp', METHOD_OPT => 'FOR COLUMNS SIZE 10 sal');
-SIZE �ؼ��ֶ����histogram ����� bucket �����������Ĺ�Ա����ͬ��salary�������������Ĺ�Ա�в�ͬ��salaryʱ����ӦΪSAL �д��� histogram��
-Oracle ��˾����ʹ��DBMS_STATS ���� SIZE AUTO�������ݿ��Զ�����ʹ�ö���buckets ���ռ����е�histograms��
+SIZE 关键字定义该histogram 的最大 bucket 数。若大量的雇员有相同的salary，而仅有少量的雇员有不同的salary时，你应为SAL 列创建 histogram。
+Oracle 公司建议使用DBMS_STATS 包的 SIZE AUTO来让数据库自动决定使用多少buckets 来收集各列的histograms。
 
 
 ./mysqld --defaults-file=/paic/t0fusion/rdbms/mysql/5.6/my.cnf --skip-grant-tables
@@ -2338,46 +2338,46 @@ Server version: 5.6.16-enterprise-commercial-advanced-log MySQL Enterprise Serve
 Copyright (c) 2000, 2014, Oracle and/or its affiliates. All rights reserved.
 
 Oracle is a registere
-����(xionglang619)   2014-04-04 19:40:15
-֪����ô����socket��½ô��
-������(dongkuifeng611)   2014-04-04 19:34:10
+熊浪(xionglang619)   2014-04-04 19:40:15
+知道怎么不加socket登陆么？
+董魁锋(dongkuifeng611)   2014-04-04 19:34:10
 mysql -u root --protocol=tcp -P 3960 -p
-����(xionglang619)   2014-04-04 19:43:59
-��������ʲô�취ֻ��mysql -uroot -p���ܵ�½ô��
-����(xionglang619)   2014-04-04 19:45:16
-�ҵ��ˡ�����my.cnf copyһ�ݵ�$MYSQL_HOME
+熊浪(xionglang619)   2014-04-04 19:43:59
+还有其他什么办法只用mysql -uroot -p就能登陆么？
+熊浪(xionglang619)   2014-04-04 19:45:16
+找到了。。把my.cnf copy一份到$MYSQL_HOME
 
-insert�Ż�
+insert优化
 
-Ҫ�����insert���ٶȣ�����Ҫ֪��ʲôӰ��insert������ִ��insert�Ĺ����в���redo��undo��Ҫ�����insert���ٶȣ��ڳ������ϵͳ��Դ�������¾�Ҫ��������insert������redo��undo��undo�Ĵ�Сû�취�ı䣬�������ǿ��Ըı�redo���������������insert������
+要想提高insert的速度，首先要知道什么影响insert慢，在执行insert的过程中产生redo和undo，要想提高insert的速度，在充分利用系统资源的条件下就要尽量减少insert产生的redo和undo，undo的大小没办法改变，但是我们可以改变redo的量。下面是提高insert方法。
 
-1. ����hint /*+ append */                                           --�����ڸ�ˮλ�²��ҿ�insert�Ŀռ䣬ֱ���ڸ�ˮλ֮��insert
-2. ����hint /*+ parallel(tab,4) */
-   ����alter session enable/disable parallel dml;         ---�������ϵͳӲ����Դ
-3. alter table tablename nologging/logging               ----�رձ���log���񣬼���redo����
-4. ���ҵ�������Ļ���������ɾ��������insert֮�����ؽ�.   ---������insertʱά�������Ŀ���
-5. ����������ʱ�м��                                                    ----���ٴ������undo��ʹ��
-6. ����sort_area_size��PGA                                       ----��������ռ䣬������̲���
-7. �Ż�sql��䱾��
-8. pl/sql������                                                              ---����Ϊ�㣬�Ѵ���������ɢ��С����
+1. 增加hint /*+ append */                                           --不用在高水位下查找可insert的空间，直接在高水位之上insert
+2. 增加hint /*+ parallel(tab,4) */
+   或者alter session enable/disable parallel dml;         ---充分利用系统硬件资源
+3. alter table tablename nologging/logging               ----关闭表的log服务，减少redo产生
+4. 如果业务允许的话，可以先删除索引，insert之后再重建.   ---减少在insert时维护索引的开销
+5. 可以增加临时中间表                                                    ----减少此事务对undo的使用
+6. 增大sort_area_size或PGA                                       ----增加排序空间，避免磁盘操作
+7. 优化sql语句本身
+8. pl/sql批处理                                                              ---化整为零，把大事务变成零散的小事务
 
-˵����tb_order_detail_his ��7000W��¼
-      tb_order_detail     ��2000W��¼
+说明：tb_order_detail_his ：7000W记录
+      tb_order_detail     ：2000W记录
 
-�Ż�ǰ��
+优化前：
 INSERT INTO /*+ append */  tablename_his
 SELECT *  FROM  tablename  PARTITION (TB_ORDER_DE_WAREID40) WHERE ID NOT IN (
 SELECT tcc.id FROM  tablename  PARTITION (TB_ORDER_DE_WAREID40) tcc , tablename_his  tcch WHERE tcc.id=tcch.id
 )
 
-�������ݹ鵵ʱ����Ҫ������������insert������insert�����ٻ��ǿ���ʤ�εģ��ɵ�Ҫ��200��������ݹ鵵��2��Сʱ��û�гɹ���
-���Ƕ����Ż����죬����append��parallel,����������nologging������ʹ���200W�����ݹ鵵��15���Ӿ����
+在做数据归档时，需要做大数据量的insert，对于insert内容少还是可以胜任的，可当要把200多万的数据归档，2个小时都没有成功，
+于是对其优化改造，利用append，parallel,分批处理，nologging方法，使这个200W的数据归档在15分钟就完成
 
 
-�Ż���
+优化后：
 
 
-ͨ�� mod(tcc.id,10)�����ݷ�10�����ύ�鵵
+通过 mod(tcc.id,10)把内容分10部分提交归档
 
 INSERT INTO /*+ append */ tablename_his
 SELECT  *  FROM tablename PARTITION (TB_ORDER_DE_WAREID40) tcc  WHERE  NOT EXISTS (
@@ -2385,7 +2385,7 @@ SELECT /*+ parallel(tcch,7) parallel(tcc,7) */ tcch.id FROM tablename_his tcch W
 ) AND mod(tcc.id,10)=9
 
 
----��ѯ���ݿ���������
+---查询数据库隐含参数
 SQL> select
   2    x.ksppinm  name,
   3    y.ksppstvl  value,
@@ -2411,7 +2411,7 @@ new  14:   x.ksppinm like '%_nets%'
 -------sqlldr
 
 csv  ^M
-���ڷ����Ұ��ļ��е����ݷŵ���linux���½����ļ��У�����OK�����ǿ�������һ����csv��ô�Ķ����У��Ҿͻ��ɿ�����һ���Ķ����ǲ���������ʲô��Ϊ�Ҳ���Ĳ��졣���������������������һ�£���Ȼ����������ͬ�����⣬���صĲ������csv�ļ���ĩ���˻س�������linux�²鿴�Աȣ�
+终于发现我把文件中的内容放到在linux下新建的文件中，加载OK，但是看起内容一样的csv怎么改都不行，我就怀疑看起来一样的东西是不是隐藏了什么不为我察觉的差异。带着这个疑问上网搜索了一下，果然有人遇到相同的问题，隐藏的差异就是csv文件行末藏了回车符。在linux下查看对比：
 
 [oracle@nathan-rhel5 ~]$ cat -v ldr_case2.csv
 SMITH,CLEAK,3904^M
@@ -2424,9 +2424,9 @@ ALLEN,"SALER,M",2891
 WARD,"SALER,""S""",3128
 KING,PRESIDENT,2523
 
-ԭ������ľ����ļ���ĩ��^M��������
+原来作祟的就是文件行末的^M啊！！！
 
-��csv�ļ�תһ�¸�ʽ��
+把csv文件转一下格式：
 [oracle@nathan-rhel5 ~]$ dos2unix ldr_case2.csv
 dos2unix: converting file ldr_case2.csv to UNIX format ...
 [oracle@nathan-rhel5 ~]$ cat -v ldr_case2.csv
@@ -2435,99 +2435,99 @@ ALLEN,"SALER,M",2891
 WARD,"SALER,""S""",3128
 KING,PRESIDENT,2523
 
-Ȼ�������¼���һ�����ݳɹ��ˣ�
+然后再重新加载一次数据成功了：
 
-��Linux�²鿴�ļ���ʽ��
+在Linux下查看文件格式：
 
 # file filename
 
-# 20140304110001.csv: ISO-8859 text //������^M
+# 20140304110001.csv: ISO-8859 text //不带有^M
 
-# 20140304110002.csv: ISO-8859 text, with CRLF line terminators //����^M
+# 20140304110002.csv: ISO-8859 text, with CRLF line terminators //带有^M
 
-Windows�´������ļ��ʹ���CRLF����ֹ����
+Windows下处理的文件就带有CRLF行终止符。
 
-�����м��ִ�����ʽ:
+以下有几种处理方式:
 
-1. vi������ģʽ������
+1. vi命令行模式下输入
 
-:%s/^M$//g # ȥ����β��^M��
-:%s/^M//g # ȥ�����е�^M��
-:%s/^M/[ctrl-v]+[enter]/g # ��^M�滻�ɻس���
-:%s/^M/\r/g # ��^M�滻�ɻس���
+:%s/^M$//g # 去掉行尾的^M。
+:%s/^M//g # 去掉所有的^M。
+:%s/^M/[ctrl-v]+[enter]/g # 将^M替换成回车。
+:%s/^M/\r/g # 将^M替换成回车。
 
-2. ʹ��sed�����vi���÷����ƣ�
+2. 使用sed命令。和vi的用法相似：
 
 # sed -e 's/^M/\n/g'  filename
-ע�⣺����ġ�^M��Ҫʹ�á�CTRL-V CTRL-M�����ɣ�������ֱ�Ӽ��롰^M����
+注意：这里的“^M”要使用“CTRL-V CTRL-M”生成，而不是直接键入“^M”。
 
-3. ʹ������
+3. 使用命令
 
-ʹ��dos2unix���һ���*nix�����汾���������С���ߣ���Windows - *nix�ļ�ת����
+使用dos2unix命令，一般的*nix发布版本都带有这个小工具，即Windows - *nix文件转换。
 
-��ʽ: dos2unix filename
+格式: dos2unix filename
 
-ת������ļ�
+转换多个文件
 
-��ʽ��dos2unix file1 file2 file3 ��.
+格式：dos2unix file1 file2 file3 ….
 
-����ת���ļ���ʱ�򶼻��޸�ԭ�����ļ���ʹ�� -k���������� -n�������Բ��ı��ļ����ԡ�
+上面转换文件的时候都会修改原来的文件，使用 -k参数，或者 -n参数可以不改变文件属性。
 
-��ʽ��dos2unix -n oldfile newfile //�½�һ���ļ�������Դ�ļ�����
+格式：dos2unix -n oldfile newfile //新建一个文件，保持源文件不变
 
-��ʽ��dos2unix -k filename //�����ļ�ʱ�������
+格式：dos2unix -k filename //保持文件时间戳不变
 
-ͬ�������ṩ��*nix - windows�ļ���ʽת�����unix2dos������ͬdos2unix��
+同样工具提供了*nix - windows文件格式转换命令：unix2dos，参数同dos2unix。
 
-*ע��"^M",��Ҫʹ��Ctrl + V + Ctrl + M���룬����������6�����^+��ĸM��
+*注："^M",需要使用Ctrl + V + Ctrl + M键入，而不是数字6上面的^+字母M。
 
 
-(ת)sqlldr����Ӧ�� (�ܽ�ƪ) (2012-11-28 13:01:54)ת�ب�
-��ǩ�� ��̸	���ࣺ oracle
+(转)sqlldr常规应用 (总结篇) (2012-11-28 13:01:54)转载▼
+标签： 杂谈	分类： oracle
 
 load data
-infile *                                              ---ָ�������ļ�   *��ʾ���ݾ��ڿ����ļ�����
-into table bonus                            ---ָ������
-fields terminated by ","                 ---ָ������ָ������Ƕ���
-(ename,job,sal)                            ---ָ����������
-begindata                                       ---����infile ָ��*ʱ��Ч
+infile *                                              ---指定加载文件   *表示数据就在控制文件后面
+into table bonus                            ---指定表名
+fields terminated by ","                 ---指定区域分隔符就是逗号
+(ename,job,sal)                            ---指定表的列名
+begindata                                       ---仅当infile 指定*时有效
 smith,cleak,3904
 allen,salesman,2891
 ward,salesman,3128
 ........
-�������ļ������a.ctl�ļ�������������Ϳ��Ե���
+把上术文件保存成a.ctl文件，用如下命令就可以导入
 sqlldr userid/pass control=a.ctl
-һ,Ҫ���ص��ļ������Զ������ָ�
-a,�޸�ԭʼ���ݣ����ָ����滻�ɶ���
-b,�޸Ŀ����ļ�,��fields terminated by ��ֵ�޸ĳ�ʵ�ʵķָ���
-��,Ҫ���ص������а����ָ�����ô�죬���±�kkk.dat
+一,要加载的文件不是以逗号作分隔
+a,修改原始数据，将分隔符替换成逗号
+b,修改控制文件,将fields terminated by 的值修改成实际的分隔符
+二,要加载的数据中包含分隔符怎么办，如下表kkk.dat
 smith,cleak,3904
 allen,"salesman,"ak"",2891
 ward,"salesman,M",3128
-���ʱ���Ҫ�޸Ŀ����ļ�
+这个时候就要修改控制文件
 load data
-infile kkk.dat                                   ---ָ�������ļ�   *��ʾ���ݾ��ڿ����ļ�����
-into table bonus                            ---ָ������
-fields terminated by ","   optinonally enclosed by ' " '               ---ָ������ָ������Ƕ���
-(ename,job,sal)                            ---ָ����������
-optinonally enclosed by ' " ' Ĭ�Ͼ���˫����,�����������,��˫���Ÿ��ľͿ�����
-��,�����ļ�û�зָ�����ô��,�Ƕ����ַ���kkk,dat
+infile kkk.dat                                   ---指定加载文件   *表示数据就在控制文件后面
+into table bonus                            ---指定表名
+fields terminated by ","   optinonally enclosed by ' " '               ---指定区域分隔符就是逗号
+(ename,job,sal)                            ---指定表的列名
+optinonally enclosed by ' " ' 默认就是双引号,如果是其他的,把双引号更改就可以了
+三,数据文件没有分隔符怎么办,是定长字符串kkk,dat
 smith   cleak           3904
 allen    salesman 2891
 ward    salesman 3128
-�޸Ŀ����ļ�
+修改控制文件
 load data
 infile kkk.dat
 truncate table bonus
 (
-ename position(1:5),                  position(1:5)ָ���Ǵӵ�һ���ַ���ֹ��������ַ���Ϊename��ֵ,����ƫ����
+ename position(1:5),                  position(1:5)指的是从第一个字符载止到第五个字符作为ename的值,绝对偏移量
 job position(7:15),
 sal position(17:20)
 )
-position(*+2:15) ,���ƫ����, ��ʾ����һ��λ�ý�����ƫ�ƶ�����ʼȡ�ַ�,��ֹ��ʵ�ʵ�15���ַ�
-position(*)char(9) ���ƫ����+���ͺͳ��ȵ���������,��ֻ��ҪΪ��һ��ָ����ʼλ�ã�������ֻ��Ҫָ���г��ȾͿ�����
-�ģ������ļ��е��б�Ҫ����ı�������,�ҿ����ֱ��븳ֵ
-��bonus�ж�һ��comm,������ʼֵ0���������ôд
+position(*+2:15) ,相对偏移量, 表示从上一个位置结束后偏移二个开始取字符,载止到实际第15个字符
+position(*)char(9) 相对偏移量+类型和长度的优势在于,你只需要为第一列指定开始位置，其他的只需要指定列长度就可以了
+四，数据文件中的列比要导入的表的列少,且空列又必须赋值
+如bonus中多一列comm,并赋初始值0，则可以这么写
 load data
 infile kkk.dat
 truncate table bonus
@@ -2537,7 +2537,7 @@ job position(7:15),
 sal position(17:20),
 comm '0'
 )
-���Ҫ��������ֵ,������ú��������
+如果要输入特殊值,则可以用函数来解决
 load data
 infile kkk.dat
 truncate table bonus
@@ -2545,12 +2545,12 @@ truncate table bonus
 ename position(1:5),
 job position(7:15),
 sal position(17:20),
-comm "substr(:sal,1,1)"      ȡsalֵ�ĵ�һ�У�����ֵ��comm��
+comm "substr(:sal,1,1)"      取sal值的第一列，并赋值给comm列
 )
-��ȻҲ������pl/sql��д�Զ���ĺ�������ֵ
-�壬�����ļ��е��б�Ҫ����ı����ж���ô��
-a,�������ļ��ж����ɾ��
-b,���ù��ˣ����ڿ����ļ��в�¼��������
+当然也可以用pl/sql编写自定义的函数来赋值
+五，数据文件中的列比要导入的表中列多怎么办
+a,将数据文件中多的列删除
+b,采用过滤，或在控制文件中不录这列数据
 load data
 infile kkk.dat
 truncate table bonus
@@ -2558,15 +2558,15 @@ truncate table bonus
 ename position(1:5),
 job position(7:15),
 sal position(17:20),
-tcol filler position(22:30) ,                       --tcol�������в�¼��,�͹��˵�,�����и����������ڿ����ļ���
+tcol filler position(22:30) ,                       --tcol假设这列不录入,就过滤掉,或这行根本不出现在控制文件中
 )
-�����ʱ�����ļ����Էָ������ֵ�������д
+如果此时数据文件是以分隔符出现的则这样写
 load data
 infile kkk.dat
 truncate table bonus
 fields terminated by ","
 (ename , job ,sal, tcol filler)
-��,��������ļ���ͬһ�ű�,����������Щ�����ļ��ĸ�ʽҪ��ͬ
+六,多个数据文件导同一张表,条件就是这些数据文件的格式要相同
 load data
 infile kkk.dat
 infile kkk2.dat
@@ -2574,18 +2574,18 @@ infile kkk3.dat
 truncate table bonus
 fields terminated by ","
 (ename , job ,sal )
-�ߣ�ͬһ�������ļ�Ҫ���벻ͬ�ı�
+七，同一个数据文件要导入不同的表
 bon         smith         cleak        3904
 bon         allen           saler         2891
 mgr         king            tech           2543
 mgr         smm     admd        3032
-Ҫ������������ݵ���b��m��
+要把这里面的数据导到b和m表
 load data
 infile kkk.dat
 discardfile ldr_case9.dsc
 truncate
    into table b
-    when tab='bon'                                    ����˴��жϹؼ����ж��,ֻ����and,������or
+    when tab='bon'                                    如果此处判断关键字有多个,只能用and,不能用or
 (tab filler position(1:3),
 ename position(5:9),
 job position(*+1:18),
@@ -2598,15 +2598,15 @@ ename position(5:9),
 job position(*+1:18),
 sal position(*+1)
 )
-��,�����ļ�ǰn�в�����
-sqlddr scott/scott control=ldr_case1.ctl skip=3   ��˼ǰ���в�����,�ӵ����й�ʼ
-sqlddr scott/scott control=ldr_case1.ctl skip=3 load=6 ǰ���в����룬�����������6��
-��,Ҫ���ص��������л��з�
-�ֹ�ָ���Ļ��з�,�����ļ��Ļ��з������Ǳ�׼�Ļ��б�־,�����û��Զ����һ����ʶ�ַ������ַ����,
+八,数据文件前n行不导入
+sqlddr scott/scott control=ldr_case1.ctl skip=3   意思前三行不导入,从第四行工始
+sqlddr scott/scott control=ldr_case1.ctl skip=3 load=6 前三行不导入，导入接下来的6行
+九,要加载的数据中有换行符
+手工指定的换行符,数据文件的换行符并不是标准的换行标志,而是用户自定义的一个标识字符或多个字符组成,
 10, smith,sales amnager,this is amith,\nhe is a sales manager.
 11, allen.w,tech manager,this is allen.w.\nhe is a tech manager.
 16, blake,hr manager,this is blake.\nhe is a hr manager.
-�����ļ���д��
+控制文件的写法
 load data
 infile ldr_case11_1.dat
 truncate into table manager
@@ -2614,16 +2614,16 @@ fields terminated by ","
 ( mgrno,mname,job,
 remark "replace(:remark,'\\n',chr(10))"
 )
-��������ļ��Ƕ����ַ���.
+如果数据文件是定长字符呢.
 smith   sales   manager   this is smith
 he is a sales manager
 allenw tech     manager this is allen w
 he is a tech manager.
 blake    hr         manager this is blake
 he is a hr manager.
-load data infile ldr_case11_2.dat "fix 68"     ���Ǽ����ļ�֮ǰ,��ͨ��fixֵ����ָ��ÿ�еĳ���,����ÿ��68���ַ��������з�����,
-                                        ����ָ�����Ⱦͻ���,�����м���û�л��з�����˽������ڶ����ַ����������ļ�,
-                                        ��Ϊֻ���ַ�������,���֪��Ӧ����infile��ָ��ʲôֵ
+load data infile ldr_case11_2.dat "fix 68"     就是加载文件之前,先通过fix值属性指定每行的长度,这里每行68个字符包括换行符在内,
+                                        到了指定长度就换行,不管中间有没有换行符，因此仅能用于定长字符串的数据文件,
+                                        因为只有字符串定长,你才知道应该在infile处指定什么值
 truncate into table manager
 (
 ename position(1:8),
@@ -2631,42 +2631,42 @@ job position(10:16),
 zhiwei position(*+1:22),
 remark position(*+1:65)
 )
-windows�л���ʵ�����ɶ����ַ����,�س��ӻ��� chr(13)+chr(10), linux/unix��ֻ��һ���ַ�chr(10)����
-char_string����ͨ�ַ�,����׼�Ŀɼ��ַ�,
-\n����ʾ����, \t ��ʾ���Ʊ���, \f ��ʾ��ҳ \v ��ʾ���Ʊ��� \r ��ʾ�س�
-windows����\r\n    linux/unix����\n�Ϳ�����
-��β�����б�ʶ��:
-�����ļ�
+windows中换行实际上由二个字符组成,回车加换行 chr(13)+chr(10), linux/unix下只需一个字符chr(10)即可
+char_string：普通字符,即标准的可见字符,
+\n，表示换行, \t 表示行制表符, \f 表示换页 \v 表示列制表符 \r 表示回车
+windows下用\r\n    linux/unix下用\n就可以了
+行尾部换行标识例:
+数据文件
 10,smith,sales manager,this is smith.
 he is a sales manager. |
 11,allen.w,tech manager,this is allen.w.
 he is a tech manager. |
-�����ļ�
+控制文件
 load data
 infile ldr_case1_4.dat "str ' | \r\n"
 truncate into table manager
 fields terminated by ','
 (mgrno,maname,job,remarek)
-ʮ,Ҫ������ֶ�(lob����)
-1�����ݱ����������ļ���
+十,要导入大字段(lob类型)
+1，数据保存在数据文件中
 load data
 infile ldr_case12_1.dat "str '|\r\n'"
 truncate into table manager
 fields terminated by "," optionally enclosed by '"',
 (mgrno,mname,job,remark char(10000))
-�ٶ�remark���д����ı����Ϳ�����ô����
-2�������ļ������ڶ������ļ���
+假定remark列有大量文本，就可以这么定义
+2，数据文件保存在独立的文件中
 SQL> create table lobtbl(
 2 fileowner varchar2(30),
 3 filename varchar2(200),
 4 filesize number,
 5 filedata clob,
 6 create_date date);
-�����ļ����� ldr_case12_2.dat
+数据文件如下 ldr_case12_2.dat
 2009-03-17 09:43 154   junsansi   f:\oracle\script\ldr_case11_1.ctl
 2009_03_17 09:44 189   junsansi   f:\oracle\script\ldr_case11_1.dat
 2009_03_17 09:45 2,639 junsansi   f:\oracle\script\ldr_case11_4.log
-�����ļ�����
+控制文件如下
 load date
 infile ldr__case12_2.dat
 truncate into table lobtbl
@@ -2676,26 +2676,26 @@ fileowner position(*+1:34),
 filename position(*+1) char(200) "substr(:FILENAME,INSTR(:FILENAME,'\\',-1)+1)",
 filedata lobfile(filename) terminated by eof)
 
-ʮһ,ĳЩ�ֶ��п�ֵ:
+十一,某些字段有空值:
 load data
 infile ldr_case13.dat
 truncate into table bonus
 fields terminated by "," trailing nullcols
 (ename,job,sal)
-ʮ��,�������ݵĵ���
+十二,大量数据的导入
 sqlldr scott/scott control=ldr_object.ctl errors=10 rows=640
-��ʾ10�г���������,ÿ�μ���640��.Ĭ����64��
-���640��̫��,��־��Ϣ��������ʾ,���ʱ���Ҫ�޸�bindsize����,Ĭ�Ͼ���256k,���ǽ����޸�Ϊ10m(
-1024X1024X10=10485760)ͬʱ��һ�ν�����ߵ�5000��.
-���������,
+表示10行出错就跳出,每次加载640行.默认是64行
+如果640行太大,日志信息里面有提示,这个时候就要修改bindsize参数,默认就是256k,我们将其修改为10m(
+1024X1024X10=10485760)同时这一次将行提高到5000行.
+这样会更快,
 sqlldr control=ldr_object.ctl errors=10 rows=5000 bindsize=10485760
-�������Ը���.
+但还可以更快.
 sqlldr scott/scott control=ldr_object.ctl direct=true;
-�������Ը���
-streamsize:ֱ��·������Ĭ�϶�ȡȫ����¼, ��˲���Ҫ����rows����,��ȡ�������ݴ�������뻺����,��
-streamsize����,�ò���Ϊ256k,����Ӵ�10mb
-date_cache: �ò���ָ��һ��ת�������ڸ�ʽ�Ļ�����,����Ϊ��λ,Ĭ��ֵ1000��,������1000��ת��������ڸ�ʽ,
-��������Ҫ����������������ڸ�ʽ,��˼Ӵ�ò�����5000���Խ�������ת�����������Ŀ���.
+但还可以更快
+streamsize:直接路径加载默认读取全部记录, 因此不需要设置rows参数,读取到的数据处理后存入缓存区,即
+streamsize参数,该参数为256k,这里加大到10mb
+date_cache: 该参数指定一个转换后日期格式的缓存区,以条为单位,默认值1000条,即保存1000条转换后的日期格式,
+由于我们要导入的数据中有日期格式,因此加大该参数到5000，以降低日期转换操作带来的开销.
 sqlldr scott/tiger control=ldr_object.ctl direct=true streamsize=10485760 date_cache=5000
 
 
@@ -2709,62 +2709,62 @@ insert into TABLE  PUB_TEST.T_CCH_DETAIL Fields TERMINATED BY ',' optionally enc
 
 D:\Users\dongkuifeng611>sqlldr devmgr@testt1iocrp log='D:\Users\dongkuifeng611\Desktop\20131230\aaa.log'
 D:\Users\dongkuifeng611>sqlldr devmgr@testt1iocrp control = D:\Users\dongkuifeng611\Desktop\20131230\t_cch_detail.ctl
-����:
+口令:
 
-oracle sqlldr�����ļ�ģ��
+oracle sqlldr控制文件模板
 
   1Sqlldr userid=lgone/tiger control=a.ctl
   2LOAD DATA
-  3INFILE 't.dat' // Ҫ������ļ�
-  4// INFILE 'tt.date' // �������ļ�
-  5// INFILE * // Ҫ��������ݾ���control�ļ��� �����BEGINDATA������ǵ��������, *��'t.dat'����ͬʱ����
+  3INFILE 't.dat' // 要导入的文件
+  4// INFILE 'tt.date' // 导入多个文件
+  5// INFILE * // 要导入的内容就在control文件里 下面的BEGINDATA后面就是导入的内容, *和't.dat'不能同时存在
   6
-  7INTO TABLE table_name // ָ��װ��ı�
-  8BADFILE 'c:bad.txt' // ָ�����ļ���ַ
+  7INTO TABLE table_name // 指定装入的表
+  8BADFILE 'c:bad.txt' // 指定坏文件地址
   9
- 10************* ������4��װ����ķ�ʽ
- 11APPEND // ԭ�ȵı������� �ͼ��ں���
- 12// INSERT // װ�ؿձ� ���ԭ�ȵı������� sqlloader��ֹͣ Ĭ��ֵ
- 13// REPLACE // ԭ�ȵı������� ԭ�ȵ����ݻ�ȫ��ɾ��
- 14// TRUNCATE // ָ�������ݺ�replace����ͬ ����truncate���ɾ���ִ�����
+ 10************* 以下是4种装入表的方式
+ 11APPEND // 原先的表有数据 就加在后面
+ 12// INSERT // 装载空表 如果原先的表有数据 sqlloader会停止 默认值
+ 13// REPLACE // 原先的表有数据 原先的数据会全部删除
+ 14// TRUNCATE // 指定的内容和replace的相同 会用truncate语句删除现存数据
  15
- 16************* ָ����TERMINATED�����ڱ��Ŀ�ͷ Ҳ���ڱ����ڲ��ֶβ���
+ 16************* 指定的TERMINATED可以在表的开头 也可在表的内部字段部分
  17FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"'
- 18// װ����������: 10,lg,"""lg""","lg,lg"
- 19// �ڱ��н��: 10 lg "lg" lg,lg
- 20// TERMINATED BY X '09' // ��ʮ�����Ƹ�ʽ '09' ��ʾ��
- 21// TERMINATED BY WRITESPACE // װ����������: 10 lg lg
+ 18// 装载这种数据: 10,lg,"""lg""","lg,lg"
+ 19// 在表中结果: 10 lg "lg" lg,lg
+ 20// TERMINATED BY X '09' // 以十六进制格式 '09' 表示的
+ 21// TERMINATED BY WRITESPACE // 装载这种数据: 10 lg lg
  22
- 23TRAILING NULLCOLS ************* �����ֶ�û�ж�Ӧ��ֵʱ����Ϊ��
+ 23TRAILING NULLCOLS ************* 表的字段没有对应的值时允许为空
  24
- 25************* �����Ǳ����ֶ�
+ 25************* 下面是表的字段
  26(
- 27col_1 , col_2 ,col_filler FILLER // FILLER �ؼ��� ���е���ֵ���ᱻװ��
- 28// ��: lg,lg,not ��� lg lg
+ 27col_1 , col_2 ,col_filler FILLER // FILLER 关键字 此列的数值不会被装载
+ 28// 如: lg,lg,not 结果 lg lg
  29)
- 30// ��û����FIELDS TERMINATED BY ',' ʱ
+ 30// 当没声明FIELDS TERMINATED BY ',' 时
  31// (
  32// col_1 [interger external] TERMINATED BY ',' ,
  33// col_2 [date "dd-mon-yyy"] TERMINATED BY ',' ,
  34// col_3 [char] TERMINATED BY ',' OPTIONALLY ENCLOSED BY 'lg'
  35// )
- 36// ��û����FIELDS TERMINATED BY ','��λ�ø����ֶ�װ������
+ 36// 当没声明FIELDS TERMINATED BY ','用位置告诉字段装载数据
  37// (
  38// col_1 position(1:2),
  39// col_2 position(3:10),
- 40// col_3 position(*:16), // ����ֶεĿ�ʼλ����ǰһ�ֶεĽ���λ��
+ 40// col_3 position(*:16), // 这个字段的开始位置在前一字段的结束位置
  41// col_4 position(1:16),
- 42// col_5 position(3:10) char(8) // ָ���ֶε�����
+ 42// col_5 position(3:10) char(8) // 指定字段的类型
  43// )
  44
- 45BEGINDATA // ��Ӧ��ʼ�� INFILE * Ҫ��������ݾ���control�ļ���
+ 45BEGINDATA // 对应开始的 INFILE * 要导入的内容就在control文件里
  4610,Sql,what
  4720,lg,show
  48
  49=====================================================================================
- 50/**///////////// ע��begindata�����ֵǰ�治���пո�
+ 50/**///////////// 注意begindata后的数值前面不能有空格
  51
- 521 ***** ��ͨװ��
+ 521 ***** 普通装载
  53LOAD DATA
  54INFILE *
  55INTO TABLE DEPT
@@ -2779,10 +2779,10 @@ oracle sqlldr�����ļ�ģ��
  6420,Accounting,"Virginia,USA"
  6530,Consulting,Virginia
  6640,Finance,Virginia
- 6750,"Finance","",Virginia // loc �н�Ϊ��
- 6860,"Finance",,Virginia // loc �н�Ϊ��
+ 6750,"Finance","",Virginia // loc 列将为空
+ 6860,"Finance",,Virginia // loc 列将为空
  69
- 702 ***** FIELDS TERMINATED BY WHITESPACE �� FIELDS TERMINATED BY x'09' �����
+ 702 ***** FIELDS TERMINATED BY WHITESPACE 和 FIELDS TERMINATED BY x'09' 的情况
  71LOAD DATA
  72INFILE *
  73INTO TABLE DEPT
@@ -2796,45 +2796,45 @@ oracle sqlldr�����ļ�ģ��
  81BEGINDATA
  8210 Sales Virginia
  83
- 843 ***** ָ����װ����һ��
+ 843 ***** 指定不装载那一列
  85LOAD DATA
  86INFILE *
  87INTO TABLE DEPT
  88REPLACE
  89FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"'
  90( DEPTNO,
- 91FILLER_1 FILLER, // ����� "Something Not To Be Loaded" �����ᱻװ��
+ 91FILLER_1 FILLER, // 下面的 "Something Not To Be Loaded" 将不会被装载
  92DNAME,
  93LOC
  94)
  95BEGINDATA
  9620,Something Not To Be Loaded,Accounting,"Virginia,USA"
  97
- 984 ***** position������
+ 984 ***** position的列子
  99LOAD DATA
 100INFILE *
 101INTO TABLE DEPT
 102REPLACE
 103( DEPTNO position(1:2),
-104DNAME position(*:16), // ����ֶεĿ�ʼλ����ǰһ�ֶεĽ���λ��
+104DNAME position(*:16), // 这个字段的开始位置在前一字段的结束位置
 105LOC position(*:29),
 106ENTIRE_LINE position(1:29)
 107)
 108BEGINDATA
 10910Accounting Virginia,USA
 110
-1115 ***** ʹ�ú��� ���ڵ�һ�ֱ��� TRAILING NULLCOLS��ʹ��
+1115 ***** 使用函数 日期的一种表达 TRAILING NULLCOLS的使用
 112LOAD DATA
 113INFILE *
 114INTO TABLE DEPT
 115REPLACE
 116FIELDS TERMINATED BY ','
-117TRAILING NULLCOLS // ��ʵ�����ENTIRE_LINE��BEGINDATA�������������û��ֱ�Ӷ�Ӧ
-118// ���е�ֵ�� �����һ�и�Ϊ 10,Sales,Virginia,1/5/2000,, �Ͳ���TRAILING NULLCOLS��
+117TRAILING NULLCOLS // 其实下面的ENTIRE_LINE在BEGINDATA后面的数据中是没有直接对应
+118// 的列的值的 如果第一行改为 10,Sales,Virginia,1/5/2000,, 就不用TRAILING NULLCOLS了
 119(DEPTNO,
-120DNAME "upper(:dname)", // ʹ�ú���
+120DNAME "upper(:dname)", // 使用函数
 121LOC "upper(:loc)",
-122LAST_UPDATED date 'dd/mm/yyyy', // ���ڵ�һ�ֱ��﷽ʽ ����'dd-mon-yyyy' ��
+122LAST_UPDATED date 'dd/mm/yyyy', // 日期的一种表达方式 还有'dd-mon-yyyy' 等
 123ENTIRE_LINE ":deptno||:dname||:loc||:last_updated"
 124)
 125BEGINDATA
@@ -2843,7 +2843,7 @@ oracle sqlldr�����ļ�ģ��
 12830,Consulting,Virginia,5/1/2000
 12940,Finance,Virginia,15/3/2001
 130
-1316 ***** ʹ���Զ���ĺ��� // �����ʱ������
+1316 ***** 使用自定义的函数 // 解决的时间问题
 132create or replace
 133my_to_date( p_string in varchar2 ) return date
 134as
@@ -2884,7 +2884,7 @@ oracle sqlldr�����ļ�ģ��
 169(DEPTNO,
 170DNAME "upper(:dname)",
 171LOC "upper(:loc)",
-172LAST_UPDATED "my_to_date( :last_updated )" // ʹ���Զ���ĺ���
+172LAST_UPDATED "my_to_date( :last_updated )" // 使用自定义的函数
 173)
 174BEGINDATA
 17510,Sales,Virginia,01-april-2001
@@ -2894,10 +2894,10 @@ oracle sqlldr�����ļ�ģ��
 17950,Finance,Virginia,02-apr-2001
 18060,Finance,Virginia,Not a date
 181
-1827 ***** �ϲ����м�¼Ϊһ�м�¼
+1827 ***** 合并多行记录为一行记录
 183LOAD DATA
 184INFILE *
-185concatenate 3 // ͨ���ؼ���concatenate �Ѽ��еļ�¼����һ�м�¼
+185concatenate 3 // 通过关键字concatenate 把几行的记录看成一行记录
 186INTO TABLE DEPT
 187replace
 188FIELDS TERMINATED BY ','
@@ -2907,18 +2907,18 @@ oracle sqlldr�����ļ�ģ��
 192LAST_UPDATED date 'dd/mm/yyyy'
 193)
 194BEGINDATA
-19510,Sales, // ��ʵ��3�п���һ�� 10,Sales,Virginia,1/5/2000
+19510,Sales, // 其实这3行看成一行 10,Sales,Virginia,1/5/2000
 196Virginia,
 1971/5/2000
-198// �������� continueif list="," Ҳ����
-199����sqlldr��ÿ�е�ĩβ�Ҷ��� �ҵ����žͰ���һ�и��ӵ���һ��
+198// 这列子用 continueif list="," 也可以
+199告诉sqlldr在每行的末尾找逗号 找到逗号就把下一行附加到上一行
 200
 201LOAD DATA
 202INFILE *
-203continueif this(1:1) = '-' // ��ÿ�еĿ�ʼ�Ƿ��������ַ� - �оͰ���һ������Ϊһ��
-204// �� -10,Sales,Virginia,
-205// 1/5/2000 ����һ�� 10,Sales,Virginia,1/5/2000
-206// ����1:1 ��ʾ�ӵ�һ�п�ʼ ���ڵ�һ�н��� ����continueif next ��continueif list������
+203continueif this(1:1) = '-' // 找每行的开始是否有连接字符 - 有就把下一行连接为一行
+204// 如 -10,Sales,Virginia,
+205// 1/5/2000 就是一行 10,Sales,Virginia,1/5/2000
+206// 其中1:1 表示从第一行开始 并在第一行结束 还有continueif next 但continueif list最理想
 207INTO TABLE DEPT
 208replace
 209FIELDS TERMINATED BY ','
@@ -2927,27 +2927,27 @@ oracle sqlldr�����ļ�ģ��
 212LOC "upper(:loc)",
 213LAST_UPDATED date 'dd/mm/yyyy'
 214)
-215BEGINDATA // ���Ǻ����������������ʹ��
+215BEGINDATA // 但是好象不能象右面的那样使用
 216-10,Sales,Virginia, -10,Sales,Virginia,
 2171/5/2000 1/5/2000
 218-40, 40,Finance,Virginia,13/04/2001
 219Finance,Virginia,13/04/2001
 220
-2218 ***** ����ÿ�е��к�
+2218 ***** 载入每行的行号
 222
 223load data
 224infile *
 225into table t
 226replace
-227( seqno RECNUM //����ÿ�е��к�
+227( seqno RECNUM //载入每行的行号
 228text Position(1:1024))
 229BEGINDATA
-230fsdfasj //�Զ�����һ�кŸ����� ��t ��seqno�ֶ� ����Ϊ 1
-231fasdjfasdfl // ����Ϊ 2
+230fsdfasj //自动分配一行号给载入 表t 的seqno字段 此行为 1
+231fasdjfasdfl // 此行为 2
 232
-2339 ***** �����л��з�������
-234ע��: unix �� windows ��ͬ & /n
-235< 1 > ʹ��һ���ǻ��з����ַ�
+2339 ***** 载入有换行符的数据
+234注意: unix 和 windows 不同 & /n
+235< 1 > 使用一个非换行符的字符
 236LOAD DATA
 237INFILE *
 238INTO TABLE DEPT
@@ -2958,7 +2958,7 @@ oracle sqlldr�����ļ�ģ��
 243DNAME "upper(:dname)",
 244LOC "upper(:loc)",
 245LAST_UPDATED "my_to_date( :last_updated )",
-246COMMENTS "replace(:comments,'n',chr(10))" // replace ��ʹ�ð���ת�����з�
+246COMMENTS "replace(:comments,'n',chr(10))" // replace 的使用帮助转换换行符
 247)
 248BEGINDATA
 24910,Sales,Virginia,01-april-2001,This is the SalesnOffice in Virginia
@@ -2966,7 +2966,7 @@ oracle sqlldr�����ļ�ģ��
 25130,Consulting,Virginia,14/04/2001 12:02:02,This is the ConsultingnOffice in Virginia
 25240,Finance,Virginia,987268297,This is the FinancenOffice in Virginia
 253
-254< 2 > ʹ��fix����
+254< 2 > 使用fix属性
 255LOAD DATA
 256INFILE demo17.dat "fix 101"
 257INTO TABLE DEPT
@@ -2989,7 +2989,7 @@ oracle sqlldr�����ļ�ģ��
 27440,Finance,Virginia,987268297,This is the Finance
 275Office in Virginia
 276
-277// ����װ�ػ�ѻ��з�װ�����ݿ� ����ķ����Ͳ��� ��Ҫ�����ݵĸ�ʽ��ͬ
+277// 这样装载会把换行符装入数据库 下面的方法就不会 但要求数据的格式不同
 278
 279LOAD DATA
 280INFILE demo18.dat "fix 101"
@@ -3013,10 +3013,10 @@ oracle sqlldr�����ļ�ģ��
 29840,Finance,Virginia,987268297,"This is the Finance
 299Office in Virginia"
 300
-301< 3 > ʹ��var����
+301< 3 > 使用var属性
 302LOAD DATA
 303INFILE demo19.dat "var 3"
-304// 3 ����ÿ����¼��ǰ3���ֽڱ�ʾ��¼�ĳ��� ���һ����¼�� 071 ��ʾ�˼�¼�� 71 ���ֽ�
+304// 3 告诉每个记录的前3个字节表示记录的长度 如第一个记录的 071 表示此记录有 71 个字节
 305INTO TABLE DEPT
 306REPLACE
 307FIELDS TERMINATED BY ','
@@ -3037,12 +3037,12 @@ oracle sqlldr�����ļ�ģ��
 32207140,Finance,Virginia,987268297,This is the Finance
 323Office in Virginia
 324
-325< 4 > ʹ��str����
-326// ������һ�� �ɶ���һ���µ��н�β�� win �س����� : chr(13)||chr(10)
+325< 4 > 使用str属性
+326// 最灵活的一中 可定义一个新的行结尾符 win 回车换行 : chr(13)||chr(10)
 327
-328�����м�¼���� a|rn ������
+328此列中记录是以 a|rn 结束的
 329select utl_raw.cast_to_raw('|'||chr(13)||chr(10)) from dual;
-330��� 7C0D0A
+330结果 7C0D0A
 331
 332LOAD DATA
 333INFILE demo20.dat "str X'7C0D0A'"
@@ -3067,13 +3067,13 @@ oracle sqlldr�����ļ�ģ��
 352Office in Virginia|
 353
 354==============================================================================
-355������������ �� nullif �Ӿ�
+355象这样的数据 用 nullif 子句
 356
 35710-jan-200002350Flipper seemed unusually hungry today.
 35810510-jan-200009945Spread over three meals.
 359
-360id position(1:3) nullif id=blanks // ���������blanks ���߱�ı���ʽ
-361// ��������һ������ ��һ�е� 1 �����ݿ��н���Ϊ null
+360id position(1:3) nullif id=blanks // 这里可以是blanks 或者别的表达式
+361// 下面是另一个列子 第一行的 1 在数据库中将成为 null
 362LOAD DATA
 363INFILE *
 364INTO TABLE T
@@ -3086,22 +3086,22 @@ oracle sqlldr�����ļ�ģ��
 37120lg
 372------------------------------------------------------------
 
-t1fls���ݿ�ִ��pkg��dml�ű�ʱ�ᱨ���´��󣬵��ű�ʵ���Ѿ�ִ�гɹ���
+t1fls数据库执行pkg或dml脚本时会报如下错误，但脚本实际已经执行成功：
 Error accessing PRODUCT_USER_PROFILE
 Warning:Product user profile information not loaded!
 You may need to run PUPBLD.SQL as SYSTEM
 
- ��system�û���ȥȻ������$oracle_home/sqlplus/admin/pupbld.sql�Ϳ�����
+ 以system用户进去然后运行$oracle_home/sqlplus/admin/pupbld.sql就可以了
 
 
- �鿴package body��Ȩ��
+ 查看package body的权限
  grant create any procedure to username;
  grant alter any procedure to username;
 
 phenomenon
 startup
-ORA-00444: background process ��MMAN�� failed while starting
-ORA-07446: sdnfy: bad value �� for parameter .
+ORA-00444: background process “MMAN” failed while starting
+ORA-07446: sdnfy: bad value ” for parameter .
 Problem
 The path to bdump,adump or udump does not exist. Oracle itself does not create any path if a path does not exist. So, you have to change the value of user_dump_dest in the initialize parameter.
 Solution
@@ -3110,8 +3110,8 @@ If you use pfile to start your database then edit the pfile with any editor (for
 
 
 connect by
-[��1]
-����һ�����ű���������������ֶΣ��ֱ��Ӧ����ID���������ƣ��Լ��ϼ�����ID
+[例1]
+创建一个部门表，这个表有三个字段，分别对应部门ID，部门名称，以及上级部门ID
 
  
 1
@@ -3129,28 +3129,28 @@ create table DEP
   UPPERDEPID number(10)
 )
 ;
-��ʼ��һЩ����
+初始化一些数据
 
 
-23 SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (0, '�ܾ���', null);
+23 SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (0, '总经办', null);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (1, '������', 0);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (1, '开发部', 0);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (2, '���Բ�', 0);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (2, '测试部', 0);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (3, 'Sever������', 1);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (3, 'Sever开发部', 1);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (4, 'Client������', 1);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (4, 'Client开发部', 1);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (5, 'TA���Բ�', 2);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (5, 'TA测试部', 2);
 1 row inserted
 
-SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (6, '��Ŀ���Բ�', 2);
+SQL> INSERT INTO DEP(DEPID, DEPNAME, UPPERDEPID) VALUES (6, '项目测试部', 2);
 1 row inserted
 
 SQL> commit;
@@ -3169,7 +3169,7 @@ Commit complete
           6 Porject QA                                                                                 2
 
 7 rows selected
-������Ҫ���ݡ�CONNECT BY����ʵ����״��ѯ���
+现在我要根据“CONNECT BY”来实现树状查询结果
 
 
 20 SQL> SELECT RPAD( ' ', 2*(LEVEL-1), '-' ) || DEPNAME "DEPNAME",
@@ -3192,14 +3192,14 @@ General Deparment              General Deparment            0          1 /Genera
  ---Porject QA                 General Deparment            1          3 /General Deparment/QA/Porject QA
 
 7 rows selected
-˵����
-1. CONNECT_BY_ROOT ���ص�ǰ�ڵ����˽ڵ�
-2. CONNECT_BY_ISLEAF �ж��Ƿ�ΪҶ�ӽڵ㣬�������ڵ��������ӽڵ㣬��ΪҶ�ӽڵ�
-3. LEVEL α�б�ʾ�ڵ����
-4. SYS_CONNECT_BY_PATH������ʾ��ϸ·�������á�/���ָ�
+说明：
+1. CONNECT_BY_ROOT 返回当前节点的最顶端节点
+2. CONNECT_BY_ISLEAF 判断是否为叶子节点，如果这个节点下面有子节点，则不为叶子节点
+3. LEVEL 伪列表示节点深度
+4. SYS_CONNECT_BY_PATH函数显示详细路径，并用“/”分隔
 
-[��2]
-ͨ��CONNECT BY��������
+[例2]
+通过CONNECT BY生成序列
 
 
 16 SQL> SELECT ROWNUM FROM DUAL CONNECT BY ROWNUM <= 10;
@@ -3218,17 +3218,17 @@ General Deparment              General Deparment            0          1 /Genera
         10
 
 10 rows selected
-[��3]
-ͨ��CONNECT BY����ʮ������ת��Ϊʮ����
+[例3]
+通过CONNECT BY用于十六进度转换为十进制
 
 
 27 CREATE OR REPLACE FUNCTION f_hex_to_dec(p_str IN VARCHAR2) RETURN VARCHAR2 IS
     ----------------------------------------------------------------------------------------------------------------------
-    -- ��������: f_hex_to_dec
-    -- ��������: ʮ������ת��ʮ����
-    -- �������: p_str ʮ�������ַ���
-    -- ���ؽ��: ʮ�����ַ���
-    -- ��������: SELECT f_hex_to_dec('78A') FROM dual;
+    -- 对象名称: f_hex_to_dec
+    -- 对象描述: 十六进制转换十进制
+    -- 输入参数: p_str 十六进制字符串
+    -- 返回结果: 十进制字符串
+    -- 测试用例: SELECT f_hex_to_dec('78A') FROM dual;
     ----------------------------------------------------------------------------------------------------------------------
     v_return  VARCHAR2(4000);
   BEGIN
@@ -3249,49 +3249,49 @@ General Deparment              General Deparment            0          1 /Genera
     WHEN OTHERS THEN
       RETURN NULL;
   END;
-˵����
+说明：
 
-1. CONNECT BY rownum <= length(p_str))��������ַ��������������
+1. CONNECT BY rownum <= length(p_str))对输入的字符串进行逐个遍历
 
-2. ͨ��CASE��䣬������ʮ�������е�A-F��Ӧ��10����ֵ
+2. 通过CASE语句，来解析十六进制中的A-F对应的10进制值
 
 
-1.��������Ự�Ĺ�ϵ
-    ���ѽ�����������,�����Ự.
-    1��process��Ӧ1�����߶���1����session.
-    Oracle��sessions��processes�Ĺ�ϵ��:
+1.连接数与会话的关系
+    在已建立的连接上,建立会话.
+    1个process对应1个或者对于1个的session.
+    Oracle的sessions和processes的关系是:
         sessions=1.1*processes + 5
-2.�鿴process���ֵ
-    ��sqlplus��
+2.查看process最大值
+    在sqlplus中
         SQL> show parameter process;
-    �������е�name��ֵΪ processes��һ����,value��ֵ����oracle���ݿ�֧�ֵ����������.
-    ������ݿ������ӱ�ռ����,�µ����ӹ���ʱ,���ڿͻ��˲���:"ORA-12519, TNS:no appropriate service handler found "�ı�����Ϣ.
-3.�޸�������������ֵ
+    输出结果中的name的值为 processes这一行中,value的值就是oracle数据库支持的最大连接数.
+    如果数据库上连接被占用完,新的连接过来时,会在客户端产生:"ORA-12519, TNS:no appropriate service handler found "的报错信息.
+3.修改连接数的上限值
     SQL> alter system set processes=400 scope = spfile;
-    ����ǰ�process�����������Ϊ400.������ɺ����������ݿ������.
+    这个是把process的最大数设置为400.设置完成后重启下数据库就行了.
 
 
 z4ch2021:t0bishm > wget -c http://10.11.100.193/silent_install/devstg/all.tar
 sh: wget:  not found.
 
-�������Ϊ���������wget Ĭ��û�а�װ
-ֱ�ӵ�   ������10.11.100.193 �ϰ�Ŀ¼/paic/dba/dbsoft/home/dbsoft/silent_install/devstg �µ�all.tar �������������$HOME/ksjf/$ORACLE_SID/Ŀ¼�¼��ɡ�
-   �û������룺opdba/Paic1234(ע��P�Ǵ�д�ģ�
-лл~~
+这个是因为这个机器上wget 默认没有安装
+直接到   主机：10.11.100.193 上把目录/paic/dba/dbsoft/home/dbsoft/silent_install/devstg 下的all.tar 拷贝到你机器上$HOME/ksjf/$ORACLE_SID/目录下即可。
+   用户名密码：opdba/Paic1234(注：P是大写的）
+谢谢~~
 
 
 
 
 
-��linux��unix �У�һ��ʹ��tar �����ѹ tarѹ��������ô��ν�ѹ��ָ��Ŀ¼�أ�
+在linux或unix 中，一般使用tar 命令解压 tar压缩包，那么如何解压到指定目录呢？
 
-�����ṩ���ַ�ʽ��
+以下提供两种方式：
 
-��ʽһ��ʹ��shell ����
+方式一：使用shell 函数
 
-�ű����� tar_target.sh
+脚本名： tar_target.sh
 
-�ű����ݣ�
+脚本内容：
 
 #!/bin/sh
 this_dir=`pwd`
@@ -3304,50 +3304,50 @@ tar xf "$1"
 cd $this_dir
 
 
-�ýű�������������tarѹ����·��    Ŀ��·��
+该脚本有两个参数：tar压缩包路径    目标路径
 
-����Ҫ��/home/whuang/tar_study/test.tar ��ѹ�� /tmp/whuang/ccc�У�
+例如要把/home/whuang/tar_study/test.tar 解压到 /tmp/whuang/ccc中：
 
 sh tar_target.sh /home/whuang/tar_study/test.tar  /tmp/whuang/ccc
 
 
-��ʽ����
+方式二：
 
 tar -xjvf test.tar.bz2 -C ./test
 
--C ��ʾָ����ѹ��ָ��Ŀ¼��
+-C 表示指定解压到指定目录，
 
-ע�⣺��Ŀ¼�����Ѿ����ڡ�
+注意：该目录必须已经存在。
 
 
-Ȼ��һЩ����������
+然后一些其他的设置
 set tabstop=4
 set softtabstop=4
 set shiftwidth=4
 set autoindent
 set cindent
 set cinoptions={0,1s,t0,n-2,p2s,(03s,=.5s,>1s,=1s,:1s
-set nu   //�Զ���ʾ�к�
-set hlsearch  //�������������ʾ
+set nu   //自动显示行号
+set hlsearch  //搜索结果高亮显示
 
 
-----��ѯ�ļ��š�����Ŷ�Ӧ�Ķ����ļ�
+----查询文件号、对象号对应的对象、文件
 select owner, segment_name, segment_type, tablespace_name from dba_extents
       where file_id = &file_id
         and &block_id between block_id and block_id + blocks - 1;
 
-��������������ѯ�����ļ���ǰ��״̬��
-��system���ռ������ļ���statusΪ0��8192�������ļ���statusȫΪ0ʱ�����������ļ���һ�µģ����Դ򿪡�
-seq#�ǵ�ǰscn���ڵ���־���кš�
+你可以用这个语句查询数据文件当前的状态。
+当system表空间数据文件的status为0或8192，其他文件的status全为0时这个库的数据文件是一致的，可以打开。
+seq#是当前scn所在的日志序列号。
 
 set linesize 300 pagesize 999 numformat 999999999999999999999999999
 select hxfil file#,fhsta status,fhscn scn ,fhrba_seq seq# from x$kcvfh;
 
-�����ָ���ָ����scn��
-��ѡ����197743����־������յ�scn�����scn��Ҫ���������v$archived_log��顣
+让它恢复到指定的scn。
+我选的是197743号日志的里的终点scn，这个scn需要到生产库的v$archived_log里查。
 select next_change#,al.SEQUENCE# from v$archived_log al where al.SEQUENCE#>=197743
 
-����������ȽϺã����scn��������197743����־��ͽ����ˣ�һ��scn�ڵ���־�ǿ��ܴ����ڶ����־�ڵģ�����������Ļ�����Ҫ�����������������ļ�����־������ɻָ���
+这次是运气比较好，这个scn的内容在197743号日志里就结束了，一个scn内的日志是可能存在于多个日志内的，如果是这样的话还需要从生产拷贝接下来的几个日志才能完成恢复。
 
 
 RMAN> recover database until scn 9164574936046;
@@ -3365,11 +3365,11 @@ Finished recover at 2013-12-10 19:56:47
 RMAN>
 
 
-���и����⣬�ղ���Щ��һ�µ������ļ�����ô��������ָ���ѽ��  �ָ����ĸ��㣿����
+还有个问题，刚才那些不一致的数据文件是怎么查出来并恢复的呀？  恢复到哪个点？。。
 
 
 
-�𻨱��䡣�����Ժ�ע���顣��
+桂花宝典。。。以后注意检查。。
 set wrap off
 col name format a120
 col checkpoint_change# format 999999999999999999999999999999
@@ -3378,8 +3378,8 @@ select distinct checkpoint_change# from v$datafile;--datafile scn
 select distinct checkpoint_change# from v$datafile_header;--start scn
 select distinct last_change# from v$datafile;--end scn
 
---���system scn��datafile scn��start scn���ȣ�����Ҫ���ʻָ�����DG��һ�㶼��system scn��datafile scn��start scnС
---���end scnΪ�գ�����Ҫʵ���ָ�
+--如果system scn和datafile scn、start scn不等，则需要介质恢复。但DG库一般都是system scn比datafile scn、start scn小
+--如果end scn为空，则需要实例恢复
 
 alter tablespace PAYDATA add datafile '/paic/t3pay/data01/oradata/paydata03.dbf'  size 100m  AUTOEXTEND ON NEXT 2M MAXSIZE 20000M;
 
@@ -3393,18 +3393,18 @@ ORA-00604: error occurred at recursive SQL level 1
 ORA-25153: Temporary Tablespace is Empty
 ORA-06512: at "DBMGR.PRC_DDL_RESTRICTION", line 10
 
-��   Oracle�����ض��塪����������
+※   Oracle在线重定义—分区表改造
 
-Ŀ�꣺��Ҫ��һ����ͨ������תΪ���·���������߲�ѯЧ��
+目标：需要将一个普通表在线转为按月分区表以提高查询效率
 
-һ���������Ա�
+一、建立测试表
 SQL> CREATE TABLE T(ID NUMBER ,TIME DATE);
 Table created.
 
 SQL> INSERT INTO T SELECT ROWNUM,CREATED FROM ALL_OBJECTS;
 17979 rows created.
 
-�������Ա��Ƿ���������ض���
+二、测试表是否可以在线重定义
 SQL> EXEC DBMS_REDEFINITION.CAN_REDEF_TABLE('test','T', DBMS_REDEFINITION.CONS_USE_PK);
 BEGIN DBMS_REDEFINITION.CAN_REDEF_TABLE('test','T', DBMS_REDEFINITION.CONS_USE_PK); END;
                                                     *
@@ -3413,14 +3413,14 @@ ORA-06550: line 1, column 53:
 PLS-00201: identifier 'DBMS_REDEFINITION' must be declared
 ORA-06550: line 1, column 7:
 PL/SQL: Statement ignored
-����ԭ����û�и��衮DBMS_REDEFINITION' ��ִ��Ȩ�ޡ�����İ취�ǣ�
-dba�û�����Ȩ��
+出错原因是没有赋予‘DBMS_REDEFINITION' 的执行权限。解决的办法是：
+dba用户授予权限
 SQL> GRANT ALL ON SYS.DBMS_REDEFINITION TO TEST;
 Grant succeeded.
 
 SQL>  GRANT CREATE ANY TABLE, ALTER ANY TABLE, DROP ANY TABLE, LOCK ANY TABLE, SELECT ANY TABLE TO TEST;
 Grant succeeded.
-�ص�test�û�������֤
+回到test用户继续验证
 SQL> EXEC DBMS_REDEFINITION.CAN_REDEF_TABLE('test', 'T', DBMS_REDEFINITION.CONS_USE_PK);
 BEGIN DBMS_REDEFINITION.CAN_REDEF_TABLE('test', 'T', DBMS_REDEFINITION.CONS_USE_PK); END;
 
@@ -3429,14 +3429,14 @@ ORA-12089: cannot online redefine table "test"."T" with no primary key
 ORA-06512: at "SYS.DBMS_REDEFINITION", line 137
 ORA-06512: at "SYS.DBMS_REDEFINITION", line 1479
 ORA-06512: at line 1
-���û�ж�����������ʾ���ϴ�����Ϣ
-����������
+如果没有定义主键会提示以上错误信息
+建立主键：
 SQL> alter table t add constraint pk_t primary key(id);
 Table altered.
-�ٴ���֤�ɹ�
+再次验证成功
 SQL> EXEC DBMS_REDEFINITION.CAN_REDEF_TABLE('test','T',DBMS_REDEFINITION.CONS_USE_PK);
 PL/SQL procedure successfully completed.
-���������м��������
+三、建立中间表及分区
 SQL> select to_char(min(time),'YYYY-MM-DD HH24:MI:SS') from t;
 TO_CHAR(MIN(TIME),'
 -------------------
@@ -3459,44 +3459,44 @@ SQL> CREATE TABLE T_NEW (ID NUMBER PRIMARY KEY, TIME DATE) PARTITION BY RANGE (T
 10      PARTITION T_2011 VALUES LESS THAN (TO_DATE('2012-1-1', 'YYYY-MM-DD')),
 11      PARTITION T_2012 VALUES LESS THAN (TO_DATE('2013-1-1', 'YYYY-MM-DD')),
 12      PARTITION T_2013 VALUES LESS THAN (TO_DATE('2014-1-1', 'YYYY-MM-DD')));
-�ġ��������¶������
+四、在线重新定义操作
 SQL> exec dbms_redefinition.start_redef_table('TEST','T','T_NEW');
 PL/SQL procedure successfully completed.
-�塢ִ���ض����ķ�������ͬ��
+五、执行重定义后的分区数据同步
 SQL>  exec dbms_redefinition.sync_interim_table('TEST','T','T_NEW');
 PL/SQL procedure successfully completed.
-������������ض������
+六、完成在线重定义操作
 SQL>  EXEC DBMS_REDEFINITION.FINISH_REDEF_TABLE('TEST','T','T_NEW');
 PL/SQL procedure successfully completed.
-ע�����ִ�������ض���Ĺ���������ˣ�������ִ��dbms_redefinition.start_redef_table֮��ִ��dbms_redefinition.finish_redef_table֮ǰ��ʱ����ִ�У�DBMS_REDEFINITION.abort_redef_table('test', 't', 't_new')�Է���ִ�������ض���
+注：如果执行在线重定义的过程中需回退，可以在执行dbms_redefinition.start_redef_table之后到执行dbms_redefinition.finish_redef_table之前的时间里执行：DBMS_REDEFINITION.abort_redef_table('test', 't', 't_new')以放弃执行在线重定义
 
 
 
-���Ľ�������ʹ��Oracle��ʱ���Ĺ�������Ҫע������������Щ�ص������֤��
-  ����ʱ����֧���ﻯ��ͼ
-  �ڿ�������ʱ���ϴ�������
-  �ۿ��Ի�����ʱ��������ͼ
-  ����ʱ���ṹ�ɱ������������ݲ����Ա�����
-  ����ʱ��ͨ���Ǵ������û�����ʱ���ռ��еģ���ͬ�û��������Լ��Ķ�������ʱ���ռ�
-  �޲�ͬ��session�����Ի�����ʶԷ�����ʱ������
-  ����ʱ�����ݽ�������DML��Data Manipulation Language����
+此文将给出在使用Oracle临时表的过程中需要注意的事项，并对这些特点进行验证。
+  ①临时表不支持物化视图
+  ②可以在临时表上创建索引
+  ③可以基于临时表创建视图
+  ④临时表结构可被导出，但内容不可以被导出
+  ⑤临时表通常是创建在用户的临时表空间中的，不同用户可以有自己的独立的临时表空间
+  ⑥不同的session不可以互相访问对方的临时表数据
+  ⑦临时表数据将不会上DML（Data Manipulation Language）锁
 
 
-��ʱ��������ͨ��һ�����нṹ�����Ƕ����ݵĹ����ϲ�һ������ʱ���洢�����Ự���м���������ʱ���б��������ֻ�Ե�ǰ �Ự�ɼ������лỰ�������������Ự�����ݣ���ʹ�����Ự�ύ�ˣ�Ҳ����������ʱ�������ڲ�����Ϊ����Ϊ���Ƕ��ڵ�ǰ�Ự���Ƕ����ġ�
+临时表：像普通表一样，有结构，但是对数据的管理上不一样，临时表存储事务或会话的中间结果集，临时表中保存的数据只对当前 会话可见，所有会话都看不到其他会话的数据，即使其他会话提交了，也看不到。临时表不存在并发行为，因为他们对于当前会话都是独立的。
 
-������ʱ��ʱ��Oracleֻ�����˱��Ľṹ���������ֵ��ж��壩����û�г�ʼ���ڴ�ռ䣬��ĳһ�Ựʹ����ʱ��ʱ��ORALCE��ӵ�ǰ�û��� ��ʱ���ռ����һ���ڴ�ռ䡣Ҳ����˵ֻ������ʱ���в�������ʱ���Ż����ʱ������洢�ռ䡣
+创建临时表时，Oracle只创建了表的结构（在数据字典中定义），并没有初始化内存空间，当某一会话使用临时表时，ORALCE会从当前用户的 临时表空间分配一块内存空间。也就是说只有向临时表中插入数据时，才会给临时表分配存储空间。
 
-��ʱ����������ʱ���ͻỰ����ʱ����
-������ʱ��ֻ�Ե�ǰ������Ч��ͨ����䣺ON COMMIT DELETE ROWS ָ����
-�Ự����ʱ���Ե�ǰ�Ự��Ч��ͨ����䣺ON COMMIT PRESERVE ROWS���ָ����
+临时表分事务级临时表和会话级临时表。
+事务级临时表只对当前事务有效，通过语句：ON COMMIT DELETE ROWS 指定。
+会话级临时表对当前会话有效，通过语句：ON COMMIT PRESERVE ROWS语句指定。
 
-�÷���������SCOTTģʽ�£���
+用法举例（在SCOTT模式下）：
 CREATE GLOBAL TEMPORARY TABLE session_temp_tab ON COMMIT PRESERVE ROWS AS SELECT * FROM emp WHERE 1=2;
- ON COMMIT PRESERVE ROWS���ָ������������ʱ���ǻỰ����ʱ���������ǶϿ����ӻ��ֶ�ִ��DELETE��TRUNCATE֮ǰ����ʱ���е�����һֱ��
- �ڣ�����ֻ�е�ǰ�Ự���Կ����������Ự��������
+ ON COMMIT PRESERVE ROWS语句指定所创建的临时表是会话级临时表，当我们断开连接或手动执行DELETE或TRUNCATE之前，临时表中的数据一直存
+ 在，并且只有当前会话可以看到，其他会话看不到。
 
  CREATE GLOBAL TEMPORARY TABLE transaction_temp_tab ON COMMIT DELETE ROWS AS SELECT * FROM emp WHERE 1=2;
- ON COMMIT DELETE ROWS���ָ������������ʱ����������ʱ������COMMIT��ROLLBACK֮ǰ����Щ����һֱ���ڣ��������ύ֮�󣬱��������Զ������
+ ON COMMIT DELETE ROWS语句指定所创建的临时表是事务级临时表，当COMMIT或ROLLBACK之前，这些数据一直存在，当事务提交之后，表中数据自动清除。
 
 
 insert into session_temp_tab select * from emp ;
@@ -3531,7 +3531,7 @@ SQL> commit;
         0
 
 
-��COMMIT֮��������ʱ���е������Զ�����������ٴβ�ѯ��ʱ��õ����Ϊ0��
+当COMMIT之后事务级临时表中的数据自动清除，所以再次查询的时候得到结果为0；
 SQL> disconnect ;
 Not logged on
 
@@ -3550,32 +3550,32 @@ Connected as scott
  COUNT(*)
 ----------
         0
-���Ͽ�֮����������֮�󣬻Ự����ʱ���е�����Ҳ���Զ�ɾ���ˡ�
+当断开之后重新连接之后，会话级临时表中的数据也被自动删除了。
 
 
 
 
-������Openģʽʱ������restrict�ؼ��֣�startup restrict
+在启动Open模式时，添加restrict关键字：startup restrict
 
-���û�ȡ������״̬��alter system enable\disable restricted session;
+设置或取消受限状态：alter system enable\disable restricted session;
 alter system disable restricted session;
 
-����״̬�����򿪵����ݿⱻ����Ϊ����״̬ʱ��ֻ��Create Session �� Restricted SessionϵͳȨ�� ���� ����SYSDBA  �� SYSPORE ϵͳȨ�޵��û��������ӵ����ݿ⡣����������״̬��ϵͳ����Ȼ���ܻ���ڻ����ͨ�û��Ự��
+受限状态，当打开的数据库被设置为受限状态时，只有Create Session 和 Restricted Session系统权限 或者 具有SYSDBA  和 SYSPORE 系统权限的用户才能连接到数据库。但进入受限状态后，系统中仍然可能会存在活动的普通用户会话。
 
-����״̬��;��
+受限状态用途：
 
-(1)ִ�����ݵ���򵼳�������
+(1)执行数据导入或导出操作；
 
-(2)��ʱ�ܾ���ͨ�û��������ݿ⣻
+(2)暂时拒绝普通用户访问数据库；
 
-(3)�������ݿ���ֲ������������
+(3)进行数据库移植或升级操作。
 
-�޸�oracle�û�����ʹ�� * ��������Ŵ�ͷ����ORA-00988�������
+修改oracle用户密码使用 * 等特殊符号打头报错ORA-00988解决方法
 ===========================================================
-����: tolywang(http://tolywang.itpub.net)
-������:2006.06.11 16:43
-����: Oracle���ݿ����
-������http://tolywang.itpub.net/post/48/113193
+作者: tolywang(http://tolywang.itpub.net)
+发表于:2006.06.11 16:43
+分类: Oracle数据库管理
+出处：http://tolywang.itpub.net/post/48/113193
 ---------------------------------------------------------------
 
 SQL> alter user cis identified by *cis_host;
@@ -3586,7 +3586,7 @@ ORA-00988: missing or invalid password(s)
 
 
 
----oracle���ݿ��������룺
+---oracle数据库特殊密码：
 ORA-00988: missing or invalid password(s)
 
 SQL> alter user cis identified by '*cis_host' ;
@@ -3599,7 +3599,7 @@ ORA-00988: missing or invalid password(s)
 alter user cis identified by "*cis_lhhost" ;
 
 
-������Ҳ�㲻�� �� ��������˫���� ��
+单引号也搞不定 。 还必须用双引号 。
 
 
 cnsz081044: > more bk_full0814.sh
@@ -3645,9 +3645,9 @@ drop database link   EGISLINK
 create database link EGISLINK connect to GBSINTF identified by aaaa1111 using
 '(description = (address = (protocol = tcp)(host = 10.31.9.12)(port = 1531)) (connect_data = (sid = t5egis)))'
 
-����#{i�����ݿ�sid}�����ļ�������·����ɾ������ļ�.
+进入#{i：数据库sid}数据文件等所在路径，删除相关文件.
 
-����10g���ϰ汾����ִ���������ɾ����
+若是10g以上版本，可执行下面操作删除：
 sqlplus '/as sysdba'
 
 startup nomount;
@@ -3658,29 +3658,29 @@ alter system enable restricted session;
 
 drop database;
 
- ע�⣺
+ 注意：
 
-�뱣�����ļ�ɾ��ǰ��þ��Ĵ�С�Աȣ����ظ����ò������档�Ա����洢����Կ������߿�������ļ�ȷʵ��ɾ���ˡ�
+请保留库文件删除前后该卷的大小对比，并回复到该步骤里面。以便后面存储组可以看出下线库的数据文件确实被删除了。
 
-ʾ���ű�λ�ã� $ORACLE_HOME/rdbms/admin/utlsampl.sql
+示例脚本位置： $ORACLE_HOME/rdbms/admin/utlsampl.sql
 
 
 SQL> alter table scott.test rename to scott.test1;
 alter table scott.test rename to scott.test1
                                     *
-ERROR λ�ڵ� 1 ��:
-ORA-14047: ALTER TABLE|INDEX RENAME �������������������
+ERROR 位于第 1 行:
+ORA-14047: ALTER TABLE|INDEX RENAME 不可以与其它分区组合
 
 
 SQL> alter table scott.test rename to test1;
 
-���Ѹ��ġ�
+表已更改。
 
-����������һ���������,����ִ��alter table scott.test��ʱ��,���Ѿ�����oracle��Ҫ�޸��ĸ��û��µ��ĸ�����,
-������rename to ��ʱ��Ͳ���Ҫ��ָ���û�������.�����д�û����Ļ�,oracleҲ������Ϊ����Ҫ��scott�µ�test�������洢�������û�����ȥ,oracle��������ô��!
+我们来分析一下这个问题,当你执行alter table scott.test的时候,你已经告诉oracle你要修改哪个用户下的哪个表了,
+所以在rename to 的时候就不需要在指定用户名称了.如果在写用户名的话,oracle也许会认为你是要把scott下的test表改名存储到其他用户下面去,oracle不允许这么做!
 
 
---�ı�job����ʱ�� ��
+--改变job启动时间 ：
 declare
   x number;
 begin
@@ -3699,7 +3699,7 @@ end;
 
 
 
-��½��monitor�������ѯ
+登陆到monitor生产库查询
 select * from dbmgr.sensitive_info_all_db where db_name=lower('&db_name')
 
 col ins_name for a10;
@@ -3730,14 +3730,14 @@ select INSTANCE_NAME as ins_name,
   from dbmon.database_info2
  where dbname = upper(trim('&1'));
 
-��������һ������ֵ����⣬job�����˲����С�
-���ݾ������Ȼ��뵽job_queue_processes�Ƿ�������ȷ�ˣ����ݿ���ʾ��ȷ��
+今天遇到一个很奇怪的问题，job到点了不运行。
+根据经验首先会想到job_queue_processes是否设置正确了，数据库显示正确。
 SQL> show parameter job_queue_processes
 NAME                                 TYPE                              VALUE
 ------------------------------------ --------------------------------- ------------------------------
 job_queue_processes                  integer                           20
-�ų���������Ƿ�job��״̬Ϊbroken����ѯ����Ҳ�ǲ��ǡ�
-�����ʱ���Ƿ�д���أ�
+排除这个错误，是否job的状态为broken，查询了下也是不是。
+程序的时间是否写错呢？
 declare
 job_name varchar2(100):='pacs_sync_user_info_job';
 begin
@@ -3748,22 +3748,22 @@ interval => 'TRUNC(SYSDATE+1)+5/24');
 commit;
 end;
 /
-Ҳû���κ����⡣
-�����Ƿ��ڼ�����û�н����أ�
-�������Ҳ���ǡ�
-ÿһ��job���޷���ʱִ�У����ǵ���ִ��û���κ����⡣
-����Ϊɶ�أ�
-������alert��־û�����Եı��������Ƿ���û��ora_j0**�Ľ��̡����������������ô�����أ�
-Metlink�ϲ�ѯ��ִ��ora_j0**��������ora_cjq0���̹����ġ�The CJQ0 process is the one which processes the dba_jobs/dbms_scheduler_jobs.˵��cjq0�����ǹ���job�Ľ��̣���j0**������job���еĽ��̡����cjq0����û��������ôjob���޷����еġ�
-�������job�����л���Ҫ���cjq0�Ƿ��������С�
+也没有任何问题。
+程序是否还在继续跑没有结束呢？
+检查了下也不是。
+每一个job都无法定时执行，但是单独执行没有任何问题。
+这是为啥呢？
+主机上alert日志没有明显的报错。但是发现没有ora_j0**的进程。但是这个进程是怎么启动呢？
+Metlink上查询下执行ora_j0**进程是有ora_cjq0进程管理的。The CJQ0 process is the one which processes the dba_jobs/dbms_scheduler_jobs.说明cjq0进程是管理job的进程，而j0**进程是job运行的进程。如果cjq0进程没有启动那么job是无法运行的。
+所以如果job不运行还需要检查cjq0是否正常运行。
 
-�ܽ��£�jobΪɶû������
-1��	������ʱ���Ƿ���ȷ
-2��	���job�Ƿ�������
-3��	������job_queue_processes�����Ƿ�����
-4��	���cjq0�����Ƿ���������
+总结下：job为啥没有运行
+1，	检查程序时间是否正确
+2，	检查job是否还在运行
+3，	检查参数job_queue_processes进程是否设置
+4，	检查cjq0进程是否运行正常
 
-������metlink�Ͻ��cjq0����û�������ķ�ʽ��
+下面是metlink上解决cjq0进程没有启动的方式：
 Symptoms
 Jobs (dba_jobs/dbms_scheduler_jobs) are not running at specified timestamp.
 Checking makes it clear that CJQ0 process is not running.
@@ -3813,7 +3813,7 @@ $> ps -ef|grep $ORACLE_SID|grep -i cjq0
 oracle 14116 1 0 10:30   00:00:00 ora_cjq0_v111
 
 
-Oracle Job�����������е�������˼·
+Oracle Job不能正常运行的问题解决思路
 1) Instance in RESTRICTED SESSIONS mode 
 
 Check if the instance is in restricted sessions mode:
@@ -3850,7 +3850,7 @@ col value format a15
 
 select a.ksppinm parameter,b.ksppstvl value from x$ksppi a,x$ksppcv b
 
-Where a.indx=b.indx and ksppinm=��_system_trig_enabled��;
+Where a.indx=b.indx and ksppinm=’_system_trig_enabled’;
 
 ^-- Checked!
 
@@ -3998,41 +3998,41 @@ Even though it was up for only 126 days, after the server was rebooted all jobs 
 4. Check that jobs are executing automatically.
 
 
-һ��job������Ƶ������
+一。job的运行频率设置
 
-1.ÿ��̶�ʱ�����У���������8:10���ӣ�Trunc(Sysdate+1) + (8*60+10)/24*60
+1.每天固定时间运行，比如早上8:10分钟：Trunc(Sysdate+1) + (8*60+10)/24*60
 
-2.Toad���ṩ�ģ�
+2.Toad中提供的：
 
-ÿ�죺trunc(sysdate+1)
+每天：trunc(sysdate+1)
 
-ÿ�ܣ�trunc(sysdate+7)
+每周：trunc(sysdate+7)
 
-ÿ�£�trunc(sysdate+30)
+每月：trunc(sysdate+30)
 
-ÿ�������գ�next_day(trunc(sysdate),'SUNDAY')
+每个星期日：next_day(trunc(sysdate),'SUNDAY')
 
-ÿ��6�㣺trunc(sysdate+1)+6/24
+每天6点：trunc(sysdate+1)+6/24
 
-���Сʱ��sysdate+30/1440
+半个小时：sysdate+30/1440
 
-3.ÿ��Сʱ�ĵ�15�������У����磺8:15��9:15��10:15...��trunc(sysdate,'hh')+75/1440��ԭ�������õ���trunc(sysdate,'hh')+15/1440�����־�Ȼ���С�
+3.每个小时的第15分钟运行，比如：8:15，9:15，10:15...：trunc(sysdate,'hh')+75/1440。原先我设置的是trunc(sysdate,'hh')+15/1440，发现居然不行。
 
-����JOBΪʲô�����У�job���� job������
+二。JOB为什么不运行？job运行 job不运行
 
-1.�����˽�һ��JOB�Ĳ���˵������job��صĲ���һ����job_queue_processes�����������JOBʱ������Ľ���������Ȼϵͳ����JOB���������ֵ�󣬾ͻ����ŶӵȺ�ģ���Сֵ��0����ʾ������JOB�����ֵ��36����OS�϶�Ӧ�Ľ���ʱSNPn��9i�Ժ�OS�Ϲ���JOB�Ľ��̽�CJQn������ʹ���������SQLȷ��Ŀǰ�м���SNP/CJQ�����С�
+1.先来了解一下JOB的参数说明：与job相关的参数一个是job_queue_processes，这个是运行JOB时候所起的进程数，当然系统里面JOB大于这个数值后，就会有排队等候的，最小值是0，表示不运行JOB，最大值是36，在OS上对应的进程时SNPn，9i以后OS上管理JOB的进程叫CJQn。可以使用下面这个SQL确定目前有几个SNP/CJQ在运行。
 
-select * from v$bgprocess�����paddr��Ϊ�յ�snp/cjq���̾���Ŀǰ���еĽ��̣��еı�ʾ���ڹ����Ľ��̡�
+select * from v$bgprocess，这个paddr不为空的snp/cjq进程就是目前空闲的进程，有的表示正在工作的进程。
 
-����һ����job_queue_interval����Χ��1--3600֮�䣬��λ���룬����ǻ���JOB��process����Ϊÿ��snp������������Ϣ�ˣ���Ҫ���ڻ����������ֵ����̫С��̫С��Ӱ�����ݿ�����ܡ�
+另外一个是job_queue_interval，范围在1--3600之间，单位是秒，这个是唤醒JOB的process，因为每次snp运行完他就休息了，需要定期唤醒他，这个值不能太小，太小会影响数据库的性能。
 
-2.��ϣ���ȷ���������������������Ƿ���ȷ���ر��ǵ�һ������������Ϊ0�ˣ�����JOB�Ͳ����ܣ�ȷ����������Ǽ������¡�
+2.诊断：先确定上面这两个参数设置是否正确，特别是第一个参数，设置为0了，所有JOB就不会跑，确认无误后，我们继续向下。
 
-3.ʹ�������SQL�쿴JOB�ĵ�broken,last_date��next_date��last_date��ָ���һ��job���гɹ��Ľ���ʱ�䣬next_date�Ǹ������õ�Ƶ�ʼ�����´�ִ��ʱ�䣬���������Ϣ�Ϳ����ж�JOB�ϴ��Ƿ��������������ж��´ε�ʱ��Բ��ԣ�SQL���£�
+3.使用下面的SQL察看JOB的的broken,last_date和next_date，last_date是指最近一次job运行成功的结束时间，next_date是根据设置的频率计算的下次执行时间，根据这个信息就可以判断JOB上次是否正常，还可以判断下次的时间对不对，SQL如下：
 
 select * from dba_jobs
 
-��ʱ�����Ƿ�������next_date��4000��1��1�գ�˵��jobҪ��������running��Ҫ������״̬��break(broken=Y)���������JOB��brokenֵΪY�����û��˽�һ�£�ȷ����JOB�Ƿ����broken���������broken���ǾͰ�brokenֵ�޸ĳ�N���޸���ʹ�������SQL�쿴�ͷ�������last_date�Ѿ����ˣ�JOB�����������У��޸�broken״̬��SQL���£�
+有时候我们发现他的next_date是4000年1月1日，说明job要不就是在running，要不就是状态是break(broken=Y)，如果发现JOB的broken值为Y，找用户了解一下，确定该JOB是否可以broken，如果不能broken，那就把broken值修改成N，修改再使用上面的SQL察看就发现他的last_date已经变了，JOB即可正常运行，修改broken状态的SQL如下：
 
 declare
 
@@ -4042,23 +4042,23 @@ DBMS_JOB.BROKEN(<JOB_ID>,FALSE);
 
 END;
 
-4.ʹ�������SQL��ѯ�Ƿ�JOB����Running
+4.使用下面的SQL查询是否JOB还在Running
 
 select * from dba_jobs_running
 
-�������JOB�Ѿ�Run�˺ܾ��˻�û�н�������Ҫ��ԭ���ˡ�һ���JOB runningʱ��������ص���ص���Դ�����Բ鿴һ��v$access��v$locked_object������view�������������������������JOB��ص�Object������PKG/Function/Procedure/Table����Դ����ô��Ҫ����������ɾ�����б�Ҫ�Ļ�����JOB�Ľ���Ҳɾ�����������ܿ��������
+如果发现JOB已经Run了很久了还没有结束，就要查原因了。一般的JOB running时会锁定相关的相关的资源，可以查看一下v$access和v$locked_object这两个view，如果发现其他进程锁定了与JOB相关的Object，包括PKG/Function/Procedure/Table等资源，那么就要把其他进程删除，有必要的话，把JOB的进程也删除，再重新跑看看结果。
 
-5.������涼����������JOB����run����ô�죿������Ҫ���ǰ�JOB��������һ�Σ���ֹ��SNP�����������JOB���ܣ�ָ�����£�
+5.如果上面都正常，但是JOB还不run，怎么办？那我们要考虑把JOB进程重启一次，防止是SNP进程死了造成JOB不跑，指令如下：
 
-alter system set job_queue_processes=0 --�ر�job���̣��ȴ�5--10����
+alter system set job_queue_processes=0 --关闭job进程，等待5--10秒钟
 
-alter system set job_quene_processes=50 --�ָ�ԭ����ֵ
+alter system set job_quene_processes=50 --恢复原来的值
 
-6.Oracle��BUG
+6.Oracle的BUG
 
-Oracle9i������һ��BUG������������497��ʱ���պôﵽ�������ֵ���ټ����ͻ���-1�����������ͱ��0�ˣ�Ȼ����������������ˡ����������������͵��������ݿ⣬���������һ�������͵����ݿ�汾��9205���ͷ���������һ�����⣬�������û�Լʱ���������û�����ˡ�����������Oracle7345��Oracle8i�����ݿ�û�з���������⡣
+Oracle9i里面有一个BUG，当计数器到497天时，刚好达到它的最大值，再计数就会变成-1，继续计数就变成0了，然后计数器将不再跑了。如果碰到这种情况就得重启数据库，我们这边有一个生产型的数据库版本是9205，就发生过这样一次问题，后来和用户约时间重启后就没问题了。但是其他的Oracle7345和Oracle8i的数据库没有发现这个问题。
 
-7.���ݿ��ϵļ������Ͼ���࣬���JOB���л������⣬����Ҫ����û��쿴һ���Ƿ��ǳ����������⣬���紦�����������󣬻��������ٶ������������ʱ�������Ǿ���Ҫ���������������ˡ����ǿ���ͨ�������SQL�ֹ�ִ��һ��JOB������
+7.数据库上的检查基本上就这多，如果JOB运行还有问题，那需要配合用户察看一下是否是程序本身的问题，比如处理的资料量大，或者网络速度慢等造成运行时过长，那就需要具体情况具体分析了。我们可以通过下面的SQL手工执行一下JOB看看：
 
 declare
 
@@ -4068,7 +4068,7 @@ dbms_job.run(<job>_ID)
 
 end;
 
-�������JOBִ�в���������Ҫ��ϳ���������һ�¡�
+如果发现JOB执行不正常，就要结合程序具体分析一下。
 
 
 
@@ -4079,9 +4079,9 @@ SQL> exec dbms_stats.gather_fixed_objects_stats;
 "
 
 
-USING INDEX��ʵ�飺
-1��USING INDEX���������ڴ���������Ψһ��Լ����ʱ��ʹ��ָ���������򴴽����������޸������Ĵ洢�ṹ��
-�ϣˣ����Ȳ���USING INDEX����������ʱOracle�Զ�����Ψһ������
+USING INDEX的实验：
+1、USING INDEX可以让你在创建主键、唯一性约束的时候使用指定的索引或创建索引、或修改索引的存储结构。
+ＯＫ，我先不用USING INDEX，创建主键时Oracle自动创建唯一索引。
 
 [html] view plaincopy
 gyj@MYDB> alter table emp add constraint emp_id_pk primary key(employee_id);
@@ -4101,7 +4101,7 @@ UNIQUENES
 UNIQUE
 
 
-2����ʱ���������ɾ���������뱣��Ψһ����EMP_ID_PK����Լ�����Ա�����drop�����������Ա�����
+2、这时我想把主键删除，但我想保留唯一索引EMP_ID_PK，即约束可以被独立drop，而索引可以保留。
 [html] view plaincopy
 gyj@MYDB> ALTER TABLE emp DROP PRIMARY KEY KEEP INDEX;
 
@@ -4117,14 +4117,14 @@ gyj@MYDB>  select INDEX_NAME from user_constraints where CONSTRAINT_NAME='EMP_ID
 
 no rows selected
 
-3��Ȼ�������봴��������������ֱ���øոմ�����Ψһ����EMP_ID_PK����ʱ�Ҿ�Ҫ��USING INDEX��
+3、然后我又想创建主键，但我想直接用刚刚创建的唯一索引EMP_ID_PK。此时我就要用USING INDEX。
 [html] view plaincopy
 gyj@MYDB> alter table emp add constraint emp_id_pk primary key(employee_id) using index EMP_ID_PK;
 
 Table altered.
 
 
-����      USING INDEX�ڹٷ��ĵĽ��ͣ�
+二、      USING INDEX在官方文的解释：
 Using Indexes to Enforce Constraints
 When defining the state of a unique or primary key constraint, you can specify an index for Oracle to use to enforce the constraint, or you can instruct Oracle to create the index used to enforce the constraint.
 using_index_clauseYou can specify theusing_index_clause only when enabling unique or primary key constraints. You can specify the clauses of theusing_index_clause in any order, but you can specify each clause only once.
@@ -4142,16 +4142,16 @@ You cannot specify the domain_index_clause of index_properties or theparallel_cl
 
 
 
-convert datafile��Ҫ��Ŀ�����ݿ����ģ�������Ŀ���������
+convert datafile需要在目标数据库做的，你是在目标库做的吗？
 
-�ο���Online Doc��http://docs.oracle.com/cd/E11882_01/backup.112/e10642/rcmxplat.htm#sthref1873��
+参考：Online Doc（http://docs.oracle.com/cd/E11882_01/backup.112/e10642/rcmxplat.htm#sthref1873）
 You can use the CONVERT DATAFILE command to convert files on the destination host, but not on the source host.
 
 
 
 
----��ƽ̨ת�������ļ�
-Դ��ִ�еĽű����£�
+---跨平台转换数据文件
+源库执行的脚本如下：
 convert database new database 'd3egis'
 transport script '/paic/g2bh8050/dev/gbs2_tmp/egisdev_conv/oratmpscriptts.sql'
 to platform 'Solaris[tm] OE (64-bit)'
@@ -4161,13 +4161,13 @@ PARALLELISM 8;
 
 
 
-------Զ�̵������ݿ�
-��Ŀ�����ݿ��ϴ���Ŀ¼��
+------远程导入数据库
+在目标数据库上创建目录：
 create or replace directory as '/usr2/ORADATA/bak/';
-������Ŀ�����ݿ��ϴ���dblink��
-create public database link hq connect to hq identified by hq using ��209��;
-�����һ��hq��dblink�����ڶ���hq��Դ���ݿ��û�����������hq��Դ���ݿ�hq�û����룬209���������ӷ���������tnsnames.ora�ļ��л�ȡ�ġ�
-�ġ���Ŀ�����ݿ���ִ��impdp��
+三、在目标数据库上创建dblink：
+create public database link hq connect to hq identified by hq using ’209’;
+这里，第一个hq是dblink名，第二个hq是源数据库用户名，第三个hq是源数据库hq用户密码，209是网络连接服务名，从tnsnames.ora文件中获取的。
+四、在目标数据库上执行impdp：
 -bash-3.00$ impdp system/system SCHEMAS=(hq) directory=exp_dir network_link=hq logfile=imp.log
 
 
@@ -4236,127 +4236,127 @@ $
 $
 $ cd
 
-�鿴�ָ��ļ�
-1���г���Ҫ�ָ��������ļ�
-�������ļ����ֽ���ʧ��ʱ��ͨ����ѯ��̬������ͼv$recover_file�������г���Ҫ�ָ��������ļ���
+查看恢复文件
+1、列出需要恢复的数据文件
+当数据文件出现介质失败时，通过查询动态性能视图v$recover_file，可以列出需要恢复的数据文件。
 col error format a20
 select file#,error,change# from v$recover_file;
   FILE# ERROR            CHANGE#
 ---------- ------------------ ----------
    5       file not found     0
 
-�����������ļ�����֮�����²�ѯV$RECOVER_FILE
+复制了数据文件备份之后，重新查询V$RECOVER_FILE
 select file#,error,change# from v$recover_file;
   FILE# ERROR            CHANGE#
 ---------- ------------------ ----------
    5                         1481225
-��ʾ�����ļ����ݵ�SCNֵΪ   1481225  ���ָ������ļ�ʱ���Ӹ�SCNֵ��ʼӦ������仯
+表示数据文件备份的SCN值为   1481225  当恢复数据文件时，从该SCN值开始应用事务变化
 
-2�������־��ʷ��Ϣ
-��ִ�н��ʻָ�ʱ����Ҫ������־���к�ȷ��ҪӦ�õĹ鵵��־��������־��
-ͨ����ѯv$loghist,������ʾ��־��ʷ��Ϣ��
-����ȷ�����ĸ���־���кſ�ʼӦ������仯
+2、类出日志历史信息
+当执行介质恢复时，需要根据日志序列号确定要应用的归档日志和重做日志。
+通过查询v$loghist,可以显示日志历史信息。
+可以确定从哪个日志序列号开始应用事务变化
 select sequence# from v$loghist
  where 1481225 between first_change# and switch_change#;
  SEQUENCE#
 ----------
    1
 
- SEQUENCE# ���ڱ�ʶ��־���кţ�first_change#�û���ʶ�ض���־���кŶ�Ӧ����ʼSCNֵ��switch_change#���ڱ�ʶ�ض���־���кŵ���һ����־���к�
- ��Ӧ����ʼSCNֵ
+ SEQUENCE# 用于标识日志序列号，first_change#用户标识特定日志序列号对应的起始SCN值，switch_change#用于标识特定日志序列号的下一个日志序列号
+ 对应的起始SCN值
 
 
- 3���г��ָ�Ҫʹ�õĹ鵵��־
- ͨ����ѯv$archived_log��������ʾ���еĹ鵵��־��ͨ����ѯv$recovery_log��������ʾ�ָ�����Ĺ鵵��־��
+ 3、列出恢复要使用的归档日志
+ 通过查询v$archived_log，可以显示所有的归档日志，通过查询v$recovery_log，可以显示恢复所需的归档日志。
  col archive_name format a30
  select sequence#,archive_name from v$recovery_log;
  SEQUENCE# ARCHIVE_NAME
 ---------- --------------------------------------------------------------------------------
-  1           ·��
+  1           路径
 
-sequence#�û���ʶ��־���к�,archive_name  ���ڱ�ʶ�ָ�ҪӦ�õĹ鵵��־��
+sequence#用户标识日志序列号,archive_name  用于标识恢复要应用的归档日志。
 
-�ǻ��־���������־��Աȫ����
+非活动日志组的所有日志成员全部损坏
 
-���ǻ��־���������־��Աȫ�����ֽ���ʧ��ʱ��������ݿ⴦�ڹر�״̬����ô�����ݿ�ʱ������ʾ������Ϣ��
-������ݿ⴦��open״̬����ô���л�������־��ʱ�����ݿ⽫���ڵȴ�״̬��
-��open״̬�ǻ��־���������־��Աȫ����
-�л�������־��ʱ��ӦΪ�����ݲ��ܱ��鵵�����Ժ�̨����lgwr���ڵȴ�״̬��Ϊ��ʹlgwr�ɼ�������������ҩ�������־��
+当非活动日志组的所有日志成员全部出现介质失败时，如果数据库处于关闭状态，那么打开数据库时将会显示错误信息，
+如果数据库处于open状态，那么当切换到该日志组时，数据库将处于等待状态。
+在open状态非活动日志组的所有日志成员全部损坏
+切换到该日志组时，应为其内容不能被归档，所以后台进程lgwr处于等待状态，为了使lgwr可继续工作，消炎药清除该日志组
 alter database clear unarchived logfile group 1;
-��ִ�������������oracle�����½�����־��1�����г�Ա����ʱ��̨����lgwr���Լ�����������������Ϊ��־������û�б��鵵�����Իᵼ�¹�ȥ�������ļ����ݲ���ʹ�á�
-ͨ���鿴aler�ļ�������ȡ����Ӧ������Ϣ��
+当执行了上述命令后，oracle会重新建立日志组1的所有成员，此时后台进程lgwr可以继续正常工作。但因为日志组内容没有被归档，所以会导致过去的数据文件备份不能使用。
+通过查看aler文件，可以取得相应警告信息。
 
-2���ڹر�״̬�·ǻ��־���������־��Աȫ����
-dba������������־�飬ɾ��ԭ�е���־�飬Ȼ������ݿ�
+2、在关闭状态下非活动日志组的所有日志成员全部损坏
+dba可以增加新日志组，删除原有的日志组，然后打开数据库
 alter database add logfile
 
 alter database drop logfile group 1;
 alter database open;
 
 
-3����ǰ ��־���������־��Աȫ����
-����open״̬�µ�ǰ��־��������־��Աȫ�����ֽ���ʧ�ܣ�oracle����ֹ���̣����ڹر�״̬�µ�ǰ��־��������־��Աȫ�����ֽ���ʧ�ܣ���ô���ݿ⽫���ܴ򿪡�
+3、当前 日志组的所有日志成员全部损坏
+若在open状态下当前日志组所有日志成员全部出现介质失败，oracle会终止例程；若在关闭状态下当前日志组所有日志成员全部出现介质失败，那么数据库将不能打开、
 
 
-���ر�״̬�µ�ǰ��־��������־��Աȫ�����ֽ���ʧ��ʱ����Ϊ�����ļ��������ļ���������ȫһ��״̬������dbaֻ��Ҫʹ��
-recover database until cancel ����ִ�л���ȡ���Ĳ���ȫ�ָ���Ȼ����resetlogsѡ������ݿ⼴�ɡ�
-��ʹ��resetlogsѡ������ݿ�֮�󣬻����½���������־��Ա�����ҹ�ȥ�ı��ݲ���ֱ��ʹ�ã�������Ҫ���±������������ļ��Ϳ����ļ�
+当关闭状态下当前日志组所有日志成员全部出现介质失败时，因为数据文件、控制文件都处于完全一致状态，所以dba只需要使用
+recover database until cancel 命令执行基于取消的不完全恢复，然后用resetlogs选项打开数据库即可。
+当使用resetlogs选项打开数据库之后，会重新建立所有日志成员，并且过去的备份不能直接使用，所以需要重新备份所有数据文件和控制文件
 
-2����open״̬�µ�ǰ��־��������־��Աȫ����
+2、在open状态下当前日志组所有日志成员全部损坏
 
-�����ݿ⴦��open״̬ʱ�������ǰ��־���������־��Աȫ�����ֽ���ʧ�ܣ�����ɾ������ô��̨����lgwr������仯д�����־��ʱ�����̻ᱻ�Զ��رգ�����ʾ������Ϣ��
-�����Ҫʹ�������ļ����ݡ��鵵��־ִ�и���ȡ���Ĳ���ȫ�ָ�
-
-
-
-��ִ���˲���ȫ�ָ���ʹ��resetlogsѡ������ݿ�֮�󣬻ᵼ�¹�ȥ����ʱ�ļ�����ʹ�á����⣬����ʱ�ļ����ֽ���ʧ��ʱ��ͳһ�ᵼ����ʱ�ļ�����ʹ�ã�����ʱ�ļ�����ʹ��ʱ������������ܻ�ʧ�ܡ�
+当数据库处于open状态时，如果当前日志组的所有日志成员全部出现介质失败，如误删除，那么后台进程lgwr将事务变化写入该日志组时，例程会被自动关闭，并显示错误信息。
+则必须要使用数据文件备份、归档日志执行给予取消的不完全恢复
 
 
-���������ݿ�
-ʹ��ramn��blockrecover����ָ��𻵵����ݿ顣
-ʹ��pl/sql ��dbms_repair�����𻵵����ݿ�
-1�������޸���
-�޸�������Ҫ����repair_ǰ׺����д��
+
+当执行了不完全恢复或使用resetlogs选项打开数据库之后，会导致过去的临时文件不能使用。另外，当临时文件出现介质失败时，统一会导致临时文件不能使用，当临时文件不能使用时，排序操作可能会失败。
+
+
+处理损坏数据块
+使用ramn的blockrecover命令恢复损坏的数据块。
+使用pl/sql 包dbms_repair处理损坏的数据块
+1、建立修复表
+修复表必须要带有repair_前缀（大写）
 EXEC dbms_repair.admin.tables('REPAIR_TABLE',DBMS_REPAIR.REPAIR_TABLE,DBMS_REPAIR.CREATE_ACTION)
-2��ȷ���𻵿����
-�����޸���֮�� ͨ��ʹ��check_object���Լ���ض��������������𻵿������ ��Ҫ�ṩ�������Ͷ����������ұ���Ҫ����������Դ���𻵿����
+2、确定损坏块个数
+建立修复表之后， 通过使用check_object可以检查特定对象所包含的损坏块个数。 需要提供方案名和对象名，并且必须要定义变量用以存放损坏块个数
 var cc number
 exec dbms_repair.check_object('SCOTT','CUSTOMERS',corrupt_count=>:cc);
 print cc
 
-3������𻵿顣Ϊ�����������ݿ飬��Ҫ�������ݿ���Ϊ���𻵡���ͨ��ʹ��fix_corrupt_blocks,���Խ������ݿ���Ϊ
-���𻵡��� ����������ݿ�ʱ����Ҫ�ṩ�������Ͷ�������������Ҫ����������Դ�ű��޸������ݿ������
+3、标记损坏块。为了跳过损坏数据块，需要将损坏数据块标记为“损坏”。通过使用fix_corrupt_blocks,可以将损坏数据块标记为
+“损坏”， 当标记损坏数据块时，需要提供方案名和对象名，并且需要定义变量用以存放被修复的数据块个数。
 VAR fc number
 exec dbms_repair.fix_corrupt_blocks('SCOTT','CUSTOMERS',fix_count=>:fc);
 print fc
 
-4�������𻵿飬ͨ��ʹ��skip_corrupt_blocks,�������������ݿ顣
+4、跳过损坏块，通过使用skip_corrupt_blocks,可以跳过损坏数据块。
 EXEC dbms_repair.skip_corrupt_blocks('SCOTT','CUTSTOMERS');
 
-5��ȥ��ָ���𻵿��������ڡ�
+5、去定指向损坏块的索引入口。
 
-rman����
-rman ���
-1��Ŀ�����ݿ�
-ָҪִ�б��ݡ�ת���ͻָ����������ݿ⣬ʵ����ָӦ��ϵͳ���漰���Ĳ�Ʒ���ݿ�
-2������������
-���ӵ�Ŀ�����ݿ�ʱ���Ὠ����������Ŀ�����ݿ�ķ��������̣�����Ĭ�Ϸ������������ڽ���rman�������������ִ�е�pl/sql
-�飬���ݷ������������ڼ�鱸�ݡ�ת���ͻָ������Ƿ��Ѿ����.
+rman介绍
+rman 组件
+1、目标数据库
+指要执行备份、转储和恢复操作的数据库，实际是指应用系统所涉及到的产品数据库
+2、服务器进程
+连接到目标数据库时，会建立两个连到目标数据库的服务器进程，其中默认服务器进程用于解析rman命令，并生成隐含执行的pl/sql
+块，沦陷服务器进程用于检查备份、转储和恢复操作是否已经完成.
 
-3��ͨ��
-����ִ�кͼ�¼���ݡ�ת���ͻָ������� ��ʹ��rman�ڴ洢�豸(�Ŵ������)��ִ�б��ݡ�ת���ͻָ�����ʱ��rman��Ҫ�ڴ洢�豸��Ŀ�����ݿ�֮�佨�����ӡ�
-�����ӱ���Ϊͨ����
+3、通道
+用于执行和记录备份、转储和恢复操作。 当使用rman在存储设备(磁带或磁盘)上执行备份、转储和恢复操作时，rman需要在存储设备和目标数据库之间建立连接。
+该连接被称为通道。
 
- 4��rman���Ͽ��rmanԪ����
- rmanԪ������ָrman�ڱ��ݡ�ת���ͻָ���������ʹ�õ����ݣ�rmanԪ���ݵļ��ϱ���Ϊrman���Ͽ⡣
- ��ʹ��rmanִ�б��ݡ�ת���ͻָ�����ʱ��oracle������rmanԪ���ݴ�ŵ�Ŀ�����ݿ�Ŀ����ļ��С���������˻ָ�Ŀ¼����ôrmanԪ���ݻ��ᱻ��ŵ��ָ�Ŀ¼�С�
+ 4、rman资料库和rman元数据
+ rman元数据是指rman在备份、转储和恢复操作中所使用的数据，rman元数据的集合被成为rman资料库。
+ 当使用rman执行备份、转储和恢复操作时，oracle总数将rman元数据存放到目标数据库的控制文件中。如果配置了恢复目录，那么rman元数据还会被存放到恢复目录中。
 
- 5���ָ�Ŀ¼
- �ָ�Ŀ¼���ڴ��rmanԪ���ݣ����Ǵ��rmanԪ���ݵ�һ����ѡ���á���ʹ��Ŀ�����ݿ�����ļ����rmanԪ����ʱ����rmanԪ���ݴ�������ﵽ��ʼ��
- ����control_file_rcord_keep_time��ֵ֮����Դ���ݿ��ܻᱻ���ǣ��Ӷ�����֮ǰ�ı��ݲ���ʹ�ã�ͨ��ʹ�ûָ�Ŀ¼���������ñ�����Ҫ��rmanԪ���ݣ����⣬�ڻָ�Ŀ¼�л����Դ�Ŵ洢�ű���
+ 5、恢复目录
+ 恢复目录用于存放rman元数据，它是存放rman元数据的一个可选设置。当使用目标数据库控制文件存放rman元数据时，在rman元数据存放天数达到初始化
+ 参数control_file_rcord_keep_time的值之后，其源数据可能会被覆盖，从而导致之前的备份不能使用；通过使用恢复目录，可以永久保留需要的rman元数据，另外，在恢复目录中还可以存放存储脚本。
 
- 6�����ʹ�����
- 7��rman��
+ 6、介质管理层
+ 7、rman包
 
  1. rman target sys/***@demo nocatalog
  rman nocatalog
@@ -4377,12 +4377,12 @@ rman ���
 log_file=/paic/stg/oracle/11g/otzj11g/xltmp/full_backup_${ORACLE_SID}_`date '+%Y%m%d_%H%M%S'`.log
 export log_file
 rman << EOF > ${log_file} 2>&1
-connect TARGET sys/paic1234@stginvdw2--Դ��
-connect AUXILIARY sys/paic1234@stginvdw3--Ŀ���
+connect TARGET sys/paic1234@stginvdw2--源库
+connect AUXILIARY sys/paic1234@stginvdw3--目标库
 DUPLICATE TARGET DATABASE
-      TO 'HDINVDW3' --Ŀ����DB_NAME
+      TO 'HDINVDW3' --目标库的DB_NAME
       FROM ACTIVE DATABASE
-      DB_FILE_NAME_CONVERT=('+DATA2_DG/invest/datafile/'--Դ��datafile�ļ�·��,'+DATA3_DG/HDINVDW3/datafile/',--Ŀ���datafile�ļ�·��
+      DB_FILE_NAME_CONVERT=('+DATA2_DG/invest/datafile/'--源库datafile文件路径,'+DATA3_DG/HDINVDW3/datafile/',--目标库datafile文件路径
 '+DATA2_DG/invest/tempfile/','+DATA3_DG/HDINVDW3/tempfile/')
     LOGFILE
       GROUP 1 ('+DATA3_DG',
@@ -4396,15 +4396,15 @@ echo "Backup finished at `date '+%Y%m%d_%H%M%S'`" >> ${log_file}
 
 
  /*******************************************
-����˵����lbs��ddl���Դ�����
-����˵����
-�����ˣ�  �¾�÷
-�������ڣ�2006-1-23
+功能说明：lbs中ddl语言触发器
+参数说明：
+创建人：  陈敬梅
+创建日期：2006-1-23
 
 
-�޸��ˣ�
-�޸����ڣ�
-�޸�˵����
+修改人：
+修改日期：
+修改说明：
 ********************************************/
 --Version 1.0
 create or replace trigger dbtr_create_alter_restriction
@@ -4492,21 +4492,21 @@ end;
 /
 
 
---����Ϊ��ǰ���õİ汾��
+--以下为当前采用的版本：
 --VERSION 3.0
---����ddl���Ƶ��û��嵥����
+--不作ddl限制的用户清单表：
 create table ddl_allow_user (username varchar2(30));
 
---ddl����ʱ������ñ���
+--ddl限制时间段配置表：
 create table ddl_deny_time (
   deny_date       varchar2(3),
   deny_start varchar2(4),
   deny_end   varchar2(4) );
 
-comment on table ddl_deny_time  is '��ֹDDL������ʱ��';
-comment on column ddl_deny_time.deny_date  is '���ڣ�1��31��ʾ���ڣ�SAT��ʾ������SUN��ʾ����';
+comment on table ddl_deny_time  is '禁止DDL操作的时间';
+comment on column ddl_deny_time.deny_date  is '日期：1～31表示日期，SAT表示周六，SUN表示周日';
 
---���벻�����Ƶ��û���
+--插入不作限制的用户：
 insert into ddl_allow_user values (       'SYS'   );
 insert into ddl_allow_user values (    'SYSTEM'   );
 insert into ddl_allow_user values (     'DBMGR'   );
@@ -4536,7 +4536,7 @@ insert into ddl_allow_user values ('LIFEKPI' );
 ---
 insert into ddl_allow_user values ('LIFEJ2EE' );
 
---�������Ƶ�ʱ������ã�
+--插入限制的时间段配置：
 insert into ddl_deny_time values ('1','0830','2030');
 insert into ddl_deny_time values ('2','0830','2030');
 insert into ddl_deny_time values ('3','0830','2030');
@@ -4573,8 +4573,8 @@ insert into ddl_deny_time values ('SAT','1400','1600');
 insert into ddl_deny_time values ('SUN','','');
 commit;
 
---DDL�������Ƶ�trigger����ddl����ǰ������
---ע�⣬��triggerҪ�����ݿ��compatible������8.1.6���ϡ�
+--DDL操作限制的trigger，在ddl操作前触发。
+--注意，该trigger要求数据库的compatible参数在8.1.6以上。
 create OR REPLACE TRIGGER dbtr_ddl_restriction
 before ddl on database
 DECLARE
@@ -4634,9 +4634,9 @@ end;
 
 
 
- ��Щʱ����Ϊ���Ի�����Ҫ,������Ҫʹ��������ı��ݼ�������һ̨�µĻ��������ָ�(ǰ�����»������Ȱ�װOracle����,�汾��ԭ��һ��),�����ǻָ�����.
+ 有些时候因为测试环境需要,我们需要使用生产库的备份集在另外一台新的机器上做恢复(前提是新机器事先安装Oracle软件,版本跟原库一致),下面是恢复过程.
 
-1.��ԭ������ȫ��(��ԭ���ϲ���)
+1.在原库上做全备(在原库上操作)
 run{
 allocate channel c1 device type disk;
 allocate channel c2 device type disk;
@@ -4646,26 +4646,26 @@ backup format '/u02/rman_backup/full_backup/arc_backup_%T_%s' archivelog all;
 release channel c1;
 release channel c2;
 }
-2.�鿴ԭ���DBID(��ԭ���ϲ���)
-��Ϊ�����ָ��Ĺ�������Ҫ�趨DBID,������Ҫ�ҵ�ԭ���DBID
+2.查看原库的DBID(在原库上操作)
+因为在做恢复的过程中需要设定DBID,这里需要找到原库的DBID
 SQL> select dbid from v$database;
       DBID
 ----------
 1820932955
 
------���µĲ���û������˵��,ȫ����Ŀ�Ŀ��ϲ���-----
-3.ʹ��ftp��ԭ���ϵı��ݼ�������Ŀ�Ŀ��Ŀ¼/u02/ftp/(�������ʡ��)
+-----以下的操作没有特殊说明,全部在目的库上操作-----
+3.使用ftp将原库上的备份集拷贝到目的库的目录/u02/ftp/(具体操作省略)
 
-4.���»����ϴ�������Ŀ¼
+4.在新机器上创建如下目录
 mkdir /u02/mydb
 mkdir -p /u02/mydb/oracl/{adump,bdump,cdump,dpdump,udump,pfile}
 mkdir -p /u02/mydb/oradata/oracl
 mkdir -p /u02/mydb/flash_recovery_area
 
-5.���������ļ�
+5.创建密码文件
 orapwd file=/u01/app/oracle/product/10.2.0/db_1/dbs/orapworacl.ora password=oracle
 
-6.�ָ������ļ�
+6.恢复参数文件
 [oracle@hxlbak ~]$ rman target /
 
 Recovery Manager: Release 10.2.0.1.0 - Production on Fri Jun 29 06:51:54 2012
@@ -4674,7 +4674,7 @@ Copyright (c) 1982, 2005, Oracle.  All rights reserved.
 
 connected to target database (not started)
 
-RMAN>set dbid 1820932955 -- �����dbid��Ҫ��ԭ�Ᵽ��һ��
+RMAN>set dbid 1820932955 -- 这里的dbid需要跟原库保持一致
 
 RMAN> startup nomount
 
@@ -4703,7 +4703,7 @@ channel ORA_DISK_1: SPFILE restore from autobackup complete
 Finished restore at 29-JUN-12
 
 
-���ݼ�full_backup_20120628_3��7�����˲����ļ�,�����ڱ������ݵ�ʱ���Ĭ�ϱ��ݲ����ļ�,������ԭ��ʹ��list backup�鿴,list backup���������������:
+备份集full_backup_20120628_3里7包含了参数文件,我们在备份数据的时候会默认备份参数文件,可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -4712,7 +4712,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_37
   SPFILE Included: Modification time: 28-JUN-12
 
-�ָ��˲����ļ�initoracl.ora��,��Ϊԭ���Ŀ�Ŀ���ļ������·����һ��,���ʱ����Ҫ�޸Ĳ����ļ�,�޸ĵĵط�����,���ļ�·��ָ����Ŀ¼:
+恢复了参数文件initoracl.ora后,因为原库和目的库各文件保存的路径不一致,这个时候需要修改参数文件,修改的地方如下,各文件路径指向新目录:
 
 *.audit_file_dest='/u02/mydb/oracl/adump'
 *.background_dump_dest='/u02/mydb/oracl/bdump'
@@ -4721,7 +4721,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 *.db_recovery_file_dest='/u02/mydb/flash_recovery_area'
 *.user_dump_dest='/u02/mydb/oracl/udump'
 
-7.ʹ�ñ༭�õĲ����ļ��������ݿ⵽nomount״̬���ָ������ļ�
+7.使用编辑好的参数文件启动数据库到nomount状态并恢复控制文件
 
 SQL> startup nomount pfile=/u01/app/oracle/product/10.2.0/db_1/dbs/initoracl.ora
 ORACLE instance started.
@@ -4733,7 +4733,7 @@ Database Buffers          734003200 bytes
 Redo Buffers                2969600 bytes
 SQL>
 
-�ָ������ļ�
+恢复控制文件
 RMAN> restore controlfile from '/u02/ftp/full_backup_20120628_36';
 
 Starting restore at 29-JUN-12
@@ -4748,7 +4748,7 @@ output filename=/u02/mydb/oradata/oracl/control02.ctl
 output filename=/u02/mydb/oradata/oracl/control03.ctl
 Finished restore at 29-JUN-12
 
-�������ļ�һ��,�ڱ������ݵ�ʱ���Ĭ�ϱ����˿����ļ�,���ݼ�full_backup_20120628_36�а����˿����ļ�,ͬ��������ԭ��ʹ��list backup�鿴,list backup���������������:
+跟参数文件一样,在备份数据的时候会默认备份了控制文件,备份集full_backup_20120628_36中包含了控制文件,同样可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -4757,13 +4757,13 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_36
   Control File Included: Ckp SCN: 1545845      Ckp time: 28-JUN-12
 
-8.�������ݿ⵽mount״̬��ע�ᱸ�ݼ�
+8.启动数据库到mount状态并注册备份集
 RMAN> alter database mount;
 
 database mounted
 released channel: ORA_DISK_1
 
-ע�ᱸ�ݼ�,��Ϊ�����ļ��еı����ı�����Ϣ��ԭ���,����������Ҫ����ע���¿�·���µı��ݼ�
+注册备份集,因为控制文件中的保留的备份信息是原库的,我们这里需要重新注册新库路径下的备份集
 RMAN> catalog start with '/u02/ftp/';
 
 Starting implicit crosscheck backup at 29-JUN-12
@@ -4814,7 +4814,7 @@ File Name: /u02/ftp/arc_backup_20120628_39
 File Name: /u02/ftp/full_backup_20120628_32
 File Name: /u02/ftp/full_backup_20120628_30
 
-9.�г���ǰ�����������ļ�
+9.列出当前的所有数据文件
 
 SQL> column name format a60;
 SQL> select file# as "file/grp#", name from v$datafile;
@@ -4837,9 +4837,9 @@ SQL> select file# as "file/grp#", name from v$datafile;
         13 /u02/app/oracle/oradata/oracl/hxl09.dbf';
         14 /u02/app/oracle/oradata/oracl/hxl10.dbf';
 
-���Կ���,��ǰ�����ļ��м�¼�������ļ���·����ԭ����·��,���������ָ���ʱ����Ҫָ���µ�·��.
+可以看到,当前控制文件中记录的数据文件的路径是原来的路径,我们在做恢复的时候需要指向新的路径.
 
-10.�ָ����ݿ�
+10.恢复数据库
 RMAN> run{
 set newname for datafile  1 to '/u02/mydb/oradata/oracl/system01.dbf';
 set newname for datafile  2 to '/u02/mydb/oradata/oracl/undotbs01.dbf';
@@ -4860,90 +4860,90 @@ switch datafile all;
 recover database;
 }
 
-11.�����ݿ�
+11.打开数据库
 alter database open resetlogs;
 
 -- The End --
 
 
-enqueue �ȴ�ͨ���Ǿ� ST  enqueue��HW  enqueue
-�� TX4 enqueue ���ԡ�ST enqueue �������ֵ������ʽ���ռ�������ռ����͹����Ϸ�����
-�á���ĳЩ�������ֵ�����ı��ռ䲻�ϳ�������ʱ������ת�����ñ��ع����ı��ռ� ��LMT����
-����Ԥ�ȷ�����չ���ٻ�������ʹ��һ��չ����һЩ��HW enqueue ͬ�εĸ�ˮλ��һ��ʹ�ã�
-�ֹ�������չ���Ա������ϵĵȴ���TX4 �Ǹ��� enqueue �ȴ�������Ϊ�����ģ����ĳ���ͨ����
-��������������֮һ����ɵĽ������һ�֣�Ωһ�������ظ�������Ҫ commit/rollback ���ͷ�
-enqueue���ڶ��֣���������Ķ�ͬһλͼ����Ƭ���޸ġ���Ϊһ��λͼ����Ƭ�ڿ����ж��
-rowids������λ�û���ͼ�޸�ͬһƬʱ������Ҫ commit/rollback ���ͷ� enqueue�������֣�Ҳ��
-����ܷ�����һ�֣����û�ͬʱ�޸���ͬ�����ݿ飬������Ѿ�û�п��е� ITL �ۣ��������һ
-���ݿ鼶�������������� initrans �� maxtrans �����ɸ��� ITL �۵ķ��������Խ��������⣬��
-����� PCTFREE Ҳ���Խ��������⡣������̸һ̸ TM ������һ���м�������������������
-��ҪΪ���Ǵ��������Ա������ֳ����������鷳��
+enqueue 等待通常是就 ST  enqueue、HW  enqueue
+和 TX4 enqueue 而言。ST enqueue 在数据字典管理方式表空间的物理空间分配和管理上发挥作
+用。当某些以数据字典管理的表空间不断出现问题时，可以转而采用本地管理的表空间 （LMT），
+或者预先分配扩展，再或者至少使下一扩展增大一些。HW enqueue 同段的高水位线一起使用，
+手工分配扩展可以避免其上的等待。TX4 是各种 enqueue 等待中所最为常见的，它的出现通常是
+由下述三种问题之一所造成的结果。第一种，惟一索引的重复，您需要 commit/rollback 以释放
+enqueue。第二种，多个并发的对同一位图索引片的修改。因为一个位图索引片内可能有多个
+rowids，当多位用户试图修改同一片时，就需要 commit/rollback 来释放 enqueue。第三种，也是
+最可能发生的一种，多用户同时修改相同的数据块，而如果已经没有空闲的 ITL 槽，则会引发一
+数据块级的锁。运用增大 initrans 或 maxtrans 以容纳更多 ITL 槽的方法，可以解决这个问题，增
+大表的 PCTFREE 也可以解决这个问题。现在来谈一谈 TM 锁──一种行级锁。如果有外键，则务
+必要为它们创建索引以避免这种常见的锁的麻烦。
 
-�������¼������� stats$idle_event ���
-
-
-
-�ȴ�����  ���ܵĽ������
-Sequential Read    �����кܶ������������������루�ر��Ǳ����Ӳ��֣�
-Scattered Read    �����кܶ�ȫ��ɨ�衪���������롢��С�������ڴ�
-Free Buffer    ���� DB_CACHE_SIZE�����ټ���͵�������
-Buffer Busy    ��ͷ�������� freelists ���� freelist groups
-Buffer Busy    ���ݿ顪�����롰�ȵ㡱���ݡ����÷���ؼ�������������С�����ݿ�
-Buffer Busy    ���ݿ顪������ initrans �� maxtrans
-Buffer Busy    undo header�������ӻع���
-Buffer Busy    undo block���������ύƵ�ȡ�����ع���
-Latch Free  �о� Latch ϸ�ڣ����Բο����ģ�
-Enqueue - ST  ʹ�ñ��ر��ռ����Ԥ�ȷ������չ
-Enqueue - HW  Ԥ�ȷ�����չ�ڸ�ˮλ��֮��
-Enqueue - TX4  ������������� initrans �� maxtrans
-Enqueue - TM  Ϊ��������������鿴Ӧ�ó����еı���
-Log Buffer Space  ������־��������������־���ڿ��ٴ�����
-Log File Switch  �鵵�豸̫������̫�������ӻ�������������־
-Log File Sync  ÿ���ύ�����¼������Ĵ��������־�Ĵ��̡����豸
-Idle Event  ����
+。空闲事件被放在 stats$idle_event 表里。
 
 
 
+等待问题  可能的解决方法
+Sequential Read    表明有很多索引读——调整代码（特别是表连接部分）
+Scattered Read    表明有很多全表扫描——调整代码、将小表放入内存
+Free Buffer    增大 DB_CACHE_SIZE、加速检查点和调整代码
+Buffer Busy    段头——增加 freelists 或者 freelist groups
+Buffer Busy    数据块——分离“热点”数据、采用反向关键字索引、采用小的数据块
+Buffer Busy    数据块——增大 initrans 和 maxtrans
+Buffer Busy    undo header——增加回滚段
+Buffer Busy    undo block——增加提交频度、增大回滚段
+Latch Free  研究 Latch 细节（可以参考下文）
+Enqueue - ST  使用本地表空间或者预先分配大扩展
+Enqueue - HW  预先分配扩展于高水位线之上
+Enqueue - TX4  增大表或索引的 initrans 和 maxtrans
+Enqueue - TM  为外键建立索引，查看应用程序中的表锁
+Log Buffer Space  增大日志缓冲区，重做日志放在快速磁盘上
+Log File Switch  归档设备太慢或者太满，增加或者扩大重做日志
+Log File Sync  每次提交更多记录、更快的存放重做日志的磁盘、裸设备
+Idle Event  忽略
 
 
-�����Ŀ����¼��������£�
-?    dispatcher timer�����������������¼�����
-?    lock manager wait for remote message��RAC �����¼�����
-?    pipe get���û����̿����¼�����
-?    pmon timer����̨���̿����¼�����
-?    PX Idle Wait�����в�ѯ�����¼�����
-?    PX Deq Credit: need buffer�����в�ѯ�����¼�����
-?    PX Deq Credit: send blkd�����в�ѯ�����¼�����
-?    rdbms ipc message����̨���̿����¼�����
-?    smon timer����̨���̿����¼�����
-?    SQL*Net message from client���û����̿����¼�����
-?    virtual circuit status�����������������¼�����
 
 
-Oracle��update����Ż��о�
-һ��         update�����﷨��ԭ��
-1.     �﷨
-������UPDATE ������ SET ������ = ��ֵ WHERE ������ = ĳֵ
-�磺update t_join_situation set join_state='1'whereyear='2011'
-�������Ϊ��2011�������ݵ�join_state�ֶ�Ϊ��1����������µ��ֶμ�������������ʱ���ؽ�����������Ч�ʻ�����
-   �������������һ�������ֶ�ֵ���µ���һ�����е��ֶ�ȥ��
-update ��a set a.�ֶ�1 = (select b.�ֶ�1 from ��b where a.�ֶ�2=b.�ֶ�2) where exists(select 1 from ��b where a.�ֶ�2=b.�ֶ�2)
-oracle�ĸ�����䲻ͨMSSQL��ô����д������д�����ˣ���ִ��ʱ���ܻᱨ
-��������set������Ӳ�ѯ����˶�������ֵ��oracle�涨һ��һ�������ݣ�������ʾ������Ҫ����������뱣֤�������ֵһһ��Ӧ��
-2.     ԭ��
-Update����ԭ�����ȸ���where�����鵽���ݺ����set�����Ӳ�ѯ����ִ���Ӳ�ѯ��ֵ������������µ��ֶΣ�ִ�и��¡�
-�磺update ��a set a.�ֶ�1 = (select b.�ֶ�1 from ��b where a.�ֶ�2=b.�ֶ�2) where exists(select 1 from ��b where a.�ֶ�2=b.�ֶ�2)�����a���������ݣ�ѭ��ÿ�����ݣ���֤���������Ƿ����exists(select 1 from ��b where a.�ֶ�2=b.�ֶ�2)�������������ִ��(select b.�ֶ�1 from ��b where a.�ֶ�2=b.�ֶ�2)��ѯ���鵽��Ӧ��ֵ����a.�ֶ�1�С�����������ʱһ��Ҫ��exists(select 1 from ��b where a.�ֶ�2=b.�ֶ�2)���������������򽫱�a���������ݵ��ֶ�1����Ϊnullֵ��
-����         ���oracle����Ч�ʵĸ��ֽ������
-1.     ��׼update�﷨
-������Ҫ���µı��ǵ������߱����µ��ֶβ���Ҫ�����������������������ѡ���׼��update��䣬�ٶ���죬�ȶ�����ã�������Ӱ�����������where�����е��ֶμ�����������ô����Ч�ʾ͸��ߡ�������Ҫ�����������ֶ�ʱ��update��Ч�ʾͷǳ��
-2.     inline view���·�
-inline view���·����Ǹ���һ����ʱ��������ͼ���磺update (select a.join_state as join_state_a,b.join_state as join_state_b
+
+常见的空闲事件包括以下：
+?    dispatcher timer（共享服务器空闲事件）；
+?    lock manager wait for remote message（RAC 空闲事件）；
+?    pipe get（用户进程空闲事件）；
+?    pmon timer（后台进程空闲事件）；
+?    PX Idle Wait（并行查询空闲事件）；
+?    PX Deq Credit: need buffer（并行查询空闲事件）；
+?    PX Deq Credit: send blkd（并行查询空闲事件）；
+?    rdbms ipc message（后台进程空闲事件）；
+?    smon timer（后台进程空闲事件）；
+?    SQL*Net message from client（用户进程空闲事件）；
+?    virtual circuit status（共享服务器空闲事件）。
+
+
+Oracle的update语句优化研究
+一、         update语句的语法与原理
+1.     语法
+单表：UPDATE 表名称 SET 列名称 = 新值 WHERE 列名称 = 某值
+如：update t_join_situation set join_state='1'whereyear='2011'
+更新年度为“2011”的数据的join_state字段为“1”。如果更新的字段加了索引，更新时会重建索引，更新效率会慢。
+   多表关联，并把一个表的字段值更新到另一个表中的字段去：
+update 表a set a.字段1 = (select b.字段1 from 表b where a.字段2=b.字段2) where exists(select 1 from 表b where a.字段2=b.字段2)
+oracle的更新语句不通MSSQL那么简单易写，就算写出来了，但执行时可能会报
+这是由于set哪里的子查询查出了多行数据值，oracle规定一对一更新数据，所以提示出错。要解决这样必须保证查出来的值一一对应。
+2.     原理
+Update语句的原理是先根据where条件查到数据后，如果set中有子查询，则执行子查询把值查出来赋给更新的字段，执行更新。
+如：update 表a set a.字段1 = (select b.字段1 from 表b where a.字段2=b.字段2) where exists(select 1 from 表b where a.字段2=b.字段2)。查表a的所有数据，循环每条数据，验证该条数据是否符合exists(select 1 from 表b where a.字段2=b.字段2)条件，如果是则执行(select b.字段1 from 表b where a.字段2=b.字段2)查询，查到对应的值更新a.字段1中。关联表更新时一定要有exists(select 1 from 表b where a.字段2=b.字段2)这样的条件，否则将表a的其他数据的字段1更新为null值。
+二、         提高oracle更新效率的各种解决方案
+1.     标准update语法
+当你需要更新的表是单个或者被更新的字段不需要关联其他表带过来，则最后选择标准的update语句，速度最快，稳定性最好，并返回影响条数。如果where条件中的字段加上索引，那么更新效率就更高。但对需要关联表更新字段时，update的效率就非常差。
+2.     inline view更新法
+inline view更新法就是更新一个临时建立的视图。如：update (select a.join_state as join_state_a,b.join_state as join_state_b
 from t_join_situation a, t_people_info b where a.people_number=b.people_number
 and a.year='2011'and a.city_number='M00000'and a.town_number='M51000') set join_state_a=join_state_b
-������ͨ��������������һ����ͼ��set�����úø��µ��ֶΡ�������������д����ֱ����ִ���ٶȿ졣����B������һ��Ҫ��where�����У��������ԡ�=�������������±�������һ�´���
+括号里通过关联两表建立一个视图，set中设置好更新的字段。这个解决方法比写法较直观且执行速度快。但表B的主键一定要在where条件中，并且是以“=”来关联被更新表，否则报一下错误：
 
-3.merge���·�
-merge��oracle���е���䣬�﷨���£�
+3.merge更新法
+merge是oracle特有的语句，语法如下：
 MERGE INTO table_name alias1
 USING (table|view|sub_query) alias2
 ON (join condition)
@@ -4953,16 +4953,16 @@ WHEN MATCHED THEN
         col2     = col2_val
 WHEN NOT MATCHED THEN
     INSERT (column_list) VALUES (column_values);
-����ԭ������alias2��Select���������ݣ�ÿһ������alias1���� ON (join condition)�ıȽϣ����ƥ�䣬�ͽ��и��µĲ���(Update),�����ƥ�䣬�ͽ��в������(Insert)��ִ��merge���᷵��Ӱ���������Merge����д���ȽϷ������������ֻ�����������������ӵ������merge���·�������������Ч�ʲ
-4.�����α���·�
-�﷨�磺
+它的原理是在alias2中Select出来的数据，每一条都跟alias1进行 ON (join condition)的比较，如果匹配，就进行更新的操作(Update),如果不匹配，就进行插入操作(Insert)。执行merge不会返回影响的行数。Merge语句的写法比较繁琐，并且最多只能两个表关联，复杂的语句用merge更新法将力不从心且效率差。
+4.快速游标更新法
+语法如：
 begin
-for cr in (��ѯ���) loop �C-ѭ��
-   --������䣨���ݲ�ѯ�����Ľ�����ϣ�
-endloop; --����ѭ��
+for cr in (查询语句) loop –-循环
+   --更新语句（根据查询出来的结果集合）
+endloop; --结束循环
 end;
-oracle֧�ֿ����α꣬����Ҫ����ֱ�Ӱ��α�д��forѭ���У������ͷ��������������������ݡ��ټ���oracle��rowid�����ֶΣ�oracleĬ�ϸ�ÿ��������rowid����ֶΣ�������Ψһ�����������Կ��ٶ�λ��Ҫ���µļ�¼�ϡ�
-�������£�
+oracle支持快速游标，不需要定义直接把游标写到for循环中，这样就方便了我们批量更新数据。再加上oracle的rowid物理字段（oracle默认给每个表都有rowid这个字段，并且是唯一索引），可以快速定位到要更新的记录上。
+例子如下：
 begin
 for cr in (select a.rowid,b.join_state from t_join_situation a,t_people_info b
 where a.people_number=b.people_number
@@ -4971,22 +4971,22 @@ update t_join_situation set join_state=cr.join_state where
 rowid = cr.rowid;
 endloop;
 end;
-ʹ�ÿ����α�ĺô��ܶ࣬����֧�ָ��ӵĲ�ѯ��䣬����׼ȷ���������ݶ�����Ч����Ȼ�ߣ���ִ�к󲻷���Ӱ��������
-��������
-����
-����
-��׼update�﷨
-�������»�ϼ򵥵�������ʹ�ô˷������š�
-inline view���·�
-���������ұ����±�ͨ�����������������ģ����ô˷������š�
-merge���·�
-���������ұ����±�����ͨ�����������������ģ����ô˷������š�
-�����α���·�
-����������߼����ӵģ����ô˷������š�
+使用快速游标的好处很多，可以支持复杂的查询语句，更新准确，无论数据多大更新效率仍然高，但执行后不返回影响行数。
+三、结论
+方案
+建议
+标准update语法
+单表更新或较简单的语句采用使用此方案更优。
+inline view更新法
+两表关联且被更新表通过关联表主键关联的，采用此方案更优。
+merge更新法
+两表关联且被更新表不是通过关联表主键关联的，采用此方案更优。
+快速游标更新法
+多表关联且逻辑复杂的，采用此方案更优。
 
 
-ʵʱ���Ե��ٶȣ�
---48466������
+实时测试的速度：
+--48466条数据
 --1.297
 update (select a.join_state as join_state_a,b.join_state as join_state_b
 from t_join_situation a, t_people_info b where a.people_number=b.people_number
@@ -5030,22 +5030,22 @@ whenmatchedthenupdateset a.join_state=b.join_state
 
 
 
-TNS-04414,TNS-04610���� .
-���ࣺ Oracle troubleshoot oracle net 2012-12-05 11:17 211���Ķ� ����(0) �ղ� �ٱ�
-ʹ��SQL���Ӹ����õ�tnsnames.ora�������������
+TNS-04414,TNS-04610错误 .
+分类： Oracle troubleshoot oracle net 2012-12-05 11:17 211人阅读 评论(0) 收藏 举报
+使用SQL连接刚配置的tnsnames.ora，出现下面错误：
 
 ERROR:
-ORA-12154: TNS: �޷�����ָ�������ӱ�ʶ��
+ORA-12154: TNS: 无法解析指定的连接标识符
 
-��NETCAͼ�����ã����²����֣�
+用NETCA图形配置，点下步出现：
 
-ServiceAliasException: �޷��г����������: TNS-04404: û�д���
-  caused by: oracle.net.config.ConfigException: TNS-04414: �ļ�����
-  caused by: TNS-04610: û����������, �ѵ��� NV �Խ�β
+ServiceAliasException: 无法列出网络服务名: TNS-04404: 没有错误
+  caused by: oracle.net.config.ConfigException: TNS-04414: 文件错误
+  caused by: TNS-04610: 没有其他文字, 已到达 NV 对结尾
 
 
 
-��󾭼����tnsnames.ora�������ļ�������һ�����ţ�
+最后经检查是tnsnames.ora的配置文件中少了一个括号：
 
    )
   )
@@ -5088,10 +5088,10 @@ Database altered.
 
 
 ALTER TRIGGER  GBSTRG.TR_DROPDENY_DEPEND_CHECK DISABLE;
-ORA-20008: �ö���������������,����ɾ��,����dba_dependencies!
+ORA-20008: 该对象被其他对象依赖,不能删除,请检查dba_dependencies!
 
-��ѯ״̬����enabled ����ʧЧ��trigger
--- trigger���ã�����ʧЧ��
+查询状态正常enabled 但是失效的trigger
+-- trigger启用，但是失效了
 select o.owner,o.object_name,o.status as is_VALID,t.trigger_type,t.table_name,t.column_name,t.status as is_ENABLED
  from all_objects o,all_triggers t
 where o.object_name=t.trigger_name
@@ -5101,44 +5101,44 @@ and t.status='ENABLED'  AND t.owner= 'INSLOG'
 
 
 
-�˺�������������
+账号密码永不过期
 
-�������̣�
-1���鿴�û���proifle���Ǹ���һ����default��
+处理过程：
+1、查看用户的proifle是那个，一般是default：
 sql>SELECT username,PROFILE FROM dba_users;
-2���鿴ָ����Ҫ�ļ�����default����������Ч�����ã�
+2、查看指定概要文件（如default）的密码有效期设置：
 sql>SELECT * FROM dba_profiles s WHERE s.profile='DEFAULT' AND resource_name='PASSWORD_LIFE_TIME';
-3����������Ч����Ĭ�ϵ�180���޸ĳɡ������ơ���
+3、将密码有效期由默认的180天修改成“无限制”：
 ALTER PROFILE DEFAULT LIMIT PASSWORD_LIFE_TIME UNLIMITED;
-��ǰ�����Ѿ�������Ĳ�û��Ҫ��
-4���޸ĺ󣬻�û�б���ʾORA-28002������û�����������ͬ������ʾ��
-   �Ѿ�����ʾ���û������ٸ�һ�����룬�������£�
+（前三步已经解决第四步没必要）
+4、修改后，还没有被提示ORA-28002警告的用户不会再碰到同样的提示；
+   已经被提示的用户必须再改一次密码，举例如下：
    $sqlplus / as sysdba
-    sql> alter user wapgw identified by  <ԭ��������>
+    sql> alter user wapgw identified by  <原来的密码>
 password_lock_time    UNLIMITED
 
-sqlplus -prelim / as sysdba    ǿ�Ƶ�½ϵͳ
-��Ϊsqlplus  / as sysdba��½ʱ�����ȡϵͳ���������������ֵ�
+sqlplus -prelim / as sysdba    强制登陆系统
+因为sqlplus  / as sysdba登陆时，会读取系统环境，包括数据字典
 
-�������ݿ�HANGס�������ֵ�Ҳ��HANG��
- ��sqlplus -prelim / as sysdba�ǲ���ȡ�����ֵ��
- ���ǿ�����Hanganalyze ��SystemState����������
- ��DUMP���ڴ�����
-
-
-
-
-hanganalyze��ORACLE��һ��������Ϲ��ߣ��������Ǵ�oracle 8.0.6��ʼ���ã���oracle���ݿ�������ص����������ʱ�������԰����㶨λ�������ڡ�
+但是数据库HANG住后，数据字典也被HANG了
+ 而sqlplus -prelim / as sysdba是不读取数据字典的
+ 但是可以用Hanganalyze ，SystemState这样的命令
+ 来DUMP出内存数据
 
 
 
-1.����˵˵hanganalyze���ߵ��÷�
 
-���ڵ�ʵ�����ݿ��﷨����
+hanganalyze是ORACLE的一款性能诊断工具，这个款工具是从oracle 8.0.6开始可用，在oracle数据库出现严重的性能问题的时候它可以帮助你定位问题所在。
+
+
+
+1.首先说说hanganalyze工具的用法
+
+对于单实例数据库语法如下
 
 alter session set events 'immediate trace name hanganalyze level <level>';
 
-����ʹ��oradebug����hanganalyze
+或则使用oradebug进行hanganalyze
 
 conn /as sysdba
 
@@ -5146,7 +5146,7 @@ SQLPLUS>oradebug hanganalyze <level>;
 
 
 
-����RAC���ݵ��﷨����
+对于RAC数据的语法如下
 
 con /as sysda
 
@@ -5160,7 +5160,7 @@ SQLPLUS>oradebug -g def hanganalyze <level>
 
 
 
-����level��˵����
+关于level的说明：
 
 10     Dump all processes (IGN state)
 
@@ -5186,11 +5186,11 @@ SQLPLUS>oradebug -g def hanganalyze <level>
 
 
 
-2.dump�ļ��ķ���
+2.dump文件的分析
 
 
 
-������һ�����ӣ�
+下面是一个例子：
 
 [oracle@SHDBService01 ~]$ more /data/oracle/admin/ora10g/udump/ora10g_ora_28378.trc
 
@@ -5358,7 +5358,7 @@ END OF HANG ANALYSIS
 
 
 
-open chains��������
+open chains部分例子
 
 Chain 1 : <cnode/sid/sess_srno/proc_ptr/ospid/wait_event> :
 
@@ -5384,7 +5384,7 @@ cnode      = Node Id (Only available since Oracle9i)
 
 
 
-State of nodes�������ӣ�
+State of nodes部分例子：
 
 [nodenum]/cnode/sid/sess_srno/session/ospid/state/start/finish/[adjlist]/predecessor
 
@@ -5414,24 +5414,24 @@ Nodenum   = This is secuencial number used by HANGANALYZE to identify each sessi
 
 
 
-IN_HANG: This might be considered as the most critical STATE. Basically a node in this state is involved in a deadlock, or is hung. Usually there will be another ��adjacent node�� in the same status. For example:
+IN_HANG: This might be considered as the most critical STATE. Basically a node in this state is involved in a deadlock, or is hung. Usually there will be another “adjacent node” in the same status. For example:
 
 
 
-LEAF and LEAF_NW: Leaf nodes are considered on top of the wait chain (usually blockers). They are considered ��Blockers�� when there is another session waiting. This can be easily identified using the ��predecesor�� field. If there is a node referenced in the ��prdecessor�� field, the node is considered as ��blocker��, otherwise it is considered as a ��slow�� session waiting for some resource.
+LEAF and LEAF_NW: Leaf nodes are considered on top of the wait chain (usually blockers). They are considered “Blockers” when there is another session waiting. This can be easily identified using the “predecesor” field. If there is a node referenced in the ‘prdecessor’ field, the node is considered as “blocker”, otherwise it is considered as a “slow” session waiting for some resource.
 
 The difference between LEAF and LEAF_NW is that LEAF nodes are not waiting for something, while LEAF_NW are not waiting or may be using the CPU
 
 
 
-���Կ������������п���
+可以看出上面例子中看出
 
- session  542   2126������session 1097 44386.
+ session  542   2126阻塞了session 1097 44386.
 
 
-3.�ںܶ������������ݿ�HANGס���޷���½sqlplus����ʱ�����Ҫ��ϵͳ����hanganalyze���ԼӲ�����¼sqlplus
+3.在很多情况下如果数据库HANG住则无法登陆sqlplus，这时如果想要对系统进行hanganalyze可以加参数登录sqlplus
 
-�����﷨���£�
+具体语法如下：
 
 
 
@@ -5448,15 +5448,15 @@ Prelim connection established
 
 SQL>
 
-prelim����ֻ��10g �Ժ�İ汾��Ч��
+prelim参数只对10g 以后的版本有效。
 
- 10g��ǰ�İ汾���ܵ�¼SQLPLUSʱ����ʹ��dbx����gdb��
+ 10g以前的版本不能登录SQLPLUS时可以使用dbx或则gdb。
 
 
 
-��ѯ������������
+查询分区表数据量
 
- ��ѯ��������¼��
+ 查询分区表记录：
 
 
 SQL> select * from dinya_test partition(part_01);
@@ -5464,9 +5464,9 @@ select/*+parallel(a 10)*/count(1) from RM_FLOWSET_STATUS partition(RM_FLOWSET_ST
 
 
 
-����ʹ����impdp��һ��С���ܣ�����Ӱ�������������Ӧ�û��õõ������ο���лл��
+今天使用了impdp的一个小功能，在做影响分析导数操作应该会用得到，供参考，谢谢。
 
-���磬���ǵ�����������ʱ����Ҫ�����ݡ���ͳ����Ϣ������ͳ����Ϣ����ʱ����ʹ��include������ʵ�֣����£�
+比如，我们导入生产数据时仅需要表数据、表统计信息、索引统计信息，此时可以使用include功能来实现，如下：
 
 userid='/ as sysdba'
 directory=dp_dir
@@ -5480,7 +5480,7 @@ job_name=impdp_iocrpt
 
 
 
-�ύjob�﷨��
+提交job语法：
 
 begin
 sys.dbms_job.submit(job => :job,
@@ -5493,22 +5493,22 @@ end;
 
 
 
-��������������������������������������������������
-����JOB
+－－－－－－－－－－－－－－－－－－－－－－－－－
+创建JOB
 variable jobno number;
 begin
 dbms_job.submit(:jobno, 'P_CRED_PLAN;',SYSDATE,'SYSDATE+1/2880',TRUE);
 commit;
 
 
-����JOB
+运行JOB
 SQL> begin
          dbms_job.run(:job1);
          end;
          /
 
 
-ɾ��JOB
+删除JOB
 SQL> begin
         dbms_job.remove(:job1);
         end;
@@ -5517,7 +5517,7 @@ SQL> begin
 
 
 
-�޸�sequence�ĵ�ǰֵ
+修改sequence的当前值
 
 declare
   LastValue integer;
@@ -5530,7 +5530,7 @@ begin
 end;
 
 
-���±���ͬ���
+重新编译同义词
 SELECT 'alter ' || decode(owner,
                           'PUBLIC',
                           'public synonym ',
@@ -5542,10 +5542,10 @@ WHERE object_type = 'SYNONYM'
 
 
 
-���ؽ�sequence
+或重建sequence
 
 
-��������
+导出序列
 
 SELECT ' CREATE SEQUENCE '||SEQUENCE_owner||'.'||SEQUENCE_NAME|| ' INCREMENT BY '||INCREMENT_BY ||' START WITH '||LAST_NUMBER||' MAXVALUE '||MAX_VALUE ||' CACHE '||CACHE_SIZE||' ORDER NOCYCLE ;'
 FROM dba_SEQUENCES
@@ -5563,15 +5563,15 @@ from dba_sequences   where sequence_owner='DBMGR'
 
 
 
-�����û����У�
+属主用户运行：
 select dbms_metadata.get_ddl('SEQUENCE',u.object_name) from dba|user_objects u where object_type='SEQUENCE'
 
-���ݿ���������ʱ���ռ䣬����impdp����ʱ�޷����룬������ʾ�κδ�����Ϣ..
+数据库需添加临时表空间，否则impdp导入时无法导入，并不提示任何错误信息..
 
 
-����������ѯ����
+联合主键查询存在
 
-where  (����a, ����b)
+where  (主键a, 主键b)
 
 
 select a.* from temp.PS_PAIC_EMP_INFO a,
@@ -5585,7 +5585,7 @@ select a.* from temp.PS_PAIC_EMP_INFO a,
 
 
 
-�޸�sql tuning advisor����
+修改sql tuning advisor参数
 
 BEGIN
   DBMS_AUTO_TASK_ADMIN.disable(
@@ -5610,9 +5610,9 @@ orapwd file=$ORACLE_HOME/dbs/orasid password=orclsys entries=2
 
 
 
- ZT ��������ֲOracle���ݿⷽ������ 2009-02-03 16:44:50
-���ࣺ Oracle
-�������ݿ��Ǩ�����ݿ���DBA�ճ���������������֡��������ݿ��Ǩ���޷�Ҳ�������ַ�ʽ��һ���Ǵ������ݿ���exp��,Ȼ���������ݿ��е��롣����һ�־���ʹ��startup upgrade�������ݿ⡣���������Oracle Rman����Ҳ�����°빦���ġ�[@more@]
+ ZT 升级和移植Oracle数据库方法若干 2009-02-03 16:44:50
+分类： Oracle
+升级数据库和迁移数据库是DBA日常工作中最常见的两种。升级数据库和迁移无非也就是两种方式，一种是从老数据库中exp出,然后在新数据库中导入。另外一种就是使用startup upgrade升级数据库。另外借助于Oracle Rman工具也是能事半功倍的。[@more@]
 
 
 
@@ -5633,14 +5633,14 @@ Release 2
 8.1.n -> 8.1.7 -> 8.1.7.4 -> 10.2.X.X.X
 
 
-�������һ�������������Ƚϸ��ӵ������Ϊ���ӡ�
+这里介绍一个工作中碰到比较复杂的情况作为例子。
 
-�����ݿ�ORACLE817��HK��������
-Ŀ�����ݿ���ODC��10.2.0.2,
-���߶�����solaris�ϵģ���������в�����Ҫ���������ݿ⣬�����ļ�·���������֡�
-��ʵ����һ��Ǩ�Ƶ��������ݿ��ļ���16G��ȫ��EXP�ļ�5G,�������ѡ�������������ݿ⣬������exp/imp.
+老数据库ORACLE817从HK传过来的
+目标数据库是ODC的10.2.0.2,
+两者都是在solaris上的，这个过程中不仅需要从命名数据库，而且文件路径不能再现。
+其实这是一个迁移的任务。数据库文件有16G，全库EXP文件5G,因此我们选择所以升级数据库，而不是exp/imp.
 
-����һ ���޸Ŀ����ļ��е��ļ�·����Ȼ�������������������ݿ⡣
+方法一 先修改控制文件中的文件路径，然后升级，再重命名数据库。
 
 1. parpare 10.2.0.2 oracle software envriment
 
@@ -5706,12 +5706,12 @@ SQL>spool catelogupgrade.log
 @ /rdbms/admin/utlrp.sql
 
 @olstrig.sql
-��������ű��Ͳ�����ora-07445�������ˡ�
+运行这个脚本就不会有ora-07445的问题了。
 
 
 
 shutdown immediate;
-�������̿�������һЩ���󣬿����� grep "^ORA-" catelogupgrade.log |sore|uniq ������쿴�����������������������������⣬��ע��temp��tools���ռ��Ƿ����
+升级过程可能碰到一些错误，可以用 grep "^ORA-" catelogupgrade.log |sore|uniq 来归类察看，我在升级过程中碰到的两个问题，是注意temp和tools表空间是否充足
 
 7. backup this database
 
@@ -5735,7 +5735,7 @@ shutdown immediate
 startup
 
 
-������ ���ȱ��ķ�ʽ��ֱ��clone���ݣ����������ݿ⣬ֱ��������
+方法二 在热备的方式下直接clone数据，从命名数据库，直接升级。
 
 1. hot backup old database
 2. alter database backup controlfile to trace in old database
@@ -5752,10 +5752,10 @@ add tempfile
 
 @ /rdbms/admin/
 
-���ַ�����Ҫ��Ҫ��ע������ 6 �� recover database��9i �� 10g ��archive log �ṹ������ͬ�ģ����Կ��Կ�汾apply, 8i-->10g��û�в��Թ���
+此种方法主要需要关注的在于 6 步 recover database，9i 和 10g 的archive log 结构上是相同的，所以可以跨版本apply, 8i-->10g的没有测试过。
 
 
-exp/imp ��ʽ����8i���ݿ⵽10g�����ӿ��Բο� itpub.net�ϵ�һƪ����
+exp/imp 方式升级8i数据库到10g的例子可以参考 itpub.net上的一篇文章
 http://www.itpub.net/thread-1078953-1-1.html
 
 
@@ -5767,7 +5767,7 @@ http://download.oracle.com/docs/cd/B19306_01/server.102/b14238/toc.htm
 "migration db to 10g" from metalink.oracle.com
 Note:263809.1
 
-��л�ҵ�ͬ�������ڵڶ���ʽ���ڵĽ���Ͱ�����
+感谢我的同事老万在第二方式给于的建议和帮助。
 
 
 
@@ -5776,26 +5776,26 @@ Note:263809.1
 
 
 
-����ͳ����Ϣ�����Ľ���취
-����취����ȷ�����ǽ�����
-���Դ���������ȥ������
-A������Schema
+对象统计信息锁定的解决办法
+解决办法很明确，就是解锁。
+可以从两个层面去处理：
+A、解锁Schema
 
 DBMS_STATS.UNLOCK_schema_STATS(user);
 
 
-B��������������
-1)�Ȳ���������ı�select table_name from user_tab_statistics where stattype_locked is not null;
-Ȼ���ٽ�������
-exec dbms_stats.unlock_table_stats(user,'����');
-2)Ҳ��ֱ������sql�ű�
+B、解锁单个对象
+1)先查出被锁定的表select table_name from user_tab_statistics where stattype_locked is not null;
+然后再解锁对象
+exec dbms_stats.unlock_table_stats(user,'表名');
+2)也可直接生成sql脚本
 select 'exec dbms_stats.unlock_table_stats('''||user||''','''||table_name||''');' from user_tab_statistics where stattype_locked is not null;
-���ﲻ�����ɵ�sql���ö�̬��user��Ϊ����ִ������ȷ֪�������ǽ����ĸ�schema�µı�����ֹ�������
+这里不在生成的sql中用动态的user是为了让执行者明确知道到底是解锁哪个schema下的表，防止误操作。
 
-һ����ԣ�����Ϊ���ȶ�ִ�мƻ�����Ϊ��Oracle 10g���ϣ�OracleĬ�ϻ��Զ��ռ�ͳ����Ϣ��Ҫ����סͳ����Ϣ����ʹ��LOCK_SCHEMA_STATS��LOCK_TABLE_STATS����
+一般而言，这是为了稳定执行计划，因为在Oracle 10g以上，Oracle默认会自动收集统计信息，要想锁住统计信息，请使用LOCK_SCHEMA_STATS、LOCK_TABLE_STATS包。
 
 
-��ѡ�ĵ�Ȼ��ʹ���Զ��������ռ�ķ�ʽ��
+首选的当然是使用自动管理表空间的方式。
 
 SQL> alter system set undo_tablespace=UNDOTBS scope=spfile;
 
@@ -5826,11 +5826,11 @@ Where Taddr=Addr and
 Sid=(select sid from v$mystat where rownum<2);
 
 
-SQL1:ִ�д�sql���������why��
+SQL1:执行此sql会产生事务，why？
 select *
   from rv_abbs_pre_sale_detail a
 
-//ִ�д�sql�ֲ����������why��
+//执行此sql又不会产生事务，why？
 select *
   from rv_abbs_pre_sale_detail a
 where rownum<10000;
@@ -5849,97 +5849,97 @@ select s.sid,s.serial#,s.sql_hash_value,
    and t.xidusn = r.segment_id(+) and s.sid=570;
 
 ORA-01555: snapshot too old: rollback segment number 3 with name "_SYSSMU3$" too small
-���пռ�ܴ��п���segment�����ѱ�offline��
-1������ع��α��ռ䡣
+空闲空间很大，有可能segment许多已被offline：
+1、增大回滚段表空间。
 
-��
-2�����ı��ռ�
+或
+2、更改表空间
 
 
-Oracle undo�ͷű��ռ��еĲ�������
+Oracle undo释放表空间中的操作步骤
 
-�鿴�����ռ�����
+查看各表空间名称
 select name from v$tablespace
 
-�鿴ĳ�����ռ���Ϣ
+查看某个表空间信息
 select file_name,bytes/1024/1024 from dba_data_files where tablespace_name like 'undoTBS1';
 
-�鿴�ع��ε�ʹ��������ĸ��û�����ʹ�ûع��ε���Դ��������û���ø���ʱ�䣨�ر���������������
+查看回滚段的使用情况，哪个用户正在使用回滚段的资源，如果有用户最好更换时间（特别是生产环境）。
 select s.username, u.name from v$transaction t,v$rollstat r, v$rollname u,v$session s  where s.taddr=t.addr and t.xidusn=r.usn and r.usn=u.usn order by s.username;
 
-���undo Segment״̬
-select usn,xacts,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; �����µ�undo���ռ䣬�������Զ���չ������
+检查undo Segment状态
+select usn,xacts,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; 创建新的undo表空间，并设置自动扩展参数；
 
-create undo tablespace undotbs2 datafile 'D:\Oracle \PRODUCT\10.1.0\ORADATA\ORCL\undoTBS02.DBF' size 10m reuse autoextend on next 100m maxsize unlimited; ��̬����spfile�����ļ���
+create undo tablespace undotbs2 datafile 'D:\Oracle \PRODUCT\10.1.0\ORADATA\ORCL\undoTBS02.DBF' size 10m reuse autoextend on next 100m maxsize unlimited; 动态更改spfile配置文件；
 
-alter system set  undo _tablespace=undotbs2 scope=both; �ȴ�ԭUNDO���ռ�����Oracle UNDO SEGMENT OFFLINE��
+alter system set  undo _tablespace=undotbs2 scope=both; 等待原UNDO表空间所有Oracle UNDO SEGMENT OFFLINE；
 
-select usn,xacts,status,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; ��ִ�п�UNDO���ռ�����UNDO SEGMENT ONLINE��
+select usn,xacts,status,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; 再执行看UNDO表空间所有UNDO SEGMENT ONLINE；
 
-select usn,xacts,status,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; ɾ��ԭ�е�UNDO���ռ䣻
+select usn,xacts,status,rssize/1024/1024/1024,hwmsize/1024/1024/1024,shrinks from v$rollstat order by rssize; 删除原有的UNDO表空间；
 
-drop tablespace undotbs1 including contents; ȷ��ɾ���Ƿ�ɹ���
+drop tablespace undotbs1 including contents; 确认删除是否成功；
 
 select name from v$tablespace;
 
 
-�ٷ���Ҳ����΢Ц���ټ���ҲҪע������: �ٿ࣬Ҳ������֣����ۣ�ҲҪ���Լ�
+再烦，也别忘微笑；再急，也要注意语气: 再苦，也别忘坚持；再累，也要爱自己
 
-���� �ֲ�ʽOracle�� database link
-�����ֲ�ʽ���ݿ�ʱ�����õ�dblink��������dblink�����Ϻ��٣��ܶ������ᵽ�ˣ�������ϸ��
+关于 分布式Oracle中 database link
+在做分布式数据库时难免用到dblink，但关于dblink的资料很少，很多书上提到了，但不详细。
 
-���ݿ����Ӷ����һ��Oracle���ݿ⵽��һ�����ݿ�ĵ���ͨ��ͨ����
-��������ǰҪ���е�Զ�����ݿ���������������ַ�����������tnsnames.ora���������Ǹ�����'oradXP'
-�Ȳ���һ�£�$tnsping oradxp
-Attemping to contact(...) OK(30����).
-˵����Զ�����ݿ�oradxp�ɷ��ʡ�
+数据库链接定义从一个Oracle数据库到另一个数据库的单行通信通道。
+建立链接前要先有到远程数据库的命名服务（连接字符串），就是tnsnames.ora中描述的那个，如'oradXP'
+先测试一下：$tnsping oradxp
+Attemping to contact(...) OK(30毫秒).
+说明对远程数据库oradxp可访问。
 
 
-�������ݿ����ӵ��﷨Ϊ��
+创建数据库链接的语法为：
 CREATE PUBLIC DATABASE LINK oradxp.cug.edu.cn USING 'oradxp';
-���� oradxp.cug.edu.cn ������Զ�����ݿ��ȫ����(SID),'oradxp'���ǵ�Զ�̵������ַ�����Զ�����ݿ��ȫ��������ͨ����½Զ�̻���
+其中 oradxp.cug.edu.cn 必须是远程数据库的全局名(SID),'oradxp'就是到远程的连接字符串。远程数据库的全局名可以通过登陆远程机，
 SELECT * FROM global_name;
-�õ���
-������Ϳ���������oradxp.cug.edu.cn����Զ�����ݿ���
-��
+得到。
+现在你就可以用链接oradxp.cug.edu.cn访问远程数据库了
+如
 SELECT * FROM global_name@oradxp.cug.edu.cn;
-�����õ����ǲ���Զ�̻���ȫ������
-����SELECT ������������������Ƕ�Զ�̻��ķ��ʡ�
-ע�⣺��½��������ǵ�ǰ��½�������û����Ϳ��Ҳ����������õ���public���ӣ���ô��Զ�̾�Ҫ��һ���ͱ�����ͬ���û�/������С��磺����aaa/aaa��¼������Ȼ��ִ��
+看看得到的是不是远程机的全局名。
+所有SELECT 语句后面跟上链接名都是对远程机的访问。
+注意：登陆名口令就是当前登陆本机的用户名和口令。也就是如果你用的是public链接，那么在远程就要有一个和本机相同的用户/口令才行。如：你以aaa/aaa登录本机，然后执行
 SELECT * FROM BBB.bbb@oradxp.cug.edu.cn;
-��ô��Զ������BBB.bbb�ķ����û�Ϊaaa����Ϊaaa
-Ҳ�����ڱ�����Զ�̻��϶����û�aaa���Ϊaaa����ִ�гɹ���
-����˽�����ӣ�
+那么对远程数据BBB.bbb的访问用户为aaa口令为aaa
+也就是在本机和远程机上都有用户aaa口令都为aaa才能执行成功！
+关于私有链接：
 CREATE DATABASE LINK oradxp.cug.edu.cn CONNECT TO system IDENTIFIED BY aaa;
-��ͽ�����system��˽�����ӡ�
-˽�����Ӻ�public���ӵĲ����ǵ�¼����������ơ�Ҳ����
+这就建立了system的私有链接。
+私有链接和public链接的差别就是登录名口令的限制。也就是
 
-�㲻����ʲô�û���¼������ִ��
+你不管用什么用户登录本机，执行
 SELECT * FROM BBB.bbb@oradxp.cug.edu.cn;
-����Զ�̻�����BBB.bbb���û��Ϳ��Ϊsystem/aaa
-���õ��������ӷ���ϵͳ��SYS.link$����
-ͨ��OEM����̨�� �ֲ�-�����ݿ����ӿ��Բ鿴���е����ӡ�
-Ҫɾ��public link ����
+访问远程机数据BBB.bbb的用户和口令都为system/aaa
+建好的数据链接放在系统表SYS.link$表中
+通过OEM控制台的 分布-〉数据库链接可以查看所有的链接。
+要删除public link 可以
 drop public database link linkname;
-����˽������������Ӧ�û���½��������system/aaa
-Ȼ��drop database link linkname;
-��Ȼ��ֱ��ɾ��SYS.link$���еļ�¼һ�����С�
+对于私有链接先以相应用户登陆，如上述system/aaa
+然后drop database link linkname;
+当然，直接删除SYS.link$表中的记录一样可行。
 
 ---------------------------------------------
 
-�����ĵ�dblink--�ֹ��ر�dblink [REF]  db_link
-��csdn�￴�û��ʵ����й�dblink�Ĺر����⣬����һֱ�����dblink�ֱ���̬�ȣ����������ò��á�
-������ʹ��dblink��Զ�̵�oracle���ݿ���в���ʱ�����dblink�ķ��ʻᵥ��������Զ�̵�һ�λỰ�������Զ�����ݿ��session�����������㽨�����Ժ���Զ��Ĺرպ�Զ�̷�����������session���������Ǻܿ��µģ����һ�����ϲ�ѯ������ܶ����Զ�̵����ݿ�session�����session̫�࣬��ɲ�ѯʧ�ܣ�����ֻҪһ�㣬����һֱ�����dblink������������ű���̬�ȣ��ܲ�ȥʹ������������ȥʹ������
-�������ʹ��dblink��������Ҫ��ʱ��ʾ�Ĺر�dblink�������ṩ���ַ�ʽ
+不放心的dblink--手工关闭dblink [REF]  db_link
+在csdn里看用户问道了有关dblink的关闭问题，本人一直对这个dblink持保留态度，如果不用最好不用。
+在我们使用dblink对远程的oracle数据库进行操作时，这个dblink的访问会单独创建到远程的一次会话，这个到远程数据库的session，并不会在你建立的以后就自动的关闭和远程服务器建立的session，所以这是很可怕的，如果一个不断查询会产生很多个到远程的数据库session，如果session太多，造成查询失败，所以只要一点，笔者一直对这个dblink这个技术保持着保留态度，能不去使用她，尽量不去使用她。
+不过如果使用dblink，我们需要及时显示的关闭dblink。以下提供两种方式
 1.
 alter sesssion close database link <dblink_name>;
 2.
 dbms_session.close_database_link(<dblink_name>);
-�����ÿ������֮�󣬻�Ҫ�û�ȥcommit���Լ��ֹ���ȥcolseһ�¡�ʵ����ʹ��֮��ѽ��
+如果是每个连接之后，还要用户去commit，以及手工的去colse一下。实在是痛苦之至呀。
 
 ------------------------------------------
 
-���Oracle���ݿ�����read onlyģʽ�򿪵ģ����޷�ͨ��db link����Զ�����ݿ⡣��ΪֻҪͨ��db link����ʹִֻ��select��oracleҲ��Ҫ�����ֲ�ʽ����֧�ֵģ�������Ҫ����ع��Σ���read onlyģʽ����û��online�Ļع��εģ�
+如果Oracle数据库是以read only模式打开的，则无法通过db link访问远程数据库。因为只要通过db link，即使只执行select，oracle也是要开启分布式事务支持的，事务需要分配回滚段，而read only模式下是没有online的回滚段的：
 
 SQL>select 1 from dual@lnk_db1;
 
@@ -5949,7 +5949,7 @@ select 1 from dual@lnk_db1
 
 ERROR at line 1: ORA-16000: database open for read-only access
 
-��һ��read write�Ŀ����������ԣ����Կ���ͨ��db link�Ĳ�ѯȷʵ���������񣬲��ҷ����˻ع��Ρ�
+在一个read write的库上做个测试，可以看到通过db link的查询确实开启了事务，并且分配了回滚段。
 
 SQL>select sid from v$mystat where rownum=1;
 
@@ -5977,9 +5977,9 @@ SQL>select s.sid,s.serial#,s.sql_hash_value,
        SID    SERIAL# SQL_HASH_VALUE SEGMENT_NA     XIDUSN    XIDSLOT     XIDSQN
 ---------- ---------- -------------- ---------- ---------- ---------- ----------
       1270      37655              0 _SYSSMU10$         10         45    2042124
-���Կ���session 1270��Ȼִֻ����һ��select��䣬��������ʹ����db link��ȷʵ������һ������񣬲��ҷ�����һ���ع���_SYSSMU10$��
+可以看到session 1270虽然只执行了一条select语句，但是由于使用了db link，确实开启了一个活动事务，并且分配了一个回滚段_SYSSMU10$。
 
-Update���߹�������һ�£�ʵ���ϻ����а취�ƹ��������ġ�Oracle�ṩ��read only�������������õ��ع��εġ�
+Update：七公提醒了一下，实际上还是有办法绕过这个问题的。Oracle提供了read only的事务，是无须用到回滚段的。
 
 SQL>select 1 from dual@lnk_db1;
 select 1 from dual@lnk_db1
@@ -5996,19 +5996,19 @@ SQL>select 1 from dual@lnk_db1;
          1
 ----------
          1
-49.�ر�dblink
+49.关闭dblink
 50.
-51.��csdn�￴�û��ʵ����й�dblink�Ĺر����⣬����һֱ�����dblink�ֱ���̬�ȣ����������ò��á�
-52.������ʹ��dblink��Զ�̵�oracle���ݿ���в���ʱ�����dblink�ķ��ʻᵥ��������Զ�̵�һ�λỰ�������Զ�����ݿ��session�����������㽨�����Ժ���Զ��Ĺرպ�Զ�̷�����������session���������Ǻܿ��µģ����һ�����ϲ�ѯ������ܶ����Զ�̵����ݿ�session�����session̫�࣬��ɲ�ѯʧ�ܣ�����ֻҪһ�㣬����һֱ�����dblink������������ű���̬�ȣ��ܲ�ȥʹ������������ȥʹ������
-53.�������ʹ��dblink��������Ҫ��ʱ��ʾ�Ĺر�dblink�������ṩ���ַ�ʽ
+51.在csdn里看用户问道了有关dblink的关闭问题，本人一直对这个dblink持保留态度，如果不用最好不用。
+52.在我们使用dblink对远程的oracle数据库进行操作时，这个dblink的访问会单独创建到远程的一次会话，这个到远程数据库的session，并不会在你建立的以后就自动的关闭和远程服务器建立的session，所以这是很可怕的，如果一个不断查询会产生很多个到远程的数据库session，如果session太多，造成查询失败，所以只要一点，笔者一直对这个dblink这个技术保持着保留态度，能不去使用她，尽量不去使用她。
+53.不过如果使用dblink，我们需要及时显示的关闭dblink。以下提供两种方式
 54.1.alter sesssion close database link <dblink_name>;
 55.2.dbms_session.close_database_link(<dblink_name>);
-56.�����ÿ������֮�󣬻�Ҫ�û�ȥcommit���Լ��ֹ���ȥcolseһ�¡�ʵ����ʹ��֮��ѽ
+56.如果是每个连接之后，还要用户去commit，以及手工的去colse一下。实在是痛苦之至呀
 
 
 
 
-���⣬����Ҳ���Լ��������ϵ��ֶ������ع��εķ�ʽ��
+另外，我们也可以继续沿用老的手动管理回滚段的方式。
 
 SQL> create rollback segment rbs01;
 
@@ -6022,8 +6022,8 @@ SQL> select segment_name, tablespace_name, status from dba_rollback_segs;
 
 
 
-ʹ��drop database link �������޷�ɾ������schema�µ�dblink�ģ��Ƿ��������취�أ������Ǵ������ҵ�������������
-����һ��ʹ������Ľű���ʹ��job��ʽɾ��dblink
+使用drop database link 命令是无法删除其他schema下的dblink的，是否还有其他办法呢？下面是从网上找到的两个方法：
+方法一、使用下面的脚本，使用job方式删除dblink
 begin
   dbms_scheduler.create_job(
     job_name=>'&owner..drop_database_link',
@@ -6035,7 +6035,7 @@ begin
   dbms_scheduler.drop_job('&owner..drop_database_link');
 end;
 /
-���������Ҫʹ�ô�д��
+输入变量需要使用大写。
 SQL> begin
   2    dbms_scheduler.create_job(
   3      job_name=>'&owner..drop_database_link',
@@ -6064,10 +6064,10 @@ PL/SQL procedure successfully completed.
 
 SQL> select * from dba_db_links;
 no rows selected
-���Գɹ���
-�ؽ����Ի���
+测试成功。
+重建测试环境
 
-��������ʹ������Ĵ洢����
+方法二、使用下面的存储过程
 Create or replace procedure Drop_DbLink(schemaName varchar2, dbLink varchar2 ) is
             plsql   varchar2(1000);
             cur     number;
@@ -6117,7 +6117,7 @@ Create or replace procedure Drop_DbLink(schemaName varchar2, dbLink varchar2 ) i
  23     /
 
 Procedure created.
-ע���������ȫ��Ϊ��д��
+注意输入参数全部为大写。
 SQL> exec drop_dblink('LIUTYA','LECCTEST');
 PL/SQL procedure successfully completed.
 
@@ -6127,7 +6127,7 @@ no rows selected
 SQL> drop procedure drop_dblink;
 Procedure dropped.
 
-C) Create a procedure as below from ��SYS�� user.
+C) Create a procedure as below from “SYS” user.
 
 SQL>  Create or replace procedure Drop_DbLink(schemaName varchar2, dbLink varchar2 ) is
             plsql   varchar2(1000);
@@ -6162,9 +6162,9 @@ SQL> select db_link,owner from dba_db_links where owner='CKPT' and db_link='DEVW
 no rows selected
 SQL>Here No DB_LINK exists with the above name after Executing Procedure.
 
-Step 2:- How to DROP ALL DB_LINKS of a ��PRIVATE�� schema from ��SYS�� user
+Step 2:- How to DROP ALL DB_LINKS of a “PRIVATE” schema from “SYS” user
 
-This procedure is an extended for the above procedure ��Drop_DbLink��, Create a procedure named ��Dropschema_dblinks��
+This procedure is an extended for the above procedure “Drop_DbLink”, Create a procedure named “Dropschema_dblinks”
 
 create or replace procedure DropSchema_DbLinks(schemaName varchar2 ) is
     begin
@@ -6204,9 +6204,9 @@ no rows selected
 SQL>
 
 
-���Ը�˽��DBLINK�û��´������򵥵Ĵ洢���̣������е���DBLINK����֤��
+可以给私有DBLINK用户下创建个简单的存储过程，过程中调用DBLINK来验证。
 
-������
+举例：
 CREATE OR REPLACE PROCEDURE owner.procedure_name
 AS
 p_int NUMBER(10);
@@ -6215,23 +6215,23 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE(p_int);
 EXCEPTION
   WHEN OTHERS THEN
-    DBMS_OUTPUT.PUT_LINE(��error.��);
+    DBMS_OUTPUT.PUT_LINE(‘error.’);
 END;
 
-Ȼ��ʹ��sysִ��������̣������ӡ�����1����˵��dblink����Ч�ġ�������쳣�У���˵��dblink��Ч��
+然后使用sys执行这个过程，如果打印输出“1”那说明dblink是有效的。如果到异常中，那说明dblink无效。
 
 
 
 
-��trace
+开trace
 ALTER SESSION SET SQL_TRACE = TRUE;
 
-ORA-12519��ORA-12514��������¼ .
-��˵processes���ù�С���µ�
+ORA-12519和ORA-12514问题解决记录 .
+是说processes设置过小导致的
 
 
 
-���ݿ�汾��10.2.0.4,��ִ��expdp����ʱ����ctrl+c�������ٴ�ִ��expdp��������
+数据库版本是10.2.0.4,在执行expdp导出时，按ctrl+c结束，再次执行expdp，报错：
 
 UDI-00008: operation generated ORACLE error 31623
 ORA-31623: a job is not attached to this session via the specified handle
@@ -6239,7 +6239,7 @@ ORA-06512: at "SYS.DBMS_DATAPUMP", line 2772
 ORA-06512: at "SYS.DBMS_DATAPUMP", line 3886
 ORA-06512: at line 1
 
-�鿴metalink���������½��ͣ�
+查看metalink，发现如下解释：
 
 Applies to:
 Oracle Server - Enterprise Edition - Version: 10.2.0.1 to 10.2.0.4
@@ -6311,7 +6311,7 @@ Note 361025.1 - Invalid Objects After Installing a 10.2 Patchset
 Keywords
 QUEUE_TABLE ; DATAPUMP ; DBMS_DATAPUMP ;
 
-��������ĵ��ṩ�Ľ���������в���������õ������
+按照这个文档提供的解决方法进行操作，问题得到解决。
 
 
 
@@ -6321,32 +6321,32 @@ ORA-06512: at "SYS.DBMS_DATAPUMP", line 3326
 ORA-06512: at "SYS.DBMS_DATAPUMP", line 4551
 ORA-06512: at line 1
 
-ִ��@ /rdbms/admin/catproc.sql
+执行@ /rdbms/admin/catproc.sql
 
 
 
-���stoped impdp/expdp job�ķ��� 2008-09-11 12:07:47
-���ࣺ Linux
-stoped impdp/expdp job����dba_datapump_jobs������һ����¼����ʾΪnot running.
-���stopped job�����������
-1) job�ܹ�attach
-���job�ܹ�attach, �����attach����kill job.
-�磺expdp system/**** attach=SYS_EXPORT_TABLE_01
+清除stoped impdp/expdp job的方法 2008-09-11 12:07:47
+分类： Linux
+stoped impdp/expdp job会在dba_datapump_jobs中留下一条记录，显示为not running.
+清除stopped job分两种情况：
+1) job能够attach
+如果job能够attach, 则可以attach后再kill job.
+如：expdp system/**** attach=SYS_EXPORT_TABLE_01
         kill_job
 
-2) job�޷�attach
-���job�޷�attach, ����Ҫɾ������DataPump���û��µ�master table.
-�磺conn system/*****
-        drop table SYS_EXPORT_TABLE_01��(master table����һ����job name��ͬ)
+2) job无法attach
+如果job无法attach, 则需要删除连接DataPump的用户下的master table.
+如：conn system/*****
+        drop table SYS_EXPORT_TABLE_01　(master table名称一般与job name相同)
 
-���ϵ��û�����job name�����Դ�dba_datapump_jobs�еõ���
-
-
+以上的用户名和job name都可以从dba_datapump_jobs中得到。
 
 
-���������һ��һ��������ORALCE��11G�����ڴ棬���ԭ������һ���Զ����ݱñ��ݲ���ʹ�ˣ��ֶ���CMD��ִ��EXPDP������ִ���
 
-ORA-31236: ��ҵû��ͨ��ָ���ľ�����ӵ��˻Ự
+
+最近调整了一下一个服务器ORALCE（11G）的内存，结果原来做的一个自动数据泵备份不好使了，手动在CMD下执行EXPDP命令，出现错误：
+
+ORA-31236: 作业没有通过指定的句柄连接到此会话
 
 ORA-06512: at "SYS.DBMS_DATAPUMP", line 2772
 ORA-06512: at "SYS.DBMS_DATAPUMP", line 3886
@@ -6354,17 +6354,17 @@ ORA-06512: at line 1
 
 
 
-�����ϲ���һ�£��ܽ������²����������
+在网上查了一下，总结了以下步骤来解决：
 
-1������streams_pool_size�Ĵ�С,�ҵ�ORACLE������ǰû���ã�Ĭ����0���Ҹ�������512M,ò�����ݱñ���Ҫ�õ��������
+1、看看streams_pool_size的大小,我的ORACLE出问题前没设置，默认是0，我给设置了512M,貌似数据泵备份要用到这个玩意
 
   alter system set streams_pool_size=512M;
 
-2�������������һ��ţ�����ģ��ҳ������ˣ�������˵Ҫ�ر����ݿ�����������û������ֱ��ִ��:
+2、接下来这个是一个牛人整的，我抄过来了，不过他说要关闭数据库再重启，我没理他，直接执行:
 
   exec dbms_aqadm.drop_queue_table(queue_table=>'SYS.KUPC$DATAPUMP_QUETAB',force=>TRUE);
 
-  --���ؽ�
+  --再重建
 
   -- Create our queue table.
 BEGIN
@@ -6381,11 +6381,11 @@ END IF;
 END;
 /
 
-3����$ORACLE_HOME/RDBMS/ADMIN���и�utlrp.sql,ִ��һ�£�OK��Ȼ���ڽ������ݱñ��ݣ�û�����ˣ�
+3、在$ORACLE_HOME/RDBMS/ADMIN下有个utlrp.sql,执行一下，OK，然后在进行数据泵备份，没问题了！
 
 
 
-���ҽ��̶�Ӧ��sql/
+查找进程对应的sql/
 
 select /*+rule*/s.SID,
        s.SERIAL#,
@@ -6408,7 +6408,7 @@ select /*+rule*/s.SID,
 
 SET SERVEROUTPUT ON SIZE 10000000
 
-ֻҪ��BEGIN�����һ��dbms_output.enable(10000000);��һ������ȫ���㶨������ű���������
+只要在BEGIN下面加一行dbms_output.enable(10000000);，一切问题全部搞定。具体脚本见附件！
 
 ERROR at line 1:
 ORA-20000: ORU-10027: buffer overflow, limit of 2000 bytes
@@ -6418,7 +6418,7 @@ ORA-06512: at "SYS.DBMS_OUTPUT", line 139
 ORA-06512: at line 429
 
 
-ORA-20000: ����Ϊoverflow��һ�㷽��Ϊ����ֵ��һЩ��
+ORA-20000: 是因为overflow，一般方法为设置值大一些。
 
 set long 10000;
 set linesize 10000;
@@ -6426,22 +6426,22 @@ set serverout on size 10000;
 
 
 
-�����ǿ��ܳ��ֵļ��������
+下面是可能出现的几种情况。
 
-1  ORU-10027:buffer overflow limit of 2000 bytes��
+1  ORU-10027:buffer overflow limit of 2000 bytes；
 
-����1��set serveroutput on size 10000000 //���ô��,Ĭ��Ϊ2000 bytes
+方法1：set serveroutput on size 10000000 //设置大点,默认为2000 bytes
 
-����2��exec dbms_output.enable(999999999999999999999); //Ĭ��Ϊ2000 bytes
+方法2：exec dbms_output.enable(999999999999999999999); //默认为2000 bytes
 
 2  ORU-10028:line length overflow,limit of 255 chars per line ;
 
-oracle 10g release2��ȡ����255���ֽڵ����ơ�֮ǰ�İ汾������255�ֽڵ����ơ�
+oracle 10g release2中取消了255个字节的限制。之前的版本，会有255字节的限制。
 
-��������õ������������á���10.2ǰ�İ汾�����ڲ�̫�������ݣ�����ʹ��SUBSTR���������������⡣��ȷ�����ȵģ�Ŀǰ��û�ҵ�����취��
+上面的设置调整都不起作用。在10.2前的版本，对于不太长的内容，可以使用SUBSTR函数来解决这个问题。不确定长度的，目前还没找到解决办法。
 
 
-������������
+两表关联更新
 
 update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id);
 
@@ -6450,14 +6450,14 @@ where exists(select 1 from TB b where b.id=a.id)
 
 update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id)
 where exists(select 1 from TB b where b.id=a.id)
-ע����������Ӻ����exists��䣬TA������������name, remark��λ��������ΪNULLֵ�� ���name, remark��λ������Ϊnull���򱨴��� �ⲻ������ϣ�������ġ�
+注意如果不添加后面的exists语句，TA关联不到的行name, remark栏位将被更新为NULL值， 如果name, remark栏位不允许为null，则报错。 这不是我们希望看到的。
 
-SQL/Oracle ������������ .
-���ࣺ SQL Server Oracle 2011-11-18 10:09 4098���Ķ� ����(0) �ղ� �ٱ�
-nulltableinsertoraclejoin�ű�
-   ��TA, TB�������������������λid, name, remark. ������Ҫ��TB����name, remark������λͨ��id���������µ�TA���Ķ�Ӧ��λ��
+SQL/Oracle 两表关联更新 .
+分类： SQL Server Oracle 2011-11-18 10:09 4098人阅读 评论(0) 收藏 举报
+nulltableinsertoraclejoin脚本
+   有TA, TB两表，假设均有三个栏位id, name, remark. 现在需要把TB表的name, remark两个栏位通过id关联，更新到TA表的对应栏位。
 
-�����ű���
+建表脚本：
 
 
 [sql] view plaincopyprint 
@@ -6518,19 +6518,19 @@ commit;
 select * from TA;
 select * from TB;
 
-SQLServer/Oracle�汾��Updateд���ֱ����£�
+SQLServer/Oracle版本的Update写法分别如下：
 
 1. SQLServer
 
 
 [sql] view plaincopyprint 
 01.update TA set name=b.name, remark=b.remark from TA a inner join TB b on a.id = b.id
-update TA set name=b.name, remark=b.remark from TA a inner join TB b on a.id = b.id����
+update TA set name=b.name, remark=b.remark from TA a inner join TB b on a.id = b.id或者
 
 [sql] view plaincopyprint 
 01.update TA set name=b.name, remark=b.remark from TA a, TB b where a.id = b.id
 update TA set name=b.name, remark=b.remark from TA a, TB b where a.id = b.id
-ע�ⲻҪ�ڱ����±��ĵ���λǰ��ӱ���ǰ׺�������﷨��̬���û���⣬ʵ��ִ�лᱨ����
+注意不要在被更新表的的栏位前面加别名前缀，否则语法静态检查没问题，实际执行会报错。
 
 Msg 4104, Level 16, State 1, Line 1
 The multi-part identifier "a.name" could not be bound.
@@ -6542,7 +6542,7 @@ The multi-part identifier "a.name" could not be bound.
 01.update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id)
 02.where exists(select 1 from TB b where b.id=a.id)
 update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id)
-where exists(select 1 from TB b where b.id=a.id)ע����������Ӻ����exists��䣬TA������������name, remark��λ��������ΪNULLֵ�� ���name, remark��λ������Ϊnull���򱨴��� �ⲻ������ϣ�������ġ�
+where exists(select 1 from TB b where b.id=a.id)注意如果不添加后面的exists语句，TA关联不到的行name, remark栏位将被更新为NULL值， 如果name, remark栏位不允许为null，则报错。 这不是我们希望看到的。
 
 
 [sql] view plaincopyprint 
@@ -6552,7 +6552,7 @@ where exists(select 1 from TB b where b.id=a.id)ע����������Ӻ����exists��䣬
 --when name, remark is not null, cause error.
 --if allow null, rows in TA not matched will be update to null.
 update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id);
-�ɿ��ǵ����������
+可考虑的替代方法：
 
 
 [sql] view plaincopyprint 
@@ -6560,9 +6560,9 @@ update TA a set(name, remark)=(select b.name, b.remark from TB b where b.id=a.id
 02.update TA a set remark= nvl((select b.remark from TB b where b.id=a.id), a.remark);
 update TA a set name= nvl((select b.name from TB b where b.id=a.id), a.name);
 update TA a set remark= nvl((select b.remark from TB b where b.id=a.id), a.remark);
-���TA.id, TB.id��unique index��primary key
+如果TA.id, TB.id是unique index或primary key
 
-����ʹ����ͼ���µ��﷨��
+可以使用视图更新的语法：
 
 
 [sql] view plaincopyprint 
@@ -6588,24 +6588,24 @@ update TA a set remark= nvl((select b.remark from TB b where b.id=a.id), a.remar
 
 
 
-Oracleû��update from�﷨������ͨ������ʵ�ַ�ʽ��
-1�������Ӳ�ѯ��
+Oracle没有update from语法，可以通过两种实现方式：
+1、利用子查询：
      update    A
-     SET    �ֶ�1=��select    �ֶα���ʽ    from    B    WHERE    ...��,
-       �ֶ�2=��select    �ֶα���ʽ    from    B    WHERE    ...��
-     WHERE    �߼�����ʽ
+     SET    字段1=（select    字段表达式    from    B    WHERE    ...）,
+       字段2=（select    字段表达式    from    B    WHERE    ...）
+     WHERE    逻辑表达式
 
-   UPDATE����ֶ�����д����
+   UPDATE多个字段两种写法：
 
 
-д��һ��
+写法一：
 
 UPDATE table_1 a
    SET col_x1 = (SELECT b.col_y1, b.col_y2 FROM table_2 b WHERE b.col_n = a.col_m),
        col_x2 = (SELECT b.col_y2 FROM table_2 b WHERE b.col_n = a.col_m)
 WHERE EXISTS (SELECT * FROM table_2 b WHERE b.col_n = a.col_m)
 
-��
+或
 
 UPDATE table_1 a
    SET col_x1 = (SELECT b.col_y1, b.col_y2 FROM table_2 b WHERE b.col_n = a.col_m),
@@ -6613,52 +6613,52 @@ UPDATE table_1 a
 WHERE a.col_m=(SELECT b.col_n FROM table_2 b WHERE b.col_n = a.col_m)
 
 
-д������
+写法二：
 
 UPDATE table_1 a
    SET (col_x1, col_x2) = (SELECT b.col_y1, b.col_y2 FROM table_2 b WHERE b.col_n = a.col_m)
 WHERE EXISTS (SELECT * FROM table_2 b WHERE b.col_n = a.col_m);
 
-��
+或
 
 UPDATE table_1 a
    SET (col_x1, col_x2) = (SELECT b.col_y1, b.col_y2 FROM table_2 b WHERE b.col_n = a.col_m)
 WHERE a.col_m=(SELECT b.col_n FROM table_2 b WHERE b.col_n = a.col_m)
 
 
-ע�⣺
+注意：
 
- 1. �����Ӳ�ѯ��ֵֻ����һ��Ψһֵ�������Ƕ�ֵ��
-        2. �Ӳ�ѯ�ھ����������£�������where EXISTS�Ӿ�����Ҫ�ģ����򽫵õ�����Ľ������where EXISTS�Ӿ������һ�������棬���ϡ������Ӿ��Ƕ�a�������¼�¼�����ƣ����޴˾䣬����a����ĳ��¼������b���й���������Ӧ�ļ�¼,��ü�¼�������ֶν�������Ϊnull��where EXISTS�Ӿ�����ų���a���и�����ļ�¼���и��¡�
+ 1. 对于子查询的值只能是一个唯一值，不能是多值。
+        2. 子查询在绝大多数情况下，最后面的where EXISTS子句是重要的，否则将得到错误的结果。且where EXISTS子句可用另一方法代替，如上。最后的子句是对a表被更新记录的限制，如无此句，对于a表中某记录，如在b表中关联不到对应的记录,则该记录被更新字段将被更新为null。where EXISTS子句就是排除对a表中该情况的记录进行更新。
 
-2��������ͼ��
+2、利用视图：
 
 
 UPDATE (SELECT A.NAME ANAME,B.NAME BNAME FROM A,B WHERE A.ID=B.ID)
 SET ANAME=BNAME;
 
-   ע�⣺
+   注意：
 
-    1. ������ͼ���µ����ƣ�
-    �����ͼ���ڶ���������ӣ���ô�û����£�update����ͼ��¼���������ܵ����ơ�����updateֻ�漰һ��������ͼ���а����˱����µı������������������ܸ�����ͼ�Ļ�����
-
-
-���⣬Oracle�е�Delete��from�Ӿ�Ҳû�ж�����ӵĹ��ܣ�ֻ��ͨ���Ӳ�ѯ�ķ�ʽ������
-delete from ��A where exists (select * from ��B where ��A.empid=��B.empid)
-delete from ��A where ��A.empid in (select empid from ��B)
+    1. 对于视图更新的限制：
+    如果视图基于多个表的连接，那么用户更新（update）视图记录的能力将受到限制。除非update只涉及一个表且视图列中包含了被更新的表的整个主键，否则不能更新视图的基表。
 
 
-����oracle��ͼ�������
+另外，Oracle中的Delete的from子句也没有多表联接的功能，只能通过子查询的方式来做：
+delete from 表A where exists (select * from 表B where 表A.empid=表B.empid)
+delete from 表A where 表A.empid in (select empid from 表B)
 
-��oracle��ͨ�������ͼ������Դ���Ե��������ͼ���Խ��и��¡��������ͼ����Դ�����������ϱ�ʱ�����ͼ�ǲ��ɸ��µġ�����ʱ��Ϊ�˲����ķ������Ǹ�ϣ���ܹ��Զ����ͼҲ���и��¡�
 
-��ʱ�����ǿ���ͨ���������´��������������ͼԭ�и����Դﵽ������µ�Ч��
+三、oracle视图多表更新
 
-���磺
+在oracle中通常如果视图的数据源来自单表则该视图可以进行更新。而如果视图数据源来自两个以上表时这个视图是不可更新的。但有时候为了操作的方便我们更希望能够对多表视图也进行更新。
 
-3.1 �����������ݱ�
+这时候我们可以通过建立更新触发器来替代该视图原有更新以达到多表更新的效果
+
+例如：
+
+3.1 创建测试数据表
 --===================================================
---�������Ա�
+--创建测试表
 --===================================================
 Drop Table t1;
 Drop Table t2;
@@ -6667,18 +6667,18 @@ create table t1
 create table t2
 ( t11 numeric(28),t22 varchar2(20));
 
-3.2 �����ͼ����
+3.2 多表视图范例
 --===================================================
---����������ͼ
+--创建测试视图
 --===================================================
 create Or Replace view t as
    select T1.t11 f1 ,T1.t12 f2 ,T2.t22 f3
       from T1,T2
       Where T1.t11=T2.t11;
 
-3.3 �����ͼ����������
+3.3 多表视图触发器范例
 --===================================================
---������ͼ�����������
+--创建视图的替代触发器
 --===================================================
 Create Or Replace Trigger Trg_InsUpdDel_t
 Instead Of Insert or update or delete
@@ -6697,7 +6697,7 @@ begin
       Delete from t2 where t11=:Old.f1;
    End if;
 end;
-��˼�ʵ�ֶ���ɸ�����ͼ�Ķ��幤�� ��
+如此即实现多表可更新视图的定义工作 。
 
 
 
@@ -6705,11 +6705,11 @@ ERROR at line 1:
 ORA-28365: wallet is not open
 
 
-���Կ�������Ϊ���ݿ������󣬼���Ǯ�д��ڹر�״̬����ʱֻҪ��ѯ�����ܵ��У�����ʾ����Ǯ��û�д򿪡�
+可以看到，因为数据库重启后，加密钱夹处于关闭状态，这时只要查询到加密的列，会提示加密钱夹没有打开。
 
-����û����Ǯ�У��������alter systemȨ�ޡ�
+如果用户想打开钱夹，必须具有alter system权限。
 
-�����wallet��
+下面打开wallet：
 SQL> conn / as sysdba
 Connected.
 SQL> alter system set wallet open identified by "ppppp";
@@ -6717,39 +6717,39 @@ SQL> alter system set wallet open identified by "ppppp";
 
 
 
-ȷ���ļ��Ϳ�ID�Ĳ�ѯ
+确定文件和快ID的查询
 
 select segment_name, file_id, block_id from dba_extents where owner='OE' and segment_name like 'ORDERS%';
 
 
 select header_file,header_block from dba_segments where segment_name ='PERSONS';
 
-���ţ�����ʹ����Ӧ���ļ��Ϳ��
+接着，可以使用相应的文件和块号
 alter system dump datafile 397 block 32811;
 
-��trc�ļ����ҵ�ת����Ϣ�е�obj#,
-ִ�����²�ѯ
+到trc文件中找到转储信息中的obj#,
+执行以下查询
 select  name from sys.obj$ where obj#='4916681';
 
-�趨sqlplus ��ʾ��
+设定sqlplus 提示符
 
 set sqlprompt "_user'@'_connect_identifier >"
 
-call ��exec ����
+call 和exec 区别
 
-call ���ù���ʱ���������()����ʹû�в���
-��exec����.
+call 调用过程时必须加括号()，即使没有参数
+而exec不用.
 
 9i
 select '&'||'#'||'&'||hash_value||'&'||'#'||'&     '||sql_text||';' from dbmgr.my_sqltext_new
 where upper(sql_text) like '%%'
 
 
-1.10��11gץȡsql�Լ�����
-     ��άDBAִ��SPAץȡSQL�ű�, ��ϸ���£�
+1.10、11g抓取sql以及导出
+     运维DBA执行SPA抓取SQL脚本, 详细如下：
 
   ---------------------------------------------------
-  --Step1: ��������ΪSTS_NAME_ZY_1030��SQL_SET.
+  --Step1: 创建名称为STS_NAME_ZY_1030的SQL_SET.
 ---------------------------------------------------
 BEGIN
 DBMS_SQLTUNE.CREATE_SQLSET(SQLSET_NAME => 'STS_NAME_dkf_0225',
@@ -6758,7 +6758,7 @@ DBMS_SQLTUNE.CREATE_SQLSET(SQLSET_NAME => 'STS_NAME_dkf_0225',
 END;
 /
 ---------------------------------------------------
---Step2: ��ʼ���ص�ǰ���ݿ��е�SQL.
+--Step2: 初始加载当前数据库中的SQL.
 ---------------------------------------------------
 DECLARE
    STSCUR   DBMS_SQLTUNE.SQLSET_CURSOR;
@@ -6784,7 +6784,7 @@ EXCEPTION
 END;
 /
 ---------------------------------------------------
---Step3: ����ץȡ���ݿ��е�SQL, ������ץȡһ��,ÿСʱץȡһ�Σ��ں�ִ̨��
+--Step3: 增量抓取数据库中的SQL, 会连续抓取一天,每小时抓取一次，在后台执行
 ---------------------------------------------------
 BEGIN
  	DBMS_SQLTUNE.CAPTURE_CURSOR_CACHE_SQLSET(SQLSET_NAME=>'STS_NAME_ZY_1030',
@@ -6808,33 +6808,33 @@ EXEC DBMS_SQLTUNE.CREATE_STGTAB_SQLSET('STGTAB_DKF0225','DBMGR');
 EXEC DBMS_SQLTUNE.PACK_STGTAB_SQLSET('STS_NAME_DKF_0225','DBMGR','STGTAB_DKF0225','DBMGR');
 
 --step3:
---����DBMGR.STGTAB_SQLSET_ZY��
+--导出DBMGR.STGTAB_SQLSET_ZY表
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-2.archive  ���� ���� archive log ����archive  �����鵵
+2.archive  已满 清理 archive log 清理archive  清理归档
 
-SQL> show parameter log_archive_dest; ����archiv log����λ��
-SQL> archive log list;һ��VALUEΪ��ʱ��������archive log list;���һ�¹鵵Ŀ¼��log sequence
-SQL> select * from V$FLASH_RECOVERY_AREA_USAGE;���flash recovery area��ʹ�����,
-SQL> select sum(percent_space_used)*3/100 from v$flash_recovery_area_usage;����flash recovery area�Ѿ�ռ�õĿռ�
-SQL> show parameter recover;�ҵ�recoveryĿ¼,
-ת�ƻ������Ӧ�Ĺ鵵��־, ɾ��һЩ���õ�����Ŀ¼���ļ���ע�Ᵽ����󼸸��ļ�������360�Ժ�ģ�
+SQL> show parameter log_archive_dest; 看看archiv log所在位置
+SQL> archive log list;一般VALUE为空时，可以用archive log list;检查一下归档目录和log sequence
+SQL> select * from V$FLASH_RECOVERY_AREA_USAGE;检查flash recovery area的使用情况,
+SQL> select sum(percent_space_used)*3/100 from v$flash_recovery_area_usage;计算flash recovery area已经占用的空间
+SQL> show parameter recover;找到recovery目录,
+转移或清除对应的归档日志, 删除一些不用的日期目录的文件，注意保留最后几个文件（比如360以后的）
 rman target /
-RMAN> crosscheck archivelog all;���һЩ���õ�archivelog
-RMAN> delete expired archivelog all; ɾ�����ڵĹ鵵
-RMAN> delete archivelog until time 'sysdate-9' ; ɾ����ֹ��ǰһ�������archivelog
-SQL> select * from V$FLASH_RECOVERY_AREA_USAGE;�ٴβ�ѯ������ʹ��������
-�������õ�Command:
+RMAN> crosscheck archivelog all;检查一些无用的archivelog
+RMAN> delete expired archivelog all; 删除过期的归档
+RMAN> delete archivelog until time 'sysdate-9' ; 删除截止到前一天的所有archivelog
+SQL> select * from V$FLASH_RECOVERY_AREA_USAGE;再次查询，发现使用率正常
+其它有用的Command:
 ----------------------------------
-���archive logģʽ�²�������startup,���Ȼָ���noarchive log,startup�ɹ�����shutdown;
+如果archive log模式下不能正常startup,则先恢复成noarchive log,startup成功后，再shutdown;
 shutdown immediate;
 startup mount;
 alter database noarchivelog;
 alter database open;
 shutdown immediate;
 
-�ٴ�startup��archive logģʽ
+再次startup以archive log模式
 shutdown immediate;
 startup mount;
 show parameter log_archive_dest;
@@ -6842,7 +6842,7 @@ alter database archivelog;
 archive log list;
 alter database open;
 
-��������У���ɾ��һЩarchlog log
+如果还不行，则删除一些archlog log
 SQL> select group#,sequence# from v$log;
 
     GROUP# SEQUENCE#
@@ -6850,30 +6850,30 @@ SQL> select group#,sequence# from v$log;
          1         62
          3         64
          2         63
-ԭ������־��һ��һ����־���ܹ鵵
+原来是日志组一的一个日志不能归档
 SQL> alter database clear unarchived logfile group 1;
-���Ҳ����ָ��λ��Arch Log, �밴����������
+最后，也可以指定位置Arch Log, 请按照如下配置
 select name from v$datafile;
 alter system set log_archive_dest='/opt/app/oracle/oradata/usagedb/arch' scope=spfile
 SQL> alter system set db_recovery_file_dest_size=3G scope=both;
 
 
-��½�������ݿ⣬��ʱ���ڴ��������޷���½���ݿ⣬ͨ�����ݿ�������ʼ���ļ�����pfile��spfile�ļ�����ȷ�����ݿ�鵵�ļ����·����
+登陆测试数据库，此时由于磁盘满，无法登陆数据库，通过数据库启动初始化文件或者pfile、spfile文件查找确定数据库归档文件存放路径。
 
-�������ݿ��������ʲ����ļ���˳��spfile<sid>.ora��spfile.ora��init<sid>.ora��init.ora�����������һ�֪��Ӧ�ò鿴�ĸ��ļ������ݡ�
+根据数据库启动访问参数文件的顺序spfile<sid>.ora，spfile.ora，init<sid>.ora，init.ora，相信下面大家会知道应该查看哪个文件的内容。
 
-E���ҵ�*.log_archive_dest������·��
+E查找到*.log_archive_dest的配置路径
 
 [oracle@dev2_180db dbs]$ cd /u02/oradata/center/archive
 
-2��ɾ��ָ��1��ǰ�Ĺ鵵�ļ�
+2。删除指定1天前的归档文件
 
 [oracle@dev2_180db archive]$ find /u02/oradata/center/archive -mtime +1 -name "*.dbf" -exec rm -rf {} \;
 
-E���ֹ�ɾ���˹鵵��־�Ժ�Rman���ݻ��⵽��־ȱʧ�Ӷ��޷���һ������ִ�С�
-���Դ�ʱ��Ҫ�ֹ�ִ��crosscheck���̣�֮��Rman���ݿ��Իָ�������
+E当手工删除了归档日志以后，Rman备份会检测到日志缺失从而无法进一步继续执行。
+所以此时需要手工执行crosscheck过程，之后Rman备份可以恢复正常。
 
-3��ͨ��rman����Crosscheck��־
+3。通过rman进行Crosscheck日志
 
 
 [oracle@dev2_180db archive]$ rman target /
@@ -6893,7 +6893,7 @@ validation failed for archived log
 archive log filename=/u02/oradata/center/archive/1_1_766187842.dbf recid=1 stamp=766189358
 Crosschecked 1 objects
 
-4��ʹ��delete expired archivelog all ����ɾ�����й��ڹ鵵��־:
+4。使用delete expired archivelog all 命令删除所有过期归档日志:
 
 RMAN> delete expired archivelog all;
 
@@ -6911,18 +6911,18 @@ deleted archive log
 archive log filename=/u02/oradata/center/archive/1_1_766187842.dbf recid=1 stamp=766189358
 Deleted 1 EXPIRED objects
 
-5����Ҫ����һ��report obsolete����
+5。简要介绍一下report obsolete命令
 
-ʹ��report obsolete�������ڱ���
+使用report obsolete命令报告过期备份
 
 RMAN> report obsolete;
 
 
-6��ʹ��delete obsolete����ɾ�����ڱ���:
+6。使用delete obsolete命令删除过期备份:
 RMAN> delete obsolete;
 
 
-7���ٴ�crosscheck ��־����������Ϣ�ж��Ƿ����ݿ��Ѿ�����
+7。再次crosscheck 日志，看返回信息判断是否数据库已经正常
 RMAN> crosscheck archivelog all;
 
 released channel: ORA_DISK_1
@@ -6930,9 +6930,9 @@ allocated channel: ORA_DISK_1
 channel ORA_DISK_1: sid=1028 devtype=DISK
 specification does not match any archive log in the recovery catalog
 
-����п���specification does not match any archive log in the recovery catalog������Ϣ����˵�����ݿ��Ѿ������ˡ�
+如果有看到specification does not match any archive log in the recovery catalog返回信息，那说明数据库已经正常了。
 
-8���˳�rman����½oracle���ݿ�Ĺ鵵ģʽΪ���ǹ鵵ģʽ
+8。退出rman，登陆oracle数据库改归档模式为到非归档模式
 
 RMAN> exit
 
@@ -6944,12 +6944,12 @@ SQL>alter database noarchivelog;
 
 SQL>alter database open;
 
-Oracle���ݿ����������2��ģʽ��:�鵵ģʽ(archivelog)�ͷǹ鵵ģʽ(noarchivelog)
-�鵵ģʽ�������Oracle���ݿ�Ŀɻָ��ԣ��������ݿⶼӦ�������ڴ�ģʽ�£��鵵ģʽӦ�ú���Ӧ�ı��ݲ������ϣ�ֻ�й鵵ģʽû����Ӧ�ı��ݲ���ֻ������鷳��
+Oracle数据库可以运行在2种模式下:归档模式(archivelog)和非归档模式(noarchivelog)
+归档模式可以提高Oracle数据库的可恢复性，生产数据库都应该运行在此模式下，归档模式应该和相应的备份策略相结合，只有归档模式没有相应的备份策略只会带来麻烦。
 
-���ļ򵥽���������ú͹ر����ݿ�Ĺ鵵ģʽ��
+本文简单介绍如何启用和关闭数据库的归档模式。
 
-1.shutdown normal��shutdown immediate�ر����ݿ�
+1.shutdown normal或shutdown immediate关闭数据库
 [oracle@jumper oracle]$ sqlplus "/ as sysdba"
 
 SQL*Plus: Release 9.2.0.4.0 - Production on Sat Oct 15 15:48:36 2005
@@ -6968,7 +6968,7 @@ Database dismounted.
 ORACLE instance shut down.
 
 
-2.�������ݿ⵽mount״̬
+2.启动数据库到mount状态
 SQL> startup mount;
 ORACLE instance started.
 
@@ -6979,9 +6979,9 @@ Database Buffers           62914560 bytes
 Redo Buffers                 667648 bytes
 Database mounted.
 
-3.���û�ֹͣ�鵵ģʽ
-���Ҫ���ù鵵ģʽ���˴�ʹ��
-alter database archivelog ���
+3.启用或停止归档模式
+如果要启用归档模式，此处使用
+alter database archivelog 命令。
 SQL> alter database archivelog;
 Database altered.
 
@@ -6997,8 +6997,8 @@ Oldest online log sequence     148
 Next log sequence to archive   151
 Current log sequence           151
 
-�����Ҫֹͣ�鵵ģʽ���˴�ʹ�ã�
-alter database noarchivelog ���
+如果需要停止归档模式，此处使用：
+alter database noarchivelog 命令。
 SQL> shutdown immediate;
 Database closed.
 Database dismounted.
@@ -7027,20 +7027,20 @@ Archive destination            /opt/oracle/oradata/conner/archive
 Oldest online log sequence     149
 Current log sequence           152
 
-4.�޸���Ӧ�ĳ�ʼ������
-Oracle10g֮ǰ���㻹��Ҫ�޸ĳ�ʼ������ʹ���ݿ⴦���Զ��鵵ģʽ��
-��pfile/spfile���������²�����
+4.修改相应的初始化参数
+Oracle10g之前，你还需要修改初始化参数使数据库处于自动归档模式。
+在pfile/spfile中设置如下参数：
 
 log_archive_start = true
 
-�������ݿ�˲�����Ч����ʱ���ݿ⴦���Զ��鵵ģʽ��
-Ҳ���������ݿ����������У��ֹ�ִ�У�
+重启数据库此参数生效，此时数据库处于自动归档模式。
+也可以在数据库启动过程中，手工执行：
 
 archive log start
 
-ʹ���ݿ������Զ��鵵���������������ݿ���Ȼ�����ֹ��鵵ģʽ��
+使数据库启用自动归档，但是重启后数据库仍然处于手工归档模式。
 
-��Oracle10g��ʼ��log_archive_start�����Ѿ��ϳ�����ο���Oracle10g�Ѿ�����log_archive_start����.
+从Oracle10g开始，log_archive_start参数已经废除，请参考：Oracle10g已经废弃log_archive_start参数.
 
 
 
@@ -7054,7 +7054,7 @@ CAPTURE_PROD   DEMODB_QUEUE  7586391    DISABLED 7586391
 
 CAPTURE_DEMODB DEMODB_QUEUE  7592351    ENABLED  7592351
 
-���������˶���Capture���̣�����һ��״̬ΪDISABLE��һֱδ���ã���һ���������õĽ��̣�ɾ����Capture���̡�
+发现配置了二个Capture进程，其中一个状态为DISABLE，一直未启用，是一个错误配置的进程，删除此Capture进程。
 
 SQL> exec dbms_capture_adm.drop_capture('capture_prod');
 
@@ -7062,74 +7062,74 @@ SQL> exec dbms_capture_adm.drop_capture('capture_prod');
 
 PL/SQL procedure successfully completed
 
-�ٴ�ִ�У�Archivelog�ļ�˳��ɾ����
+再次执行，Archivelog文件顺利删除。
 
 RMAN> delete archivelog all;
 
-dataGuarad��primary�⣬rman��ʹ��backup archivelog all delete input ����ɾ���Ѿ��鵵�����Ѿ��ɹ����͵����Ⲣ����standby��Ӧ�õ���־������
+dataGuarad的primary库，rman中使用backup archivelog all delete input 命令删除已经归档并且已经成功传送到备库并且在standby上应用的日志是遇到
 RMAN-08137: WARNING: archive log not deleted as it is still needed
 archive log filename=/ora03/oraflsh/RMANCCB/1_3740_580667843.dbf thread=1 sequence=3740
-����ͱ����alter��־����Ҳ����� ���ΪAPPLIED='NO'�Ĺ鵵��־��ʼ��ʧ�ܡ���ʱ������־�Ѿ������ˣ��������ڲ���ɾ�����´��̿ռ䱻ռ�����ջᵼ�����ݿ�hangס����Ϊ���ܲ����κεĹ鵵��־�ˡ�
-��������ִ��������䣬������һ��archivelog ��APPLIED��ֵΪNO:
+主库和备库的alter日志里面也会出现 标记为APPLIED='NO'的归档日志初始化失败。此时尽管日志已经备份了，但是由于不能删除导致磁盘空间被占满最终会导致数据库hang住，因为不能产生任何的归档日志了。
+在主库上执行如下语句，最少有一个archivelog 的APPLIED的值为NO:
 alter session set nls_date_format='dd-mon-rr hh24:mi:ss';
 select recid, dest_id, thread#, sequence#, first_time, completion_time, creator, registrar, archived, applied, deleted, status
 from v$archived_log where standby_dest='YES' and status='A';
 
 
-     �������������ԭ������Ϊ�������־��Ȼ���͵��˱��Ⲣ�ҳɹ�Ӧ�ã����Ƕ�Ӧ���������ϵ���־��Ŀ ��v$archived_log.applied��û�б�����Ϊ��YES���������ڸ��ֶε�ֵΪNO ,��ʹ��rman ִ��delete input ����ʱ��rman��Ϊ����־û�й鵵��û�б�����Ӧ�á�֪���������ԭ�����ǿ���ʹ�����·��������
-1 ��鱸��������Ƿ�����־���жϣ�����У��������ж����⣡�ٴ�������ִ������sql ���鿴�Ƿ���Ȼ�� applied='NO'����־��Ŀ
-2 ������й鵵��־ ���Ϊapplied='NO' ���Ҵ���־�Ѿ�������Ӧ�ã�������֮��û��gap�����ǿ���ʹ��os ����ɾ����Щ�鵵��־��Ȼ��ִ�У�
+     遇到此类问题的原因是因为主库的日志虽然传送到了备库并且成功应用，但是对应的在主库上的日志条目 在v$archived_log.applied并没有被更新为‘YES’正是由于该字段的值为NO ,当使用rman 执行delete input 操作时，rman认为该日志没有归档且没有被备库应用。知道此问题的原因，我们可以使用如下方法解决：
+1 检查备库和主库是否有日志的中断，如果有，则解决该中断问题！再次在主库执行上述sql 语句查看是否依然有 applied='NO'的日志条目
+2 如果还有归档日志 标记为applied='NO' 并且此日志已经被备库应用，主备库之间没有gap，我们可以使用os 命令删除那些归档日志，然后执行：
 RMAN>crosscheck archivelog all;
 RMAN>delete expired archivelog all;
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-3 . set unused���÷�
+3 . set unused的用法
 
 
-һ������
-alter table1 drop (column1,column2); ����alter table1 drop column column1;
-��alter table1 drop column column2;  �Ļ�����Ҫִ�кܳ�ʱ�䣬���ڼ�ñ���������Ӱ�쵽����Ӧ�á�
-�������  ʹ��set unused����ϵͳ����ʱ��drop unused��
+一、问题
+alter table1 drop (column1,column2); 或者alter table1 drop column column1;
+和alter table1 drop column column2;  的话，需要执行很长时间，这期间该表被锁，会影响到其它应用。
+解决方法  使用set unused，等系统空闲时再drop unused。
 alter table table1 set unused (column1,column2);
-����
+或者
 alter table table1 set unused column column1;
 alter table table2 set unused column column2;
 alter table drop unused columns checkpoint 1000;
-֪ʶ�㣨set unused���÷���
-ԭ����������ֵ���Ϣ�������洢�ռ䣩�����ɻָ���
-   ����ʹ�� SET UNUSED ѡ����һ�л��߶��в����á�
-   ʹ��DROP SET UNUSED ѡ��ɾ���������Ϊ�����õ��С�
-�﷨��
+知识点（set unused的用法）
+原理：清楚掉字典信息（撤消存储空间），不可恢复。
+   可以使用 SET UNUSED 选项标记一列或者多列不可用。
+   使用DROP SET UNUSED 选项删除被被标记为不可用的列。
+语法：
 
-   ALTER TABLE table SET UNUSED (COLlist���) ���� ALTER TABLE table SET UNUSED COLUMN col����;
+   ALTER TABLE table SET UNUSED (COLlist多个) 或者 ALTER TABLE table SET UNUSED COLUMN col单个;
 
    ALTER TABLE table DROP UNUSED COLUMNS [checkpoint 1000];
-set unused�������ɾ���ֶΡ�
-����alter table drop field�⣬Ҳ����
+set unused不会真地删除字段。
+除了alter table drop field外，也可以
 alter table set   unused field;
 alter table drop unused;
-set unusedϵͳ�����Ƚ�С���ٶȽϿ죬���Կ�����set unuased��Ȼ����ϵͳ���ؽ�Сʱ����drop����ϵͳ���ز���Ҳ����ֱ��drop��
-�����ú��ַ������������ջؿռ䡣
-��������������Ҫɾ��ĳһ�������ϵ�ĳЩ��λ����������������ӵ�зǳ����������ϣ�������ڼ��ʱ��ֱ��ִ�� ALTER TABLE ABC DROP ��COLUMN�������ܻ��յ� ORA-01562 - failed to extend rollback segment number string��
-������Ϊ�����ɾ����λ�Ĺ���������ܻ����Ĺ�����RBS����������Ĵ�����֣��������������������һ���÷�����������ƴ���ļӴ�RBS�ռ���Ӧ��������⣬Ҳ�����Ǹ������⡣
-        �ҵĽ���������
-        CREATE TABLE T1 ��A NUMBER��B NUMBER����
-        SQL> begin 2 for i in 1 .. 100000 3 loop 4 insert into t1 values ��i��100����5 end loop��6 commit��7 end��
-        SQL> select count��*�� from t1��
-        SQL> ALTER TABLE T1 SET UNUSED COLUMN A CASCADE CONSTRAINTS��
-        ��Ҫ����drop column��Ӧ����set unused��column�޷�ʹ�ã��ܿ�ϵͳ���ʱ����������ɾ����λ������ϣ�Ҫע�����һ����set unused column�������λ���޷��ٻظ�ʹ�õġ�
-        �ص����ˣ��������λ��һ��������ϣ�����Ӧ�ñ���һ��д����ô���\ log��������׼��ÿɾ��һǧ�����Ͼ�commitһ�Ρ�
-        SQL> alter table t1 drop unused columns checkpoint 1000��
-        ������ʱ����������Ķ�����Ӧ�ÿ��Ա��� ORA-01562 �Ĵ�������
-�ղ��и�����������޸�������ΪUNUSED���ֶΣ��ҿ�����һ�£����µķ������Իָ������²���ִ��ǰҪ���ñ��ݣ���û�о����DBA��Ҫ���׳��ԡ�
-����ʵ���TTTA
+set unused系统开销比较小，速度较快，所以可以先set unuased，然后在系统负载较小时，再drop。如系统负载不大，也可以直接drop。
+不管用何种方法，都不会收回空间。
+如果你有这个需求，要删除某一个表格上的某些栏位，但是由於这个表格拥有非常大量的资料，如果你在尖峰时间直接执行 ALTER TABLE ABC DROP （COLUMN）；可能会收到 ORA-01562 - failed to extend rollback segment number string，
+这是因为在这个删除栏位的过程中你可能会消耗光整个RBS，造成这样的错误出现，因此这样的做法并不是一个好方法，就算你拼命的加大RBS空间来应付这个问题，也不会是个好主意。
+        我的建议做法：
+        CREATE TABLE T1 （A NUMBER，B NUMBER）；
+        SQL> begin 2 for i in 1 .. 100000 3 loop 4 insert into t1 values （i，100）；5 end loop；6 commit；7 end；
+        SQL> select count（*） from t1；
+        SQL> ALTER TABLE T1 SET UNUSED COLUMN A CASCADE CONSTRAINTS；
+        不要马上drop column，应该先set unused让column无法使用，避开系统尖峰时间再来处理删除栏位里的资料，要注意的是一但你set unused column，这个栏位是无法再回复使用的。
+        重点来了，若你的栏位有一百万笔资料，我们应该避免一次写入那么多的\ log，所以我准备每删除一千笔资料就commit一次。
+        SQL> alter table t1 drop unused columns checkpoint 1000；
+        在离峰的时间进行这样的动作，应该可以避免 ORA-01562 的错误发生。
+刚才有个人问我如何修复被设置为UNUSED的字段，我考虑了一下，以下的方法可以恢复（以下步骤执行前要做好备份），没有经验的DBA不要轻易尝试。
+创建实验表TTTA
 SQL> CREATE TABLE TTTA ( A INTEGER,B INTEGER,C VARCHAR2(10),D INTEGER);
 SQL> INSERT INTO TTTA VALUES (1,2,'3',4);
 SQL> INSERT INTO TTTA VALUES (2,3,'4',5);
 SQL> COMMIT;
 ALTER TABLE TTTA SET UNUSED COLUMN C;
-���½��лָ�
+以下进行恢复
 SQL> SELECT OBJ# FROM OBJ$ WHERE NAME='TTTA';
       OBJ#
 ----------
@@ -7139,27 +7139,27 @@ SELECT COL#,INTCOL#,NAME FROM COL$ WHERE OBJ#=32067;
 ---------- ---------- ------------------------------
          1          1 A
          2          2 B
-         0          3 SYS_C00003_08031720:09:55$   ��UNUSED���ֶ�
+         0          3 SYS_C00003_08031720:09:55$   被UNUSED的字段
          3          4 D
 SQL> SELECT COLS FROM TAB$ WHERE OBJ#=32067;
       COLS
 ----------
-         3      ------�ֶ�����Ϊ3��
+         3      ------字段数变为3了
 SQL> UPDATE COL$ SET COL#=INTCOL# WHERE OBJ#=32067;
 SQL> UPDATE TAB$ SET COLS=COLS+1 WHERE OBJ#=32067;
 UPDATE COL$ SET NAME='C' WHERE OBJ#=32067 AND COL#=3;
 UPDATE COL$ SET PROPERTY=0 WHERE OBJ#=32067;
 SQL> COMMIT;
-3���������ݿ�
+3、重启数据库
 SQL> SELECT * FROM SCOTT.TTTA;
          A          B C                   D
 ---------- ---------- ---------- ----------
          1          2 3                   4
          2          3 4                   5
-�ָ����
+恢复完成
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-4  ����spid���������е�sql����ִ�мƻ�
+4  根据spid查找数据中的sql语句和执行计划
 execute dbms_job.interval(6,'TRUNC(SYSDATE+1)+6/24');
 select * from v$process where spid=24213
 select * from v$session where paddr = 'C000000952278FF0';
@@ -7175,9 +7175,9 @@ declare
   V_BUSINESSTYPEID VARCHAR2(10):='LBS03';
   V_PAYTYPE VARCHAR2(1):='C';
   V_BANKID VARCHAR2(8):='10529002';--A0229002
-  V_BRANCH VARCHAR2(11):='2150000';--2150000��2150500
+  V_BRANCH VARCHAR2(11):='2150000';--2150000，2150500
   V_DSTACCOUNT VARCHAR2(128):='2960399980100555181';--6222980061307460
-  V_DSTACCOUNTNAME VARCHAR2(150):='��һ';--ƽ������20070
+  V_DSTACCOUNTNAME VARCHAR2(150):='王一';--平安测试20070
   V_AMOUNT NUMBER(16,2):= 100;
   V_CURRENCY VARCHAR2(3):='RMB';
   V_SYSTEMID VARCHAR2(10):='122';
@@ -7252,7 +7252,7 @@ INSERT INTO TDRAWDATA
          NULL,
          V_BANK_NAME,
          NULL,
-         V_URGENT,--������־
+         V_URGENT,--紧急标志
          V_REMARK,
          'HUAHAIJIE001',
          DRAWBATCHNO,
@@ -7274,24 +7274,24 @@ select  sql_text from v$sql where hash_value =(select sql_hash_value from v$sess
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-5.10046����
+5.10046跟踪
 
--���Ҫ׼ȷ������ָ�꣬��Ҫ������shared_pool��buffer_cache
+-如果要准确的性能指标，需要先清理shared_pool和buffer_cache
 
 alter system flush shared_pool;
 alter system flush buffer_cache;
 alter session set tracefile_identifier='ddddddd';
 alter session set trace on;
---����session��10046 event trace
+--开启session级10046 event trace
 alter session set events '10046 trace name context forever, level 12';
---ִ�����SQL
+--执行你的SQL
 <sql_text>
---�ر�session��10046 event trace
+--关闭session级10046 event trace
 alter session set events '10046 trace name context off';
 
 
 
---��ȡtrace�ļ���·��
+--获取trace文件的路径
 select d.value || '/' || lower(rtrim(i.instance, chr(0))) || '_ora_' ||p.spid|| '.trc' trace_file_name
          from (select p.spid
               from v$mystat m, v$session s, v$process p
@@ -7318,8 +7318,8 @@ SELECT   *
    WHERE ROWNUM < 11
 ORDER BY rds_exec_ratio DESC
 
-ʶ�𡯵�Чִ�С���SQL���
-������SQL�����ҳ���ЧSQL:
+识别’低效执行’的SQL语句
+用下列SQL工具找出低效SQL:
 SELECT EXECUTIONS , DISK_READS, BUFFER_GETS,
         ROUND((BUFFER_GETS-DISK_READS)/BUFFER_GETS,2) Hit_radio,
         ROUND(DISK_READS/EXECUTIONS,2) Reads_per_run,
@@ -7330,7 +7330,7 @@ AND     BUFFER_GETS > 0
 AND (BUFFER_GETS-DISK_READS)/BUFFER_GETS < 0.8
 ORDER BY 4 DESC;
 
-���ҵ��������ڴ�ռ����
+查找单条语句的内存占用率
 alter system set pga_aggregate_target=10m
 alter system set workarea_size_policy=auto;
 select distinct * from a where rownum<500000;
@@ -7423,32 +7423,32 @@ ORDER BY version_count DESC)
 WHERE rownum <= 10
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-7.��oracle��ͳ����Ϣ�ĵ��뵼��
-�������Ա�
+7.【oracle】统计信息的导入导出
+创建测试表
 SQL> create table test_stat as select * from dba_objects;
-�鿴�����Ƿ���ͳ����Ϣ��
+查看测试是否有统计信息：
 SQL> select A.TABLE_NAME,A.NUM_ROWS,A.BLOCKS,A.LAST_ANALYZED from dba_tables a where a.table_name='TEST_STAT';
-�ϲ����û�У����ռ���ͳ����Ϣ��
+上步结果没有，故收集下统计信息：
 SQL> execute dbms_stats.gather_table_stats(ownname => 'DANGHB',tabname => 'TEST_STAT',estimate_percent => 20,degree => 5,no_invalidate => false);
-�ٴβ鿴ͳ����Ϣ��
+再次查看统计信息：
 SQL> select A.TABLE_NAME,A.NUM_ROWS,A.BLOCKS,A.LAST_ANALYZED from dba_tables a where a.table_name='TEST_STAT';
-�������ͳ����Ϣ�ı���
+创建存放统计信息的表：
 SQL> execute dbms_stats.create_stat_table(ownname => 'DANGHB',stattab => 'STAT_TABLE');
-����ͳ����Ϣ��
+导出统计信息：
 SQL> execute dbms_stats.export_table_stats(ownname => 'DANGHB',tabname => 'TEST_STAT',stattab => 'STAT_TABLE');
-�鿴���ͳ����Ϣ�ı��Ƿ������ݣ�
+查看存放统计信息的表是否有内容：
 SQL> select count(*) from stat_table;
-ɾ�����Ա���ͳ����Ϣ��
+删除测试表的统计信息：
 SQL> execute dbms_stats.delete_table_stats(ownname => 'DANGHB',tabname => 'TEST_STAT');
-ȷʵ�Ƿ�ɾ����
+确实是否删除：
 SQL> select A.TABLE_NAME,A.NUM_ROWS,A.BLOCKS,A.LAST_ANALYZED from dba_tables a where a.table_name='TEST_STAT';
-����ͳ����Ϣ��
+导入统计信息：
 SQL> execute dbms_stats.import_table_stats(ownname => 'DANGHB',tabname => 'TEST_STAT',stattab => 'STAT_TABLE');
-�鿴�Ƿ���ɹ���
+查看是否导入成功：
 SQL> select A.TABLE_NAME,A.NUM_ROWS,A.BLOCKS,A.LAST_ANALYZED from dba_tables a where a.table_name='TEST_STAT';
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-8.���ռ��������-���ռ�ʹ����  ���ռ��С
+8.表空间的利用率-表空间使用率  表空间大小
 
 SELECT A.TABLESPACE_NAME,A.BYTES TOTAL,B.BYTES USED, C.BYTES FREE,
 (B.BYTES*100)/A.BYTES "% USED",(C.BYTES*100)/A.BYTES "% FREE"
@@ -7456,11 +7456,11 @@ FROM SYS.SM$TS_AVAIL A,SYS.SM$TS_USED B,SYS.SM$TS_FREE C
 WHERE A.TABLESPACE_NAME=B.TABLESPACE_NAME AND A.TABLESPACE_NAME=C.TABLESPACE_NAME;
 
 
-SELECT a.tablespace_name ���ռ���,
-       total ���ռ��С,
-       free ���ռ�ʣ���С,
-       (total - free) ���ռ�ʹ�ô�С,
-       ROUND((total - free) / total, 4) * 100 ʹ����
+SELECT a.tablespace_name 表空间名,
+       total 表空间大小,
+       free 表空间剩余大小,
+       (total - free) 表空间使用大小,
+       ROUND((total - free) / total, 4) * 100 使用率
   FROM (SELECT tablespace_name, ROUND(SUM(bytes) / (1024 * 1024), 4) free
           FROM DBA_FREE_SPACE
          GROUP BY tablespace_name) a,
@@ -7476,83 +7476,83 @@ LOOP
      LCalc := Lcntr * 31;
 END LOOP;
 
-�������е�������������  ���ȡ��
+采样表中的数据量。抽样  随机取样
 SELECT * FROM (select * from myob  SAMPLE(0.01)) where rownum<=20;
-����ORACLEʵ�����ݳ���
-2013-04-18      0 ������    ��Դ��jingyun��BLOG   �ղ�     ��ҪͶ��
-����ORACLEʵ�����ݳ���
+利用ORACLE实现数据抽样
+2013-04-18      0 个评论    来源：jingyun的BLOG   收藏     我要投稿
+利用ORACLE实现数据抽样
 
-�����ݷ�����,�ⲻ��������¼�������ܴ���ô�죿
-��ȫ������ǲ���ʵҲû�б�Ҫ��
-����һ�³���������ʵ��
-���ֳ��õĳ���������
-1.�����������simple random sampling��
-�����е��������ţ����ó�ǩ����������ֱ������ȡ���ֹ۲��������������
-�ŵ㣺�����򵥣��������ʼ���Ӧ�ı�׼�����򵥡�
-ȱ�㣺����ϴ�ʱ������һһ��š�
-2.ϵͳ������systematic sampling��
-�ֳƻ�е�������Ⱦ���������Ƚ�����Ĺ۲쵥λ��ĳһ˳��ŷֳ�n�����֣��ٴӵ�һ���������ȡ��k�Ź۲쵥λ����������ȼ���ÿһ���ָ���ȡһ���۲쵥λ���������
-�ŵ㣺�������⡢������С�
-ȱ�㣺���������ڻ���������ʱ���ײ���ƫ�ԡ�
-3.��Ⱥ����(cluster sampling)
-�Ƚ���������һ�ֻ���������Ϊ���������壨�࣮Ⱥ����ÿһ���������Ϊһ�㣬Ȼ���ÿһ���������ȡһ���������������Ǻ���һ�𣬼�Ϊ�������������Ϊ�ֲ�����
-�ŵ㣺������֯����ʡ���ѡ�
-ȱ�㣺���������ڵ������������
-4.�ֲ������stratified sampling��
-�����������������������ֳ��������ͻ�㣬Ȼ�������ͻ���������ȡ������λ������������������а�������������ŷ��䣨���ȳ����Ƿ�������ŷ��䷽���������ַ�����
-�ص㣺����ͨ������ֲ㣬�����˸������е�λ��Ĺ�ͬ�ԣ����׳�����д����Եĵ����������÷�������������������ӣ������֮�����ϴ󣨱�����ڿͻ�����/�Ƿ��������Ĳ��죩�����϶�������
-�ŵ㣺���������Ժã����������١�
+做数据分析的,免不了碰到记录数据量很大，怎么办？
+做全面分析是不现实也没有必要。
+介绍一下抽样方法及实现
+几种常用的抽样方法：
+1.简单随机抽样（simple random sampling）
+将所有调查总体编号，再用抽签法或随机数字表随机抽取部分观察数据组成样本。
+优点：操作简单，均数、率及相应的标准误计算简单。
+缺点：总体较大时，难以一一编号。
+2.系统抽样（systematic sampling）
+又称机械抽样、等距抽样，即先将总体的观察单位按某一顺序号分成n个部分，再从第一部分随机抽取第k号观察单位，依次用相等间距从每一部分各抽取一个观察单位组成样本。
+优点：易于理解、简便易行。
+缺点：总体有周期或增减趋势时，易产生偏性。
+3.整群抽样(cluster sampling)
+先将总体依照一种或几种特征分为几个子总体（类．群），每一个子总体称为一层，然后从每一层中随机抽取一个子样本，将它们合在一起，即为总体的样本，称为分层样本
+优点：便于组织、节省经费。
+缺点：抽样误差大于单纯随机抽样。
+4.分层抽样（stratified sampling）
+将总体样本按其属性特征分成若干类型或层，然后在类型或层中随机抽取样本单位，合起来组成样本。有按比例分配和最优分配（过度抽样是否就是最优分配方法？）两种方案。
+特点：由于通过划类分层，增大了各类型中单位间的共同性，容易抽出具有代表性的调查样本。该方法适用于总体情况复杂，各类别之间差异较大（比如金融客户风险/非风险样本的差异），类别较多的情况。
+优点：样本代表性好，抽样误差减少。
 
-������Ҫʹ�ó����ķ����������û��������ȡ100W��������¼��
-down������Ȼ�����sas�����������ܣ�
-ֱ��sas�����������������ܣ�
-ֱ���ύ���������г�����Ȼ�����ӵ��������з���
-���ڽ���һ��ORACLE����������
-Oracleȡ�������ʵ��
-����鿴ǰN����¼
+我们需要使用抽样的方法从总量用户中随机抽取100W个样本记录。
+down到本机然后进行sas抽样，不可能！
+直接sas联机抽样，更不可能！
+直接提交服务器进行抽样，然后链接到本机进行分析
+现在介绍一下ORACLE抽样方法：
+Oracle取随机数据实现
+随机查看前N条记录
 SELECT * FROM (SELECT * FROM TB_PHONE_NO ORDER BY SYS_GUID())
 WHERE ROWNUM < 10;
 SELECT * FROM (SELECT * FROM chifan  ORDER BY dbms_random.random) WHERE ROWNUM<=5
 SQL> SELECT * FROM (SELECT * FROM A SAMPLE(0.01)) WHERE ROWNUM<=1;
-ע��ÿ��ȡ�õ�ֵ����ͬ��
-SAMPLE ������������������ֵ�ǲ����ٷֱȡ�
-������oracle �����ȡ���ݵķ�������ϸ���⣺
-1.�������ȡ���ݣ��Ƽ�ʹ�ã���
+注意每次取得的值都不同。
+SAMPLE 是随机抽样，后面的数值是采样百分比。
+以下是oracle 中随机取数据的方法的详细讲解：
+1.快速随机取数据（推荐使用）：
 select * from MEMBER sample(1) where rownum <= 10
-2.���ȡ���ݣ�����
+2.随机取数据，较慢
 select * from (
   select * from MEMBER order by dbms_random.value
 ) where rownum<=10
-========ԭ��========
-�������ϵͳʱ�õ��������ȡ��¼�����⣻
-     �����ϲ����˺ܶ�������ϣ������˲�ͬ�ķ���������졣���ǻ���ORACLE�ķ���Ŷ
-      ���ȵ�һ���������ȡ6��
-      select * from  (select * from tablename order by order by dbms_random.value) where  rownum��7
-      ���������ԭ������ΪӦ���ǰѱ��е�����ȫ����ѯ��������������������к��ڴӲ�ѯ�����������в�ѯ��6����¼�������������ʹ�õĹ����з��֣������¼һ��Ļ���ѯ���ٶ���һ������������ʱ��7000�����������ʮ��Ļ����ܾ͸����ˣ�
-     �ڶ���������oracle��sample()��sample block����
-     select * from tablename sample ( 50 ) where  rownum��6
-      ������Խ���һ��sample
-     Oracle�������ݵĻ���������:
-     1.ȫ��ɨ��
-     2.������ɨ��
-     ȫ��ɨ��(Full table Scan)
-     ȫ��ɨ�践�ر������еļ�¼��
-     ִ��ȫ��ɨ�裬Oracle�����е����м�¼������ÿһ���Ƿ�����WHERE������Oracle˳��Ķ�������ñ���ÿһ�����ݿ飬����ȫ��ɨ���ܹ������ڶ���.
-      ÿ�����ݿ�Oracleֻ��һ��.
-     ������ɨ��(sample table scan)
-     ������ɨ�践�ر�������������ݡ�
-     ���ַ��ʷ�ʽ��Ҫ��FROM����а���SAMPLEѡ�����SAMPLE BLOCKѡ��.
-     SAMPLEѡ��:
-     �����в�����ִ��һ��������ɨ��ʱ��Oracle�ӱ��ж�ȡ�ض��ٷֱȵļ�¼�����ж��Ƿ�����WHERE�Ӿ��Է��ؽ����
-     SAMPLE BLOCKѡ��:
-     ʹ�ô�ѡ��ʱ��Oracle��ȡ�ض��ٷֱȵ�BLOCK�����������Ƿ�����WHERE�����Է������������ļ�¼.
+========原文========
+最近在做系统时用到了随机抽取记录的问题；
+     上网上查找了很多相关资料，发现了不同的方法及其差异。都是基于ORACLE的方法哦
+      首先第一个是随机抽取6个
+      select * from  (select * from tablename order by order by dbms_random.value) where  rownum＜7
+      这个方法的原理我认为应该是把表中的数据全部查询出来按照随机数进行排列后在从查询出来的数据中查询中6条记录，这个方法我在使用的过程中发现，如果记录一多的话查询的速度有一点点的慢，测试时是7000条，如果几万几十万的话可能就更慢了；
+     第二个是利用oracle的sample()或sample block方法
+     select * from tablename sample ( 50 ) where  rownum＜6
+      这个稍稍介绍一下sample
+     Oracle访问数据的基本方法有:
+     1.全表扫描
+     2.采样表扫描
+     全表扫描(Full table Scan)
+     全表扫描返回表中所有的记录。
+     执行全表扫描，Oracle读表中的所有记录，考查每一行是否满足WHERE条件。Oracle顺序的读分配给该表的每一个数据块，这样全表扫描能够受益于多块读.
+      每个数据块Oracle只读一次.
+     采样表扫描(sample table scan)
+     采样表扫描返回表中随机采样数据。
+     这种访问方式需要在FROM语句中包含SAMPLE选项或者SAMPLE BLOCK选项.
+     SAMPLE选项:
+     当按行采样来执行一个采样表扫描时，Oracle从表中读取特定百分比的记录，并判断是否满足WHERE子句以返回结果。
+     SAMPLE BLOCK选项:
+     使用此选项时，Oracle读取特定百分比的BLOCK，考查结果集是否满足WHERE条件以返回满足条件的纪录.
       Sample_Percent:
-      Sample_Percent��һ�����֣����������а�����¼ռ�ܼ�¼�����İٷֱȡ�
-      SampleֵӦ����[0.000001,99.999999]֮�䡣
-      ��Ҫע�����¼���:
-      1.sampleֻ�Ե�����Ч���������ڱ����Ӻ�Զ�̱�
-      2.sample��ʹSQL�Զ�ʹ��CBO
-PS����Ȼ�������Ի�ȡһ����������ݣ������������˳��ȴ����˳��ģ���֪���ǲ���Oracle�Ļ��ƾ������������ǲ�����ʱҲ�Ҳ���ɶԭ�򣬲������Ҳ���ǽ���������������ʱ��������~~2015/6/26
+      Sample_Percent是一个数字，定义结果集中包含记录占总记录数量的百分比。
+      Sample值应该在[0.000001,99.999999]之间。
+      主要注意以下几点:
+      1.sample只对单表生效，不能用于表连接和远程表
+      2.sample会使SQL自动使用CBO
+PS：虽然这样可以获取一定随机的数据，不过，输出的顺序却还是顺序的，不知道是不是Oracle的机制就是这样，还是菜鸟暂时也找不出啥原因，不过这个也算是解决了随机的需求，暂时就这样了~~2015/6/26
 
 
 select * from  sys.sm$ts_free
@@ -7561,10 +7561,10 @@ SET SERVEROUTPUT ON
 SET PAGESIZE 1000
 SET LINESIZE 255
 SET FEEDBACK OFF
-SELECT * FROM SYS.SM$TS_AVAIL T; -- ����ռ�
-SELECT * FROM SYS.SM$TS_USED T;  -- ���ÿռ�
-SELECT * FROM SYS.SM$TS_FREE T;  -- ʣ��ռ�
--- ���ռ��������
+SELECT * FROM SYS.SM$TS_AVAIL T; -- 分配空间
+SELECT * FROM SYS.SM$TS_USED T;  -- 已用空间
+SELECT * FROM SYS.SM$TS_FREE T;  -- 剩余空间
+-- 表空间的利用率
 SELECT Substr(df.tablespace_name,1,20) "Tablespace Name",
        Substr(df.file_name,1,40) "File Name",
        Round(df.bytes/1024/1024,2) "Size (M)",
@@ -7588,7 +7588,7 @@ ORDER BY df.tablespace_name,
 PROMPT
 SET FEEDBACK ON
 SET PAGESIZE 18
--- ���ռ��ܴ�С��ʣ���С
+-- 表空间总大小与剩余大小
 select a.*, b.free_MB
   from (select tablespace_name, sum(bytes) / 1024 / 1024 total_MB
           from dba_data_files
@@ -7598,7 +7598,7 @@ select a.*, b.free_MB
          group by tablespace_name) b
  where a.tablespace_name = b.tablespace_name;
 
-prompt --'��ѯ���ռ�ʹ�����';
+prompt --'查询表空间使用情况';
 col tablespace_name for a25;
 col total for a20;
 col free for a20;
@@ -7626,7 +7626,7 @@ select tb.tbs_name,
  where ta.tbs_name(+) = tb.tbs_name
 /
 prompt
-prompt --��ѯtemp���ռ�ռ���ݿ�Ŀռ����
+prompt --查询temp表空间占数据库的空间比例
 SELECT (select round(sum(decode(t.autoextensible,
                                 'YES',
                                 t.maxbytes,
@@ -7648,7 +7648,7 @@ SELECT (select round(sum(decode(t.autoextensible,
 
 @tempuser
 
- -------��ʱ���ռ��ʹ����
+ -------临时表空间的使用率
  select t1."Tablespace" "Tablespace",
 t1."Total (G)" "Total (G)",
 nvl(t2."Used (G)", 0) "Used(G)",
@@ -7667,7 +7667,7 @@ where t1."Tablespace"=t2.tablespace(+)
 
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-9.��У����ʷ���ݽ�������� ���� ���  Լ��
+9.不校验历史数据禁用主外键 主键 外键  约束
 
 drop table EPCISUDWR.POLICY_VEHICLE_INFO cascade constraints ;
 
@@ -7696,7 +7696,7 @@ alter table LIFEDATA.CHS_SPECIAL_LIMIT  disable constraint FK_CHS_AUTOCHECK_LIMI
        and constraint_type='R' ;
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-10. �鿴��������sid. library cache
+10. 查看持有锁的sid. library cache
  SELECT a.SID,
        a.username,
        a.serial#
@@ -7711,15 +7711,15 @@ alter table LIFEDATA.CHS_SPECIAL_LIMIT  disable constraint FK_CHS_AUTOCHECK_LIMI
 
 grant ANALYZE ANY to DEPLOYOP;
 
-��
-������ִ�����½ű�����ORA-00900��
+：
+开发库执行如下脚本报错ORA-00900：
 
 
 
-    "DFS lock handle"��һevent����RAC�����У��Ự�ȴ���ȡһ��ȫ�����ľ��ʱ�����ġ���RAC�У�ȫ�����ľ������DLM��Distributed Lock Manager �ֲ�ʽ�����������������ͷ���ġ�����������һevent˵��ȫ���������Դ���������ˡ�����DLM�������Ĳ�����_lm_locks��9i�Ժ�����һ������������Ĭ��ֵ��12000��û�������������һֵ����һ��OLTPϵͳ��˵���㹻�ġ����ǲ���äĿ��ֱ��������Դ��������Ҫ�ҵ�������Դ���ŵĸ���ԭ������Դ���ţ�˵�����ڴ��������ȡ��������������û���ύ���ع�����ô������ʲô��������Щ���񲻽����أ�Ӧ�ó�����벻���ƣ�û���ύ���񣿻�����Щ�����ڵȴ������Դ���������ˣ�������ʱ�ȷ�����һevent������top event�е�����һ���쳣event��
+    "DFS lock handle"这一event是在RAC环境中，会话等待获取一个全局锁的句柄时产生的。在RAC中，全局锁的句柄是由DLM（Distributed Lock Manager 分布式锁管理器）所管理和分配的。大量发生这一event说明全局锁句柄资源不够分配了。决定DLM锁数量的参数是_lm_locks，9i以后，它是一个隐含参数，默认值是12000。没有特殊情况，这一值对于一个OLTP系统来说是足够的。我们不能盲目地直接增加资源，而是需要找到导致资源紧张的根本原因。锁资源紧张，说明存在大量事务获取了锁，但是事务没有提交、回滚。那么，又是什么导致了这些事务不结束呢？应用程序代码不完善，没有提交事务？或者那些事务还在等待别的资源？分析到此，我们暂时先放下这一event，看下top event中的另外一个异常event。
 
-    "enq: US - contention"�����event˵�������ڶ����еȴ�UNDO Segment��ͨ��������UNDO�ռ䲻�㵼�µġ���϶�ǰһevent�ķ����������ж�������Ϊ���������ڵȴ������еȴ�UNDO��Դ������ȫ����û���ͷš�Ϊ����֤��һ�жϣ��ҷֱ��ѯ������2��events�Ķ�������Щ��
-�ȿ�"DFS lock handle"��wait����
+    "enq: US - contention"，这个event说明事务在队列中等待UNDO Segment，通常是由于UNDO空间不足导致的。结合对前一event的分析，初步判断正是因为大量事务在等待队列中等待UNDO资源，导致全局锁没有释放。为了验证这一判断，我分别查询发生这2个events的对象是那些。
+先看"DFS lock handle"的wait对象：
 
 01.select o.object_id, o.owner, o.object_name, o.subobject_name, o.object_type, s.cnt
 02.from dba_objects o,
@@ -7740,9 +7740,9 @@ grant ANALYZE ANY to DEPLOYOP;
 17.    121524 CS2_PARTY_OWNER    PARKING_LOT_SHMT_IDX1                      INDEX          606
 18.    121516 CS2_PARTY_OWNER    PARKING_LOT_IDX3                           INDEX          594
 19.    121523 CS2_PARTY_OWNER    PARKING_LOT_SHMT_PK                        INDEX          524
-���ȣ����뵽һ��������UNDO_RETENTIONʱ��̫������UNDO���ռ䱻����ΪGUARANTEE�ˡ������Ļ����ᵼ�������Ѿ������������UNDO���ݱ�������������ʹ�ã�UNDO_RETENTION��ʱ��Խ������Щ����ռ�õ�UNDO�ռ��Խ�࣬�����ͺ����׵���"enq: US - contention"���⡣��Awr report�п�����UNDO_RETENTION��ʱ�����õ�ȷʵ�Ƚϳ���7200�롣�ٿ�һ�±��ռ��Ƿ�GUARANTEE�ˣ�
+首先，我想到一个可能是UNDO_RETENTION时间太长、且UNDO表空间被设置为GUARANTEE了。这样的话，会导致许多已经结束的事务的UNDO数据被保护起来不被使用，UNDO_RETENTION的时间越长，这些数据占用的UNDO空间就越多，这样就很容易导致"enq: US - contention"问题。从Awr report中看到，UNDO_RETENTION的时间设置得确实比较长：7200秒。再看一下表空间是否被GUARANTEE了：
 
-SQL����
+SQL代码
 01.select tablespace_name, retention from dba_tablespaces where tablespace_name like 'UNDO%';
 02.
 03.TABLESPACE_NAME            RETENTION
@@ -7750,11 +7750,11 @@ SQL����
 05.UNDOTBS1               NOGUARANTEE
 06.UNDOTBS2               NOGUARANTEE
 07.UNDOTBS3               NOGUARANTEE
-������ֱ��ռ䲢û����retension guarantee����һ�����Ա��ų���
+结果发现表空间并没有做retension guarantee，这一可能性被排除。
 
-    �������ٿ�һ�µ�������Щ����ռ����UNDO�ռ䣬����������ϣ�
+    那我们再看一下到底是那些事务占用了UNDO空间，结果出乎意料：
 
-SQL����
+SQL代码
 01.SELECT a.sid, a.username, b.xidusn, b.used_urec, b.used_ublk, sq.sql_text
 02.FROM v$session a, v$transaction b, v$sqlarea sq
 03.WHERE a.saddr = b.ses_addr
@@ -7763,9 +7763,9 @@ SQL����
 06.       SID USERNAME    XIDUSN     USED_UREC  USED_UBLK  SQL_TEXT
 07.---------- ----------- ---------- ---------- ---------- -----------
 08.      1511 CS2_PARTY   1          9          1
-�����ڸýڵ��ϲ�û���ҵ�����ռ��UNDO�ռ������ġ���UNDO�ռ��ʵ��ʹ������������������أ�
+我们在该节点上并没有找到大量占用UNDO空间的事务的。那UNDO空间的实际使用情况到底是怎样的呢？
 
-SQL����
+SQL代码
 01.SELECT SEGMENT_NAME, TABLESPACE_NAME, BYTES, BLOCKS, EXTENTS, SEGMENT_TYPE
 02.   FROM DBA_SEGMENTS
 03.   WHERE SEGMENT_TYPE LIKE chr(37)||'UNDO'||chr(37)
@@ -7777,9 +7777,9 @@ SQL����
 09._SYSSMU123$    UNDOTBS1        11141120   1360     170        TYPE2 UNDO
 10._SYSSMU34$     UNDOTBS1        11010048   1344     168        TYPE2 UNDO
 11.... ...
-    �ҵ�֢���ˡ�_SYSSMU69$����ع���ռ����19.3G�Ŀռ䣡�ٿ�������ع����е���չ�Σ�extent����״̬��
+    找到症结了。_SYSSMU69$这个回滚段占据了19.3G的空间！再看看这个回滚段中的扩展段（extent）的状态：
 
-SQL����
+SQL代码
 01.select status, sum(blocks)
 02.  from dba_undo_extents
 03.where segment_name='_SYSSMU69$'
@@ -7788,9 +7788,9 @@ SQL����
 06.STATUS    SUM(BLOCKS)
 07.--------- -----------
 08.ACTIVE        2528008
-    ȫ����չ�ζ���active�ģ������Ļ���˵������������ʹ�øûع��ε�������չ�Ρ���ʵ����ȴ�Ҳ�������������
+    全部扩展段都是active的，正常的话，说明有事务正在使用该回滚段的所有扩展段。但实际上却找不到这样的事务：
 
-SQL����
+SQL代码
 01.select
 02.   r.name       "RBS name",
 03.   t.start_time,
@@ -7803,11 +7803,11 @@ SQL����
 10.and r.name = '_SYSSMU69$';
 11.
 12.no rows selected
-    ��һ�㲻���������Ŀ����Ծ��ǵ���ʹ�øûع��ε������쳣��ֹ�ˣ�������Դû�ͷš���һ�㣬ͨ��������֧�ֵ�ͬ��ȷ�ϣ��õ�һ����������ʵ��
+    这一点不正常。最大的可能性就是当初使用该回滚段的事务被异常终止了，导致资源没释放。这一点，通过与生产支持的同事确认，得到一个这样的事实：
 
-�������ٲ�һ�¸ûع�������ʲôʱ�俪ʼ�����ģ�
+那我们再查一下该回滚段是在什么时间开始激增的：
 
-SQL����
+SQL代码
 01.select begin_time,end_time,undotsn,undoblks,txncount,activeblks,unexpiredblks,expiredblks from v$undostat;
 02.
 03.2009-09-01 05:19:01 2009-09-01 05:29:01   1  1268     7993    2529896     30048    48
@@ -7820,13 +7820,13 @@ SQL����
 10.2009-09-01 04:09:01 2009-09-01 04:19:01   1  110936   20206   1989672     308864   261456
 11.2009-09-01 03:59:01 2009-09-01 04:09:01   1  80127    13635   1911464     367360   273744
 12.2009-09-01 03:49:01 2009-09-01 03:59:01   1  107125   11822   1807576     499840   252576
- ���Կ�����������4:00���ҿ�ʼ���������ġ����������ǿ���ȷ��������һ�쳣�������´����Ļع��α�ռ��Ҳû���ͷţ�
+ 可以看到，正是在4:00左右开始急剧增长的。基本上我们可以确认正是这一异常操作导致大量的回滚段被占用也没被释放！
 
-    ���ڸûع��ε�״̬����ONLINE״̬������������չ�ζ���ACTIVE�ģ��������ǲ���DROP��SHRINK�������ڣ�������������������������⣺
+    由于该回滚段的状态处于ONLINE状态，且其所有扩展段都是ACTIVE的，所以我们不能DROP或SHRINK它。现在，我们有两个方案来解决该问题：
 
-1.���ڶ��ڵ������Ѿ��������ˣ������޷�ͨ���ύ��ع��������Ƿ�ع�����Դ����ô����ֱ�ӵķ�����������ʵ�������ûع��Σ�
-2.��ʱ��������������ӻ����½�һ��UNDO���ռ䣬ʹ�����������������С�
-    ��һ��������Ӱ�쵽����ģ�飬ֻ�ܵ���ĩdowntime��ʱ��ʵʩ�����ǲ��õڶ�����������ʱ������ΪUNDOTBS1������10g�ռ䡣��ɱ��һЩ������Щ�ȴ�������hungס�ĻỰ���������ݿ�ָ���������
+1.由于对于的事务已经不存在了，我们无法通过提交或回滚事务来是否回滚段资源。那么，最直接的方法就是重启实例，重置回滚段；
+2.临时解决方案就是增加或者新建一个UNDO表空间，使其它事务能正常运行。
+    第一个方案会影响到其它模块，只能到周末downtime的时候实施。于是采用第二个方案：临时增加了为UNDOTBS1增加了10g空间。在杀掉一些由于这些等待被彻底hung住的会话后，整个数据库恢复了正常。
 
 
 ORA-17629: Cannot connect to the remote database server
@@ -7836,192 +7836,192 @@ RMAN-04006: error from auxiliary database: ORA-01034: ORACLE not available
 ORA-27101: shared memory realm does not exist
 Linux-x86_64 Error: 2: No such file or directory
 
-��������Ա��������ֵĵ�¼��ʽ���������п��ܳ�����ǰһ���֣���Ϊʹ�õ���Ĭ����Ϊ��ʽ�������벿���������޷�ġ����յ�ԭ���ȷ���������ʹ��Oracle��Active Database Duplicate���ܴ�������DataGuard�Ĺ����У�����target���ݿ���롰��ʽ��ָ�����롱����ʹ��ʹ�ò���ϵͳ��֤��ʽ��¼��
+如果继续对比这两部分的登录方式，问题最有可能出现在前一部分，因为使用的是默认行为方式；另外后半部分是天衣无缝的。最终的原因的确出在这里，在使用Oracle的Active Database Duplicate功能创建物理DataGuard的过程中，连接target数据库必须“显式地指定密码”，即使是使用操作系统认证方式登录。
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-11. �鿴�����ļ����ļ��ţ������ļ��Ƿ�һ�� �����ļ�һ��
+11. 查看数据文件的文件号，数据文件是否一致 数据文件一致
 select hxfil file#,fhsta status,fhscn scn ,fhrba_seq seq# from x$kcvfh;
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-12. �鿴����ִ�е�impdp��expdp���������.
+12. 查看正在执行的impdp或expdp的运行情况.
 select * from dba_datapump_jobs t where t.owner_name like 'SYS' and t.state='EXECUTING';
 
-insert into nv values('��?','��?');
+insert into nv values('刘?','刘?');
 
 
-���ı���
-��cmd���ڵ���
+中文表名
+在cmd窗口导入
 
-oracle exp/imp ���
+oracle exp/imp 详解
 
-����/������ORACLE�Ҵ������ϵ����������й��ߣ���ʵ�Ҵ�������ΪExp/Imp��һ�ֺõı��ݷ�ʽ��
-��ȷ��˵����Exp/Impֻ����һ���õ�ת�����ߣ��ر�����С�����ݿ��ת�������ռ��Ǩ�ƣ����ĳ�ȡ��
-����߼���������ͻ�����в�С�Ĺ��͡���Ȼ������Ҳ���԰�����ΪС�����ݿ���������ݺ��һ����
-���������ݣ�Ҳ�ǲ����Ľ��顣����Խ��Խ������ݿ⣬�ر���TB�����ݿ��Խ��Խ�����ݲֿ�ĳ��֣�
-EXP/IMPԽ��Խ���������ˣ����ʱ�����ݿ�ı��ݶ�ת����RMAN�͵��������ߡ�����˵��һ��EXP/IMP��ʹ�á�
-���ʹexp�İ����Բ�ͬ���ַ�����ʾ��set nls_lang=simplified chinese_china.zhs16gbk
-ͨ�����û���������������exp�İ�����������ʾ�����set nls_lang=American_america.�ַ�����
-��ô��������Ӣ�ĵ���
+导入/导出是ORACLE幸存的最古老的两个命令行工具，其实我从来不认为Exp/Imp是一种好的备份方式，
+正确的说法是Exp/Imp只能是一个好的转储工具，特别是在小型数据库的转储，表空间的迁移，表的抽取，
+检测逻辑和物理冲突等中有不小的功劳。当然，我们也可以把它作为小型数据库的物理备份后的一个逻
+辑辅助备份，也是不错的建议。对于越来越大的数据库，特别是TB级数据库和越来越多数据仓库的出现，
+EXP/IMP越来越力不从心了，这个时候，数据库的备份都转向了RMAN和第三方工具。下面说明一下EXP/IMP的使用。
+如何使exp的帮助以不同的字符集显示：set nls_lang=simplified chinese_china.zhs16gbk
+通过设置环境变量，可以让exp的帮助以中文显示，如果set nls_lang=American_america.字符集，
+那么帮助就是英文的了
 
-EXP�����в�����������Ϊ������Ĭ��ֵ����
-USERID                  �û���/����      �磺 USERID=duanl/duanl
-FULL                    �����������ݿ� (N)
-BUFFER                  ���ݻ������Ĵ�С
-OWNER                   �������û����б�,��ϣ�������ĸ��û��Ķ��󣬾���owner=username
-FILE                    ����ļ� (EXPDAT.DMP)
-TABLES                  �����б� ,ָ��������table���ƣ��磺TABLES=table1,table2
+EXP的所有参数（括号中为参数的默认值）：
+USERID                  用户名/口令      如： USERID=duanl/duanl
+FULL                    导出整个数据库 (N)
+BUFFER                  数据缓冲区的大小
+OWNER                   所有者用户名列表,你希望导出哪个用户的对象，就用owner=username
+FILE                    输出文件 (EXPDAT.DMP)
+TABLES                  表名列表 ,指定导出的table名称，如：TABLES=table1,table2
 
-RECORDLENGTH            IO ��¼�ĳ���
-GRANTS                  ����Ȩ�� (Y)
-INCTYPE                 ������������
-INDEXES                 �������� (Y)
-RECORD                  ������������ (Y)
-ROWS                    ���������� (Y)
-PARFILE                 �����ļ���,�����exp�Ĳ����ܶ࣬���Դ�ɲ����ļ�.
-CONSTRAINTS             ����Լ�� (Y)
-CONSISTENT              �����һ����
-LOG                     ��Ļ�������־�ļ�
-STATISTICS              �������� (ESTIMATE)
-DIRECT                  ֱ��·�� (N)
-TRIGGERS                ���������� (Y)
-FEEDBACK                ��ʾÿ x �� (0) �Ľ���
-FILESIZE                ��ת���ļ������ߴ�
-QUERY                   ѡ���������Ӽ����Ӿ�
+RECORDLENGTH            IO 记录的长度
+GRANTS                  导出权限 (Y)
+INCTYPE                 增量导出类型
+INDEXES                 导出索引 (Y)
+RECORD                  跟踪增量导出 (Y)
+ROWS                    导出数据行 (Y)
+PARFILE                 参数文件名,如果你exp的参数很多，可以存成参数文件.
+CONSTRAINTS             导出约束 (Y)
+CONSISTENT              交叉表一致性
+LOG                     屏幕输出的日志文件
+STATISTICS              分析对象 (ESTIMATE)
+DIRECT                  直接路径 (N)
+TRIGGERS                导出触发器 (Y)
+FEEDBACK                显示每 x 行 (0) 的进度
+FILESIZE                各转储文件的最大尺寸
+QUERY                   选定导出表子集的子句
 
-���йؼ��ֽ����ڿɴ���ı��ռ�
-TRANSPORT_TABLESPACE    �����ɴ���ı��ռ�Ԫ���� (N)
-TABLESPACES             ������ı��ռ��б�
-    IMP�����в�����������Ϊ������Ĭ��ֵ����
-USERID                  �û���/����
-FULL                    ���������ļ� (N)
-BUFFER                  ���ݻ�������С
-FROMUSER      				  �������û����б�
-FILE      						  �����ļ� (EXPDAT.DMP)
-TOUSER        				  �û����б�
-SHOW      						  ֻ�г��ļ����� (N)
-TABLES       					  �����б�
-IGNORE    						  ���Դ������� (N)
-RECORDLENGTH   				  IO ��¼�ĳ���
-GRANTS   							  ����Ȩ�� (Y)
-INCTYPE       				  ������������
-INDEXES 							  �������� (Y)
-COMMIT        				  �ύ������� (N)
-ROWS     							  ���������� (Y)
-PARFILE       				  �����ļ���
-LOG       						  ��Ļ�������־�ļ�
-CONSTRAINTS   				  �������� (Y)
-DESTROY   						  ���Ǳ��ռ������ļ� (N)
-INDEXFILE 						  ����/������Ϣд��ָ�����ļ�
-SKIP_UNUSABLE_INDEXES   ����������������ά�� (N)
-ANALYZE   						  ִ��ת���ļ��е� ANALYZE ��� (Y)
-FEEDBACK 							  ��ʾÿ x �� (0) �Ľ���
-TOID_NOVALIDATE   		  ����ָ������ id ��У��
-FILESIZE 							  ��ת���ļ������ߴ�
-RECALCULATE_STATISTICS  ���¼���ͳ��ֵ (N)
+下列关键字仅用于可传输的表空间
+TRANSPORT_TABLESPACE    导出可传输的表空间元数据 (N)
+TABLESPACES             将传输的表空间列表
+    IMP的所有参数（括号中为参数的默认值）：
+USERID                  用户名/口令
+FULL                    导入整个文件 (N)
+BUFFER                  数据缓冲区大小
+FROMUSER      				  所有人用户名列表
+FILE      						  输入文件 (EXPDAT.DMP)
+TOUSER        				  用户名列表
+SHOW      						  只列出文件内容 (N)
+TABLES       					  表名列表
+IGNORE    						  忽略创建错误 (N)
+RECORDLENGTH   				  IO 记录的长度
+GRANTS   							  导入权限 (Y)
+INCTYPE       				  增量导入类型
+INDEXES 							  导入索引 (Y)
+COMMIT        				  提交数组插入 (N)
+ROWS     							  导入数据行 (Y)
+PARFILE       				  参数文件名
+LOG       						  屏幕输出的日志文件
+CONSTRAINTS   				  导入限制 (Y)
+DESTROY   						  覆盖表空间数据文件 (N)
+INDEXFILE 						  将表/索引信息写入指定的文件
+SKIP_UNUSABLE_INDEXES   跳过不可用索引的维护 (N)
+ANALYZE   						  执行转储文件中的 ANALYZE 语句 (Y)
+FEEDBACK 							  显示每 x 行 (0) 的进度
+TOID_NOVALIDATE   		  跳过指定类型 id 的校验
+FILESIZE 							  各转储文件的最大尺寸
+RECALCULATE_STATISTICS  重新计算统计值 (N)
 
-���йؼ��ֽ����ڿɴ���ı��ռ�
-TRANSPORT_TABLESPACE   ����ɴ���ı��ռ�Ԫ���� (N)
-TABLESPACES 					 ��Ҫ���䵽���ݿ�ı��ռ�
-DATAFILES 						 ��Ҫ���䵽���ݿ�������ļ�
-TTS_OWNERS             ӵ�пɴ�����ռ伯�����ݵ��û�
+下列关键字仅用于可传输的表空间
+TRANSPORT_TABLESPACE   导入可传输的表空间元数据 (N)
+TABLESPACES 					 将要传输到数据库的表空间
+DATAFILES 						 将要传输到数据库的数据文件
+TTS_OWNERS             拥有可传输表空间集中数据的用户
 
-��������������˵����exp/imp���������������������ϵ�������������ò�Ҫʹ�á�
+关于增量参数的说明：exp/imp的增量并不是真正意义上的增量，所以最好不要使用。
 
 
-EXP����ѡ��
-1.FULL��������ڵ����������ݿ⣬��ROWS=Nһ��ʹ��ʱ�����Ե����������ݿ�Ľṹ�����磺
+EXP常用选项
+1.FULL，这个用于导出整个数据库，在ROWS=N一起使用时，可以导出整个数据库的结构。例如：
 exp userid=test/test file=./db_str.dmp log=./db_str.log full=y rows=n compress=y direct=y
 
-2.OWNER��TABLE��������ѡ�����ڶ���EXP�Ķ���OWNER���嵼��ָ���û��Ķ���TABLEָ��EXP��table���ƣ����磺
+2.OWNER和TABLE，这两个选项用于定义EXP的对象。OWNER定义导出指定用户的对象；TABLE指定EXP的table名称，例如：
 exp userid=test/test file=./db_str.dmp log=./db_str.log owner=duanl
 exp userid=test/test file=./db_str.dmp log=./db_str.log table=nc_data,fi_arap
 
-3.BUFFER��FEEDBACK���ڵ����Ƚ϶������ʱ���һῼ���������������������磺
+3.BUFFER和FEEDBACK，在导出比较多的数据时，我会考虑设置这两个参数。例如：
 exp userid=test/test file=yw97_2003.dmp log=yw97_2003_3.log feedback=10000 buffer=100000000 tables=WO4,OK_YT
-feedback;ûһ������ʾһ�ν��ȡ�
+feedback;没一万行显示一次进度。
 
-4.FILE��LOG�������������ֱ�ָ�����ݵ�DMP���ƺ�LOG���ƣ������ļ�����Ŀ¼�����Ӽ����档
+4.FILE和LOG，这两个参数分别指定备份的DMP名称和LOG名称，包括文件名和目录，例子见上面。
 
-5.COMPRESS������ѹ���������ݵ����ݡ��������Ƶ��������storage�����β�����Ĭ��ֵΪY��ʹ��Ĭ��ֵ������Ĵ洢����init extent���ڵ�ǰ���������extent���ܺ͡��Ƽ�ʹ��COMPRESS��N��
+5.COMPRESS参数不压缩导出数据的内容。用来控制导出对象的storage语句如何产生。默认值为Y，使用默认值，对象的存储语句的init extent等于当前导出对象的extent的总和。推荐使用COMPRESS＝N。
 
-6.FILESIZE��ѡ����8i�п��á����������dmp�ļ�����ʱ�����ʹ��FILESIZE�����������ļ���С��Ҫ����2G���磺
+6.FILESIZE该选项在8i中可用。如果导出的dmp文件过大时，最好使用FILESIZE参数，限制文件大小不要超过2G。如：
 exp userid=duanl/duanl file=f1,f2,f3,f4,f5 filesize=2G owner=scott
-����������f1.dmp, f2.dmp��һϵ���ļ���ÿ����С��Ϊ2G���������������С��10G,EXP���ش���f5.bmp.
+这样将创建f1.dmp, f2.dmp等一系列文件，每个大小都为2G，如果导出的总量小于10G,EXP不必创建f5.bmp.
 
 
-IMP����ѡ��
-1��FROMUSER��TOUSER,ʹ������ʵ�ֽ����ݴ�һ��SCHEMA�е��뵽����һ��SCHEMA�С����磺����������expʱ������Ϊtest�Ķ���,����������Ѷ������û���
+IMP常用选项
+1、FROMUSER和TOUSER,使用它们实现将数据从一个SCHEMA中导入到另外一个SCHEMA中。例如：假设我们做exp时导出的为test的对象,现在我们想把对象导入用户：
 imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1
 
-2��IGNORE��GRANTS��INDEXES������IGNORE���������Ա��Ĵ��ڣ��������룬���������Ҫ�������Ĵ洢����ʱ�����ã����ǿ����ȸ���ʵ������ú����Ĵ洢�������ñ���Ȼ��ֱ�ӵ������ݡ���GRANTS��INDEXES���ʾ�Ƿ�����Ȩ�������������ʹ���µĴ洢�����ؽ�����������Ϊ�˼ӿ쵽���ٶȣ����ǿ��Կ��ǽ�INDEXES��ΪN����GRANTSһ�㶼��Y�����磺imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1 indexes=N
+2、IGNORE、GRANTS和INDEXES，其中IGNORE参数将忽略表的存在，继续导入，这个对于需要调整表的存储参数时很有用，我们可以先根据实际情况用合理的存储参数建好表，然后直接导入数据。而GRANTS和INDEXES则表示是否导入授权和索引，如果想使用新的存储参数重建索引，或者为了加快到入速度，我们可以考虑将INDEXES设为N，而GRANTS一般都是Y。例如：imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1 indexes=N
 
 
-���ռ䴫��
-���ռ䴫����8i�����ӵ�һ�ֿ��������ݿ���ƶ����ݵ�һ�ְ취���ǰ�һ�����ݿ��ϵĸ�ʽ�����ļ����ӵ�����һ�����ݿ��У������ǰ����ݵ�����Dmp�ļ���������Щʱ���Ƿǳ����õģ���Ϊ������ռ��ƶ����ݾ������ļ�һ���졣
+表空间传输
+表空间传输是8i新增加的一种快速在数据库间移动数据的一种办法，是把一个数据库上的格式数据文件附加到另外一个数据库中，而不是把数据导出成Dmp文件，这在有些时候是非常管用的，因为传输表空间移动数据就象复制文件一样快。
 
-���ڴ�����ռ���һЩ���򣬼���
-1.Դ���ݿ��Ŀ�����ݿ������������ͬ��Ӳ��ƽ̨�ϡ�
-2.Դ���ݿ���Ŀ�����ݿ����ʹ����ͬ���ַ�����
-3.Դ���ݿ���Ŀ�����ݿ�һ��Ҫ����ͬ��С�����ݿ�
-4.Ŀ�����ݿⲻ������Ǩ�Ʊ��ռ�ͬ���ı��ռ�
-5.SYS�Ķ�����Ǩ��
-6.���봫���԰����Ķ���
-7.��һЩ�������ﻯ��ͼ�����ں����������Ȳ��ܱ�����
+关于传输表空间有一些规则，即：
+1.源数据库和目标数据库必须运行在相同的硬件平台上。
+2.源数据库与目标数据库必须使用相同的字符集。
+3.源数据库与目标数据库一定要有相同大小的数据块
+4.目标数据库不能有与迁移表空间同名的表空间
+5.SYS的对象不能迁移
+6.必须传输自包含的对象集
+7.有一些对象，如物化视图，基于函数的索引等不能被传输
 
-���������µķ��������һ�����ռ��һ�ױ��ռ��Ƿ���ϴ����׼��
+可以用以下的方法来检测一个表空间或一套表空间是否符合传输标准：
 exec sys.dbms_tts.transport_set_check('tablespace_name',true);
 select * from sys.transport_set_violation;
-���û����ѡ�񣬱�ʾ�ñ��ռ�ֻ���������ݣ��������԰����ġ�������Щ���԰����ı��ռ䣬�����ݱ��ռ���������ռ䣬����һ���䡣
+如果没有行选择，表示该表空间只包含表数据，并且是自包含的。对于有些非自包含的表空间，如数据表空间和索引表空间，可以一起传输。
 
-����Ϊ��Ҫʹ�ò��裬�����ο���ϸʹ�÷�����Ҳ���Բο�ORACLE����������
-1.���ñ��ռ�Ϊֻ�����ٶ����ռ�����ΪAPP_Data ��APP_Index��
+以下为简要使用步骤，如果想参考详细使用方法，也可以参考ORACLE联机帮助。
+1.设置表空间为只读（假定表空间名字为APP_Data 和APP_Index）
 alter tablespace app_data read only;
 alter tablespace app_index read only;
-2.����EXP����
-SQL>host exp userid=������sys/password as sysdba������ transport_tablespace=y tablespace=(app_data, app_index)
-������Ҫע�����
-a.Ϊ����SQL��ִ��EXP��USERID�������������ţ���UNIX��Ҳ����ע����⡰/����ʹ��
-b.��816���Ժ󣬱���ʹ��sysdba���ܲ���
-c.���������SQL�б��������һ��
+2.发出EXP命令
+SQL>host exp userid=”””sys/password as sysdba””” transport_tablespace=y tablespace=(app_data, app_index)
+以上需要注意的是
+a.为了在SQL中执行EXP，USERID必须用三个引号，在UNIX中也必须注意避免“/”的使用
+b.在816和以后，必须使用sysdba才能操作
+c.这个命令在SQL中必须放置在一行
 
-3.���������ļ�����һ���ص㣬��Ŀ�����ݿ�,������cp(unix)��copy(windows)��ͨ��ftp�����ļ���һ��Ҫ��bin��ʽ��
-4.�ѱ��صı��ռ�����Ϊ��д
-5.��Ŀ�����ݿ⸽�Ӹ������ļ�
-imp file=expdat.dmp userid=������sys/password as sysdba������ transport_tablespace=y ��datafile=(c:\temp\app_data,c:\temp\app_index)��
-6.����Ŀ�����ݿ���ռ�Ϊ��д
+3.拷贝数据文件到另一个地点，即目标数据库,可以是cp(unix)或copy(windows)或通过ftp传输文件（一定要在bin方式）
+4.把本地的表空间设置为读写
+5.在目标数据库附加该数据文件
+imp file=expdat.dmp userid=”””sys/password as sysdba””” transport_tablespace=y “datafile=(c:\temp\app_data,c:\temp\app_index)”
+6.设置目标数据库表空间为读写
 alter tablespace app_data read write;
 alter tablespace app_index read write;
 
 
-�Ż�EXP/IMP�ķ�����
-     ����Ҫexp/imp���������Ƚϴ�ʱ�����������Ҫ��ʱ���ǱȽϳ��ģ����ǿ�����һЩ�������Ż�exp/imp�Ĳ�����
+优化EXP/IMP的方法：
+     当需要exp/imp的数据量比较大时，这个过程需要的时间是比较长的，我们可以用一些方法来优化exp/imp的操作。
 
-exp:ʹ��ֱ��·�� direct=y
-    oracle��ܿ�sql��䴦������,ֱ�Ӵ����ݿ��ļ��ж�ȡ����,Ȼ��д�뵼���ļ�.
-    �����ڵ�����־�й۲쵽: exp-00067: table xxx will be exported in conventional path
-    ���û��ʹ��ֱ��·��,���뱣֤buffer������ֵ�㹻��.
-    ��һЩ������direct=y������,�޷���ֱ��·���������ƶ���tablespace,������query�����������ݿ��Ӽ�.
-    �����뵼�������ݿ������ڲ�ͬ��os��ʱ,���뱣֤recordlength������ֵһ��(RECORDLENGTH:I/O��¼�ĳ���).
+exp:使用直接路径 direct=y
+    oracle会避开sql语句处理引擎,直接从数据库文件中读取数据,然后写入导出文件.
+    可以在导出日志中观察到: exp-00067: table xxx will be exported in conventional path
+    如果没有使用直接路径,必须保证buffer参数的值足够大.
+    有一些参数于direct=y不兼容,无法用直接路径导出可移动的tablespace,或者用query参数导出数据库子集.
+    当导入导出的数据库运行在不同的os下时,必须保证recordlength参数的值一致(RECORDLENGTH:I/O记录的长度).
 
-imp:ͨ�����¼���;���Ż�
-  1.�����������
-		��sort_area_size����Ϊһ���ϴ��ֵ,����100M
-	2.������־�л��ȴ�
-		����������־�������,������־�ļ���С.
-	3.�Ż���־������
-		���罫log_buffer��������10��(���Ҫ����5M)
-	4.ʹ�����в������ύ
+imp:通过以下几个途径优化
+  1.避免磁盘排序
+		将sort_area_size设置为一个较大的值,比如100M
+	2.避免日志切换等待
+		增加重做日志组的数量,增大日志文件大小.
+	3.优化日志缓冲区
+		比如将log_buffer容量扩大10倍(最大不要超过5M)
+	4.使用阵列插入与提交
 		commit = y
-		ע��:���з�ʽ���ܴ�������LOB��LONG���͵ı�,����������table,���ʹ��commit = y,ÿ����һ��,�ͻ�ִ��һ���ύ.
-	5.ʹ��NOLOGGING��ʽ��С������־��С
-		�ڵ���ʱָ������indexes=n,ֻ�������ݶ�����index,�ڵ������ݺ���ͨ���ű�����index,ָ�� NOLOGGINGѡ��
+		注意:阵列方式不能处理包含LOB和LONG类型的表,对于这样的table,如果使用commit = y,每插入一行,就会执行一次提交.
+	5.使用NOLOGGING方式减小重做日志大小
+		在导入时指定参数indexes=n,只导入数据而忽略index,在导完数据后在通过脚本创建index,指定 NOLOGGING选项
 
 
-����/�������ַ���
-    �������ݵĵ��뵼��ʱ������Ҫע������ַ��������⡣��EXP/IMP������������Ҫע���ĸ��ַ����Ĳ����������˵Ŀͻ����ַ��������������ݿ��ַ���������˵Ŀͻ����ַ�������������ݿ��ַ�����
-����������Ҫ�鿴���ĸ��ַ���������
-�鿴���ݿ���ַ�������Ϣ��
+导出/导入与字符集
+    进行数据的导入导出时，我们要注意关于字符集的问题。在EXP/IMP过程中我们需要注意四个字符集的参数：导出端的客户端字符集，导出端数据库字符集，导入端的客户端字符集，导入端数据库字符集。
+我们首先需要查看这四个字符集参数。
+查看数据库的字符集的信息：
 SQL> select * from nls_database_parameters;
 PARAMETER                       VALUE
 ------------------------------ ------------------------------------------
@@ -8044,41 +8044,41 @@ NLS_COMP                        BINARY
 NLS_NCHAR_CHARACTERSET          ZHS16GBK
 NLS_RDBMS_VERSION               8.1.7.4.1
 
-NLS_CHARACTERSET��ZHS16GBK�ǵ�ǰ���ݿ���ַ�����
+NLS_CHARACTERSET：ZHS16GBK是当前数据库的字符集。
 
-���������鿴�ͻ��˵��ַ�����Ϣ��
-�ͻ����ַ����Ĳ���NLS_LANG=_< territory >.
-language��ָ��oracle��Ϣʹ�õ�����,�������պ��µ���ʾ��
-Territory��ָ�����Һ����ֵĸ�ʽ�������ͼ������ڼ����ڵ�ϰ�ߡ�
-Characterset�����ƿͻ���Ӧ�ó���ʹ�õ��ַ�����ͨ�����û���ڿͻ��˵Ĵ���ҳ�����߶���unicodeӦ����ΪUTF8��
-��windows�У���ѯ���޸�NLS_LANG����ע����н��У�
+我们再来查看客户端的字符集信息：
+客户端字符集的参数NLS_LANG=_< territory >.
+language：指定oracle消息使用的语言,日期中日和月的显示。
+Territory：指定货币和数字的格式，地区和计算星期及日期的习惯。
+Characterset：控制客户端应用程序使用的字符集。通常设置或等于客户端的代码页。或者对于unicode应用设为UTF8。
+在windows中，查询和修改NLS_LANG可在注册表中进行：
 HKEY_LOCAL_MACHINE\SOFTWARE\Oracle\HOMExx\
-xxָ���ڶ��Oracle_Homeʱ��ϵͳ��š�
-��unix�У�
+xx指存在多个Oracle_Home时的系统编号。
+在unix中：
 $ env|grep NLS_LANG
 NLS_LANG=simplified chinese_china.ZHS16GBK
-�޸Ŀ��ã�
+修改可用：
 $ export NLS_LANG=AMERICAN_AMERICA.UTF8
 
-ͨ���ڵ���ʱ��ðѿͻ����ַ������õú����ݿ����ͬ�����������ݵ���ʱ����Ҫ���������������
-		1.Դ���ݿ��Ŀ�����ݿ������ͬ���ַ������á�
-			��ʱ,ֻ�����õ����͵���˵Ŀͻ���NLS_LANG�������ݿ��ַ������ɡ�
-		2.Դ���ݿ��Ŀ�����ݿ��ַ�����ͬ��
-      �Ƚ������˿ͻ��˵�NLS_LANG���óɺ͵����˵����ݿ��ַ���һ�£��������ݣ�Ȼ�󽫵���˿ͻ��˵�NLS_LANG���óɺ͵�����һ�£��������ݣ�����ת��ֻ���������ݿ�ˣ�����ֻ����һ�Ρ�
-      ��������£�ֻ�е���������ݿ��ַ���Ϊ���������ݿ��ַ������ϸ񳬼�ʱ�����ݲ�����ȫ���ɹ������򣬿��ܻ������ݲ�һ�»�������֡�
+通常在导出时最好把客户端字符集设置得和数据库端相同。当进行数据导入时，主要有以下两种情况：
+		1.源数据库和目标数据库具有相同的字符集设置。
+			这时,只需设置导出和导入端的客户端NLS_LANG等于数据库字符集即可。
+		2.源数据库和目标数据库字符集不同。
+      先将导出端客户端的NLS_LANG设置成和导出端的数据库字符集一致，导出数据，然后将导入端客户端的NLS_LANG设置成和导出端一致，导入数据，这样转换只发生在数据库端，而且只发生一次。
+      这种情况下，只有当导入端数据库字符集为导出端数据库字符集的严格超集时，数据才能完全导成功，否则，可能会有数据不一致或乱码出现。
 
-��ͬ�汾��EXP/IMP����
-   	һ����˵���ӵͰ汾���뵽�߰汾���ⲻ���鷳���ǽ��߰汾�����ݵ��뵽�Ͱ汾�У���Oracle9i֮ǰ����ͬ�汾Oracle֮���EXP/IMP����ͨ������ķ����������
-		1���ڸ߰汾���ݿ������еװ汾��catexp.sql��
-		2��ʹ�õͰ汾��EXP�������߰汾�����ݣ�
-		3��ʹ�õͰ汾��IMP�����ݿ⵼�뵽�Ͱ汾���ݿ��У�
-		4���ڸ߰汾���ݿ����������и߰汾��catexp.sql�ű���
+不同版本的EXP/IMP问题
+   	一般来说，从低版本导入到高版本问题不大，麻烦的是将高版本的数据导入到低版本中，在Oracle9i之前，不同版本Oracle之间的EXP/IMP可以通过下面的方法来解决：
+		1、在高版本数据库上运行底版本的catexp.sql；
+		2、使用低版本的EXP来导出高版本的数据；
+		3、使用低版本的IMP将数据库导入到低版本数据库中；
+		4、在高版本数据库上重新运行高版本的catexp.sql脚本。
 
-����9i�У�����ķ��������ܽ�����⡣���ֱ��ʹ�õͰ汾EXP/IMP��������´���
+但在9i中，上面的方法并不能解决问题。如果直接使用低版本EXP/IMP会出现如下错误：
 EXP-00008: orACLE error %lu encountered
 orA-00904: invalid column name
-���Ѿ���һ��������BUG����Ҫ�ȵ�Oracle10.0���ܽ����BUG��Ϊ2261722������Ե�METALINK��ȥ�鿴�йش�BUG����ϸ��Ϣ��
-BUG��BUG�����ǵĹ�������Ҫ������û��Oracle��֧��֮ǰ�����Ǿ��Լ��������Oracle9i��ִ�������SQL�ؽ�exu81rls��ͼ���ɡ�
+这已经是一个公布的BUG，需要等到Oracle10.0才能解决，BUG号为2261722，你可以到METALINK上去查看有关此BUG的详细信息。
+BUG归BUG，我们的工作还是要做，在没有Oracle的支持之前，我们就自己解决。在Oracle9i中执行下面的SQL重建exu81rls视图即可。
 
 Create or REPLACE view exu81rls
 (objown,objnam,policy,polown,polsch,polfun,stmts,chkopt,enabled,spolicy)
@@ -8100,13 +8100,13 @@ exists ( select * from session_roles where role='Select_CATALOG_ROLE')
 grant select on sys.exu81rls to public;
 /
 
-���Կ�汾��ʹ��EXP/IMP����������ȷ��ʹ��EXP��IMP�İ汾��
-1������ʹ��IMP�İ汾ƥ�����ݿ�İ汾���磺Ҫ���뵽817�У�ʹ��817��IMP���ߡ�
-2������ʹ��EXP�İ汾ƥ���������ݿ�����͵İ汾���磺��9201��817�е��룬��ʹ��817�汾��EXP���ߡ�
+可以跨版本的使用EXP/IMP，但必须正确地使用EXP和IMP的版本：
+1、总是使用IMP的版本匹配数据库的版本，如：要导入到817中，使用817的IMP工具。
+2、总是使用EXP的版本匹配两个数据库中最低的版本，如：从9201往817中导入，则使用817版本的EXP工具。
 
-ʾ����
+示例：
 
-1.exp����������
+1.exp的条件导出
 
 userid='/ as sysdba '
 file=(exp01.dmp,exp02.dmp,exp03.dmp,exp04.dmp,exp05.dmp,exp06.dmp,exp07.dmp,exp08.dmp,exp09.dmp,
@@ -8125,7 +8125,7 @@ RESUMABLE_NAME=exp_byrnes
 RESUMABLE_TIMEOUT=99999
 QUERY="where GL_DATE in('20100930','20101031','20101130')"
 
-2.imp����
+2.imp导入
 
 userid='/ as sysdba '
 file=exp01.dmp
@@ -8143,7 +8143,7 @@ RESUMABLE_NAME=imp_byrnes
 RESUMABLE_TIMEOUT=99999
 commit=y
 
-3.expdp����
+3.expdp导出
 
 create directory dtpump_egis as '..................';
 
@@ -8167,7 +8167,7 @@ REMAP_TABLESPACE=EGISDATA:ludata
 TABLE_EXISTS_ACTION=REPLACE
 EXCLUDE=constraint, ref_constraint, grant,index,trigger
 
-4.impd����
+4.impd导入
 
 create directory dtpump_egis as '.............';
 
@@ -8190,7 +8190,7 @@ REMAP_TABLESPACE=EGISDATA:luidx,EGISIDX:luidx
 TABLE_EXISTS_ACTION=REPLACE
 INCLUDE=index
 
-5.expdpֻ�����ṹ
+5.expdp只导表结构
 
 userid='/ as sysdba'
 DIRECTORY=rik_expimpdp_dest
@@ -8202,7 +8202,7 @@ content=METADATA_ONLY
 LOGFILE=expdp_csb.log
 JOB_NAME=expdp_rik_job1
 
-6.expdp��������
+6.expdp条件导出
 
 userid='/ as sysdba'
 DIRECTORY=rik_imp_1
@@ -8219,7 +8219,7 @@ JOB_NAME=expdp_rik_job1
 QUERY="where GL_DATE in('20100930','20101031','20101130')"
 
 
-7.11g��IMPDP�����������
+7.11g中IMPDP重命名导入表
 
 userid='/ as sysdba '
 directory=dtpump
@@ -8243,18 +8243,18 @@ Tom Kyte suggests you always set them unusable instead
 
 
 
-���õ�ǰ�û�Ҫ��Ч�Ľ�ɫ
-(ע����ɫ����Ч��һ��ʲô�����أ������û�a��b1,b2,b3������ɫ����ô���b1δ��Ч����b1��������Ȩ�޶���a�����ǲ�ӵ�еģ�ֻ�н�ɫ��Ч�ˣ���ɫ�ڵ�Ȩ�޲��������û���������Ч��ɫ���ɲ���MAX_ENABLED_ROLES�趨�����û���¼��oracle������ֱ�Ӹ����û���Ȩ�޺��û�Ĭ�Ͻ�ɫ�е�Ȩ�޸����û�����
-sql>set role role1;//ʹrole1��Ч
-sql>set role role,role2;//ʹrole1,role2��Ч
-sql>set role role1 identified by password1;//ʹ�ô��п����role1��Ч
-sql>set role all;//ʹ�ø��û������н�ɫ��Ч
-sql>set role none;//�������н�ɫʧЧ
-sql>set role all except role1;//��role1��ĸ��û�������������ɫ��Ч��
-sql>select * from SESSION_ROLES;//�鿴��ǰ�û�����Ч�Ľ�ɫ��
+设置当前用户要生效的角色
+(注：角色的生效是一个什么概念呢？假设用户a有b1,b2,b3三个角色，那么如果b1未生效，则b1所包含的权限对于a来讲是不拥有的，只有角色生效了，角色内的权限才作用于用户，最大可生效角色数由参数MAX_ENABLED_ROLES设定；在用户登录后，oracle将所有直接赋给用户的权限和用户默认角色中的权限赋给用户。）
+sql>set role role1;//使role1生效
+sql>set role role,role2;//使role1,role2生效
+sql>set role role1 identified by password1;//使用带有口令的role1生效
+sql>set role all;//使用该用户的所有角色生效
+sql>set role none;//设置所有角色失效
+sql>set role all except role1;//除role1外的该用户的所有其它角色生效。
+sql>select * from SESSION_ROLES;//查看当前用户的生效的角色。
 
 
-8.�޸�ָ���û���������Ĭ�Ͻ�ɫ
+8.修改指定用户，设置其默认角色
 sql>alter user user1 default role role1;
 sql>alter user user1 default role all except role1;
 
@@ -8262,7 +8262,7 @@ sql>alter user user1 default role all except role1;
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-13.��ѯ���ݵ�������С
+13.查询数据的整个大小
 
 select ceil(a.tempfile_size + b.datafile_size +c.logfile_size)  "databse size(GB)" from
 (select sum(bytes)/1024/1024/1024 tempfile_size from dba_temp_files) a,
@@ -8270,32 +8270,32 @@ select ceil(a.tempfile_size + b.datafile_size +c.logfile_size)  "databse size(GB
 (select sum(bytes)/1024/1024/1024 logfile_size from v$log)c;
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-14.���Ҵ洢����OPERATIONDATA_IMP����Щsession��ס���޷�����   �洢���̽��� �����洢���� ��������
+14.查找存储过程OPERATIONDATA_IMP被哪些session锁住而无法编译   存储过程解锁 解锁存储过程 解锁过程
 select *  FROM dba_ddl_locks where name =upper('OPERATIONDATA_IMP');
-�Ӷ��õ�session_id��Ȼ��ͨ��
+从而得到session_id，然后通过
 select t.sid,t.serial# from v$session t where t.sid=&session_id;
-�õ�sid��serial#�����
+得到sid和serial#最后用
 alter system kill session 'sid,serial#';
 
 
 GRANT SELECT_CATALOG_ROLE TO clmbbquery;  
  set role SELECT_CATALOG_ROLE;
- select any dictionary��select_catalog_role
-��֮ͬ���������������е�һ���������Ϳ��Բ�ѯ�����ֵ�
-��֮ͬ����
-1��select any dictionary��һ��ϵͳȨ�ޣ�system privilege������select_catalog_role ��һ�ֽ�ɫ��a role����
-2����ɫ�Ļ���Ҫ���µ�¼������ʽ��set role ����Ч��������ϵͳȨ����������Ч�ġ���P.S. ͬ��revokeȨ��Ҳ��������Ч��
-3��select_catalog_role���Բ鿴һЩ�����ֵ����ͼ��(���Կ�role�Ķ���)����dba_֮��ģ���select any dictionary���Բ鿴sys�ı���select_catalog_role��������
-���������֤һ�£�
-2����ɫ�Ļ���Ҫ���µ�¼������ʽ��set role ����Ч��������ϵͳȨ����������Ч�ġ���P.S. ͬ��revokeȨ��Ҳ��������Ч��
-select any dictionary������Ч
-ͬʱ�������Ự���鿴������������£���˳��
+ select any dictionary与select_catalog_role
+相同之处，有了这两个中的一个，基本就可以查询数据字典
+不同之处：
+1、select any dictionary是一种系统权限（system privilege），而select_catalog_role 是一种角色（a role）。
+2、角色的话需要重新登录或者显式的set role 来生效，而赋予系统权限是立即生效的。（P.S. 同样revoke权限也是立即生效）
+3、select_catalog_role可以查看一些数据字典的视图·(可以看role的定义)，如dba_之类的，而select any dictionary可以查看sys的表，select_catalog_role看不到。
+下面具体验证一下：
+2、角色的话需要重新登录或者显式的set role 来生效，而赋予系统权限是立即生效的。（P.S. 同样revoke权限也是立即生效）
+select any dictionary立即生效
+同时开两个会话，查看情况。从上至下，按顺序。
  sys@test10gr2> select * from dba_role_privs where grantee = 'TEST_USER';
 GRANTEE                        GRANTED_ROLE                   ADM DEF
 ------------------------------ ------------------------------ --- ---
 TEST_USER                    CONNECT                        NO  YES
 TEST_USER                    RESOURCE                       NO  YES
-1��TEST_USER ֻ���������CONNECT��RESOURCE  ��ɫ�������ı�Ȩ��Ҳû�С�
+1、TEST_USER 只有最基本的CONNECT和RESOURCE  角色，其它的表权限也没有。
  
  	
 TEST_USER@test10gr2> select count(*) from v$session;    
@@ -8303,21 +8303,21 @@ select count(*) from v$session
                      *
 ERROR at line 1:
 ORA-00942: table or view does not exist
-2����ʱ������ v$session
+2、此时看不到 v$session
 
 sys@test10gr2> GRANT SELECT ANY DICTIONARY TO TEST_USER; 
 Grant succeeded.
-3������SELECT ANY DICTIONARYϵͳȨ��
+3、赋予SELECT ANY DICTIONARY系统权限
  
  	
  TEST_USER@test10gr2>  select count(*) from v$session;  
   COUNT(*)
 ----------
         73
-4��������Ч�����Բ鿴��v$session
+4、立即生效，可以查看到v$session
  sys@test10gr2> REVOKE SELECT ANY DICTIONARY  FROM TEST_USER;
 Revoke succeeded.
-5���ջ�SELECT ANY DICTIONARYϵͳȨ��
+5、收回SELECT ANY DICTIONARY系统权限
  
  	
  TEST_USER@test10gr2>  select count(*) from v$session; 
@@ -8325,11 +8325,11 @@ Revoke succeeded.
                       *
 ERROR at line 1:
 ORA-00942: table or view does not exist
-6��������Ч���޷��鿴��v$session
-select_catalog_role �޷�������Ч
+6、立即生效，无法查看到v$session
+select_catalog_role 无法立即生效
  sys@test10gr2> GRANT SELECT_CATALOG_ROLE TO TEST_USER;   
 Grant succeeded.
-1������SELECT ANY DICTIONARY��ɫ
+1、赋予SELECT ANY DICTIONARY角色
  
  	
 TEST_USER@test10gr2>  select count(*) from v$session; 
@@ -8337,8 +8337,8 @@ TEST_USER@test10gr2>  select count(*) from v$session;
                       *
 ERROR at line 1:
 ORA-00942: table or view does not exist
-2���޷�������Ч��ʹ��set role���ɣ�
-revoke roleҲ��ͬ������ʱ��Ч��
+2、无法立即生效，使用set role即可，
+revoke role也相同，不即时生效。
 
 TEST_USER@test10gr2> set role SELECT_CATALOG_ROLE;
 Role set.
@@ -8346,8 +8346,8 @@ TEST_USER@test10gr2>  select count(*) from v$session;
   COUNT(*)
 ----------
         74 
-3��select_catalog_role���Բ鿴һЩ�����ֵ����ͼ������dba_֮��ģ���select any dictionary���Բ鿴sys�ı���
-select any dictionary ���Կ��� SYS.ACCESS$��
+3、select_catalog_role可以查看一些数据字典的视图·，如dba_之类的，而select any dictionary可以查看sys的表。
+select any dictionary 可以看到 SYS.ACCESS$表
  test_user@test10gr2> select * from dba_sys_privs where grantee = 'TEST_USER';
 GRANTEE                        PRIVILEGE                                ADM
 ------------------------------ ---------------------------------------- ---
@@ -8367,7 +8367,7 @@ test_user@test10gr2> desc SYS.ACCESS$
  ORDER#                                                NOT NULL NUMBER
  COLUMNS                                                        RAW(126)
  TYPES                                                 NOT NULL NUMBER
-select_catalog_role ������
+select_catalog_role 看不到
  test_user@test10gr2> select * from dba_sys_privs where grantee = 'TEST_USER';
 GRANTEE                        PRIVILEGE                                ADM
 ------------------------------ ---------------------------------------- ---
@@ -8385,7 +8385,7 @@ ORA-04043: object SYS.ACCESS$ does not exist
 
 
 ORA-12801  ORA-01652
-������ռ��С
+增大表空间大小
 
 Applies to:
 Oracle Database - Enterprise Edition - Version 11.2.0.3 to 11.2.0.3 [Release 11.2]
@@ -8440,14 +8440,14 @@ One-off patch 14383007 has been provided for certain platform, please check My O
 
 
 --***************************
--- Oracle ���� kill session
+-- Oracle 彻底 kill session
 --***************************
 
-  kill session ��DBA��������������֮һ�����kill ���˲���kill ��session��������ƻ��ԣ���˾����ܵı��������Ĵ�������ͬʱҲӦ��ע�⣬
-���kill ��session����Oracle ��̨���̣������׵������ݿ�ʵ��崻���
-  ͨ������£�������Ҫ�Ӳ���ϵͳ����ɱ��Oracle�Ự���̣�������������ˣ�����������и�������Oracle����ɱ���Ự�Լ�����ϵͳ����ɱ�����̡�
+  kill session 是DBA经常碰到的事情之一。如果kill 掉了不该kill 的session，则具有破坏性，因此尽可能的避免这样的错误发生。同时也应当注意，
+如果kill 的session属于Oracle 后台进程，则容易导致数据库实例宕机。
+  通常情况下，并不需要从操作系统级别杀掉Oracle会话进程，但并非总是如此，下面的描述中给出了在Oracle级别杀掉会话以及操作系统级别杀掉进程。
 
-һ�������Ҫkill session����Ϣ(ʹ��V$SESSION �� GV$SESSION��ͼ)
+一、获得需要kill session的信息(使用V$SESSION 和 GV$SESSION视图)
 
   SET LINESIZE 180
   COLUMN spid FORMAT A10
@@ -8476,21 +8476,21 @@ One-off patch 14383007 has been provided for certain platform, please check My O
            1        144         42 27641      SCOTT      sqlplus@oracle10g (TNS V1-V3)                 4C624730 INACTIVE
 
 
-����ʹ��ALTER SYSTEM KILL SESSION ����ʵ��
-  �﷨��
+二、使用ALTER SYSTEM KILL SESSION 命令实现
+  语法：
       SQL> ALTER SYSTEM KILL SESSION 'sid,serial#';
       SQL> ALTER SYSTEM KILL SESSION 'sid,serial#' IMMEDIATE;
 
-    ����RAC�����µ�kill session ,��Ҫ�������Ҫkill ��session λ���ĸ��ڵ㣬���Բ�ѯGV$SESSION��ͼ��á�
-    kill session ��ʱ������ǽ��Ựɱ��������Щʱ�����ڽϴ���������Ҫ���нϳ���SQL��佫������Ҫkill��session����������ɱ��������������
-    �����յ� "marked for kill"��ʾ(����)��һ���Ự��ǰ����������ɣ��ûỰ������ɱ����
+    对于RAC环境下的kill session ,需要搞清楚需要kill 的session 位于哪个节点，可以查询GV$SESSION视图获得。
+    kill session 的时候仅仅是将会话杀掉。在有些时候，由于较大的事务或需要运行较长的SQL语句将导致需要kill的session并不能立即杀掉。对于这种情
+    况将收到 "marked for kill"提示(如下)，一旦会话当前事务或操作完成，该会话被立即杀掉。
 
     alter system kill session '4730,39171'
     *
     ERROR at line 1:
     ORA-00031: session marked for kill
 
-  ������Ĳ����н�ɱ���Ự146��144
+  在下面的操作中将杀掉会话146，144
     sys@AUSTIN> alter system kill session '146,23';
     System altered.
 
@@ -8507,12 +8507,12 @@ One-off patch 14383007 has been provided for certain platform, please check My O
 
              1 4C71FC84        160         17 4C624174 SYS        ACTIVE   sqlplus@oracle10g (TNS V1-V3)
 
-     ע�⣺�ڲ�ѯ�п��Կ�����ɱ���ĻỰ��PADDR��ַ�����˱仯�����ղ�ѯ����еĺ�ɫ���塣������session��kill ��������session��PADDR
+     注意：在查询中可以看到被杀掉的会话的PADDR地址发生了变化，参照查询结果中的红色字体。如果多个session被kill 掉，则多个session的PADDR
 
-     ����Ϊ��ͬ�Ľ��̵�ַ��
+     被改为相同的进程地址。
 
 
-  ͨ�������������һر�kill ����ADDR��ǰ�ĵ�ַ
+  通过下面的语句来找回被kill 掉的ADDR先前的地址
     SELECT s.username,s.status,
 
     x.ADDR,x.KSLLAPSC,x.KSLLAPSN,x.KSLLASPO,x.KSLLID1R,x.KSLLRTYP,
@@ -8550,7 +8550,7 @@ One-off patch 14383007 has been provided for certain platform, please check My O
                         4C61DA3C          0          0                       0
 
 
-  ���߸���������������÷����仯��addr
+  或者根据下面的语句来获得发生变化的addr
 
     sys@AUSTIN> select p.addr from v$process p where pid <> 1
       2  minus
@@ -8563,8 +8563,8 @@ One-off patch 14383007 has been provided for certain platform, please check My O
 
     4C624730
 
-�����ڲ���ϵͳ����ɱ���Ự
-  Ѱ�һỰ��Ӧ�Ĳ���ϵͳ�Ľ���ID
+三、在操作系统级别杀掉会话
+  寻找会话对应的操作系统的进程ID
 
     sys@AUSTIN> select SPID from  v$process where ADDR in ('4C621950','4C624730') ;
 
@@ -8573,12 +8573,12 @@ One-off patch 14383007 has been provided for certain platform, please check My O
     27573
     27641
 
-  ʹ��kill ������ɱ������ϵͳ�������ID
+  使用kill 命令来杀掉操作系统级别进程ID
 
     kill session -9 27573
     kill session -9 27641
 
-�ġ���õ�ǰ�Ự��SID
+四、获得当前会话的SID
 
   SQL> select userenv('sid') from dual;
 
@@ -8586,8 +8586,8 @@ One-off patch 14383007 has been provided for certain platform, please check My O
   --------------
              627
 
-�塢����Ự��Ҫkill �Ĵ����취
-  1.���ݸ�����SID(�û���)������Ҫɱ���Ự����Ϣ������λ����һ��ʵ��
+五、多个会话需要kill 的处理办法
+  1.根据给定的SID(用户名)查找需要杀掉会话的信息，包括位于哪一个实例
     set linesize 160
     col program format a35
     col username format a18
@@ -8611,8 +8611,8 @@ One-off patch 14383007 has been provided for certain platform, please check My O
 
              2 00000003DAFD66F8       2731          1 00000003DBBE92F8                    ACTIVE   oracle@svdg0029 (ARC0)
 
-    ����Ĳ�ѯ����һ��SIDΪ2731��λ�ڽڵ�2�ϡ�
-    Ҳ����ͨ������ķ�ʽ�����RAC�Ľڵ���Ϣ������ȷ����Ҫkill ��session����λ����һ���ڵ㡣
+    上面的查询中有一个SID为2731的位于节点2上。
+    也可以通过下面的方式来获得RAC的节点信息，便于确定需要kill 的session究竟位于哪一个节点。
       set linesize 160
       col HOST_NAME format a25
 
@@ -8625,30 +8625,30 @@ One-off patch 14383007 has been provided for certain platform, please check My O
                     2 O02WMT1B         svd0052                  10.2.0.4.0        OPEN
                     3 O02WMT1C         svd0053                  10.2.0.4.0        OPEN
 
-  2.ʹ�������ѯ������kill session �����
+  2.使用下面查询来生成kill session 的语句
     select 'alter system kill session '''|| sid ||',' ||SERIAL# ||''''||';'  from  gv$session
     where sid in ('2731','2734','2720','2678','2685')
     order by inst_id;
 
-�������kill session����䣬����Ҫ�����ڴ˴���Ҫɱ����sessionȫ��λ�ڽڵ�1����˵�¼���ڵ�ڵ�1ִ����������
+获得下列kill session的语句，根据要求由于此次需要杀掉的session全部位于节点1，因此登录到节点节点1执行下面的语句
 alter system kill session '2678,8265';
 alter system kill session '2685,83';
 alter system kill session '2720,5';
 alter system kill session '2731,3';
 alter system kill session '2734,15';
-alter system kill session '2731,1';    --���������Ҫִ�У���sessionλ�ڽڵ�2��
+alter system kill session '2731,1';    --此条命令不需要执行，该session位于节点2。
 
 
 
 
 
-�����ʾû�������ͼ��������sys�û���ִ��$ORACLE_HOME/rdbms/admin/catblock.sql�ű����д���������ű�����������һЩ�ǳ���������������ͼ��
+如果提示没有这个视图，可以在sys用户下执行$ORACLE_HOME/rdbms/admin/catblock.sql脚本进行创建（这个脚本还包含其他一些非常有意义的锁相关视图）
 sys@ora10g> conn / as sysdba
 Connected.
 sys@ora10g> @ /rdbms/admin/catblock.sql
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-15. �ֶ��ύʾ��
+15. 分段提交示例
 declare   ---
   cursor cur is
     select rowid
@@ -8690,7 +8690,7 @@ end;
 
 
 
-�ֶ��ύ
+分段提交
 declare
   cursor c_pol_main is
     select  a.* from ABBSDATA.abbs_sale_detail_t5egisss a  ;
@@ -8724,12 +8724,12 @@ exception
   when others then
     close c_pol_main;
     dbms_output.put_line(substr(sqlerrm, 1, 200));
-    dbms_output.put_line(v_pol_main.polno || '������');
+    dbms_output.put_line(v_pol_main.polno || '出错！');
 end;
 /
 
 
-�ֶ��ύ��
+分段提交：
 
 
 DECLARE
@@ -8752,7 +8752,7 @@ BEGIN
 
     V_COUNT := V_COUNT + 1;
 
-    /* �ֶ��ύ */
+    /* 分段提交 */
     IF V_COUNT = V_COMMIT_COUNT THEN
       COMMIT;
       V_COUNT := 0;
@@ -8765,20 +8765,20 @@ BEGIN
 END;
 
 
-�ֶ��ύʾ��2
+分段提交示例2
 /*
-�������裺
-1.�޸ı�pos_accept��IS_POSTED�ֶΣ��޸������ǣ�ACCEPT_DATE��2011��1��1��֮ǰ������,����IS_POSTEDΪ�ա�
-2.������Ҫ�޸ĵ����ݣ���ACCEPT_DATE�ֶηֲ��ȽϾ���
-3.�޸�������50����Ҫ�ֶ��ύ��
+背景假设：
+1.修改表pos_accept中IS_POSTED字段，修改条件是：ACCEPT_DATE在2011年1月1日之前的数据,而且IS_POSTED为空。
+2.假设需要修改的数据，随ACCEPT_DATE字段分布比较均匀
+3.修改量超过50万，需要分段提交。
 
 */
 
 
 /*
-  �ֶ��ύʵ�����£�
-  1.����ACCEPT_DATE���зֶ��ύ
-  2.����ʵ�ֶϵ����������Ѿ�commit֮������ݣ�IS_POSTED����Ϊ�գ��ڽű��в�ѯ������ʱ�������Ѿ��޸Ĺ������ݡ�
+  分段提交实现如下：
+  1.根据ACCEPT_DATE进行分段提交
+  2.可以实现断点续作，当已经commit之后的数据，IS_POSTED不再为空，在脚本中查询数据量时会跳过已经修改过的数据。
 */
 
 declare
@@ -8791,31 +8791,31 @@ declare
 	v_insert_count     number:=0;
 
 begin
-	--��ѯ��Ҫ�޸ĵ�������
+	--查询需要修改的数据量
 	v_sql:='select  max(ACCEPT_DATE),min(ACCEPT_DATE),max(ACCEPT_DATE)- min(ACCEPT_DATE),count(*) from pos_accept;
 	execute immediate v_sql into v_max,v_min,v_interval,v_count;
 
-  --����ֶε�ʱ����
+  --计算分段的时间间隔
 	v_step:=round(v_interval/(v_count/500000));
 
 	loop
-	  --������¼
+	  --锁定记录
 	  select * from pos_accept
       where ACCEPT_DATE >= v_min
 			 	and ACCEPT_DATE <least(v_min+v_step,v_end_date) and IS_POSTED is null for update;
 
-		--���뵽���ݱ�
+		--插入到备份表
 		INSERT INTO dmlbak.pos_accept_bu
      SELECT rowid bak_rowid, t.*, null  from pos_accept t
        where ACCEPT_DATE >= v_min
 			 	 and ACCEPT_DATE <least(v_min+v_step,v_end_date) and IS_POSTED is null;
 
-    --�������ݱ��޸�Դ��
+    --关联备份表修改源表
     update  pos_accept
       set IS_POSTED='Y'
     where rowid in (select  bak_rowid from  dmlbak.pos_accept_bu where  date_dml_flag is null);
 
-    --���ñ�־λ
+    --设置标志位
     update dmlbak.pos_accept_bu set date_dml_flag=systimestamp where date_dml_flag is null;
 
     commit;
@@ -8838,7 +8838,7 @@ end;
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-15.����Ĭ����ʱ���ռ䲢��ѯʹ����
+15.更改默认临时表空间并查询使用率
 --create TMP---------------------------------------------
 step 1)
 CREATE TEMPORARY TABLESPACE TMP
@@ -8861,19 +8861,19 @@ step 3)
 drop tablespace  TMP  including  contents and datafiles ;
 ----------------------------------------------------------
 
-select Total.Tname "���ռ�",
-       Total.Total_Size "��С",
-       Total.Total_Size - Used.free_size as "��ʹ��",
-       Used.Free_size as ���ռ�ʣ���С,
+select Total.Tname "表空间",
+       Total.Total_Size "大小",
+       Total.Total_Size - Used.free_size as "已使用",
+       Used.Free_size as 表空间剩余大小,
        Round((Total.Total_Size - Used.free_size) / Total.Total_Size, 4) * 100 || '%'
   from (
-        -- ���ռ������ļ��Ĵ�С
+        -- 表空间数据文件的大小
         select tablespace_name as TName,
                 round(sum(user_bytes) / (1024 * 1024), 1) as Total_size
           from dba_data_files
          group by tablespace_name) Total,
        (
-        -- ���ռ�ʣ��Ĵ�С
+        -- 表空间剩余的大小
         select tablespace_name as TName,
                 round(sum(bytes) / (1024 * 1024), 1) as Free_size
           from dba_free_space
@@ -8881,39 +8881,39 @@ select Total.Tname "���ռ�",
  where Total.TName = Used.TName(+);
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-16.��ѯ���ݶ���
+16.查询数据定义
   select dbms_metadata.get_ddl('PACKAGE', 'PKG_TRUNCATE', 'APPMGR') from dual;
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-17.ʹ��10046 ��level 1��sql trace�����ԣ���ʵ������Щʱ����ȵġ�
-��ʱ��ͳ��Ϊtrue
+17.使用10046 的level 1及sql trace都可以，其实这两者些时是相等的。
+设时间统计为true
 SQL> show parameter timed_statistics
-����sql_traceΪtrue,�򿪸���
+设置sql_trace为true,打开跟踪
 SQL> alter session set sql_trace=true;
-���ٱ��session������Ҫ�ҵ�����sid��serial#,Ȼ�����²���
-�򿪣�SQL>execute dbms_system.SET_SQL_TRACE_IN_SESSION(sid,serial#,true);
-�ر�: SQL>execute dbms_system.SET_SQL_TRACE_IN_SESSION(sid,serial#,false);
-��
-�򿪣�SQL>execute dbms_system.SET_EV(sid,serial#,10046,1'');
-�ر�: SQL>execute dbms_system.SET_EV(sid,serial#,0,0,'');
-���ִ��һЩsql
+跟踪别的session，首先要找到它的sid的serial#,然后如下操作
+打开：SQL>execute dbms_system.SET_SQL_TRACE_IN_SESSION(sid,serial#,true);
+关闭: SQL>execute dbms_system.SET_SQL_TRACE_IN_SESSION(sid,serial#,false);
+或
+打开：SQL>execute dbms_system.SET_EV(sid,serial#,10046,1'');
+关闭: SQL>execute dbms_system.SET_EV(sid,serial#,0,0,'');
+随便执行一些sql
 SQL> select * from ee;
 SQL> select * from tab;
-�ر�sql_trace
+关闭sql_trace
 SQL> alter session set sql_trace=false;
-�������ɵ�trace�ļ�
+查找生成的trace文件
 SQL> show user
 USER is "SYS"
 SQL> select sid,paddr from v$session where username='HR'
 SQL> /
 SQL> select spid from v$process where addr='51A00BD8';
-��tkprof����һ��,sys=no�ǹص�ϵͳ��ͼ���ҵ���ʾ
+用tkprof解析一下,sys=no是关掉系统视图查找的显示
 oracle@yang:/opt/oracle/admin/ocm1/udump> tkprof ocm1_ora_6321.trc 1.txt sys=no
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-18.�������б��ռ� �������ռ� shrink
-���ȣ����û�з���Ŀռ䲻��100M���򲻿���������
-����Ŀ�꣺��ǰ�����ļ���С �� ��û����ռ䣭 100M����0.8
+18.收缩空闲表空间 收缩表空间 shrink
+首先，如果没有分配的空间不足100M，则不考虑收缩。
+收缩目标：当前数据文件大小 － （没分配空间－ 100M）×0.8
 
 select /*+ ordered use_hash(a,c) */
   'alter database datafile '''||a.file_name||''' resize '
@@ -8952,7 +8952,7 @@ select a.file_id,a.file_name,a.bytes/1024/1024/1024 total_g,c.free_g from dba_da
 where a.file_id = c.file_id )
 where free_g>=5)
 
-���ֻ�����ĳ���������datafile resize,�ɲ���:
+如果只是想对某个表个间的datafile resize,可采用:
 
 SQL> select a.file#,a.name,a.bytes/1024/1024 CurrentMB,
        ceil(HWM * a.block_size)/1024/1024 ResizeTo,
@@ -8970,7 +8970,7 @@ and (a.bytes - HWM *block_size)>0
 order by 5
 ;
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-19.Oracle�������������
+19.Oracle的锁表与解锁表
 
 SELECT /*+ rule */ s.username,
 decode(l.type,'TM','TABLE LOCK',
@@ -8994,9 +8994,9 @@ WHERE l.sid = s.sid
 AND l.id1 = o.object_id(+)
 AND s.username is NOT Null
 
---kill session���
+--kill session语句
 alter system kill session'50,492';
---���¼���Ϊ��ر�
+--以下几个为相关表
 SELECT * FROM v$lock;
 SELECT * FROM v$sqlarea;
 SELECT * FROM v$session;
@@ -9004,22 +9004,22 @@ SELECT * FROM v$process ;
 SELECT * FROM v$locked_object;
 SELECT * FROM all_objects;
 SELECT * FROM v$session_wait;
-�������object��session����Ϣ�Լ���������object��
+查出锁定object的session的信息以及被锁定的object名
 SELECT l.session_id sid, s.serial#, l.locked_mode,l.oracle_username,
 l.os_user_name,s.machine, s.terminal, o.object_name, s.logon_time
 FROM v$locked_object l, all_objects o, v$session s
 WHERE l.object_id = o.object_id
 AND l.session_id = s.sid
 ORDER BY sid, s.serial# ;
-�����������session��sid, serial#,os_user_name, machine name, terminal��ִ�е����
---�������Ƕζ��sql_text��action
+查出锁定表的session的sid, serial#,os_user_name, machine name, terminal和执行的语句
+--比上面那段多出sql_text和action
 SELECT l.session_id sid, s.serial#, l.locked_mode, l.oracle_username, s.user#,
 l.os_user_name,s.machine, s.terminal,a.sql_text, a.action
 FROM v$sqlarea a,v$session s, v$locked_object l
 WHERE l.session_id = s.sid
 AND s.prev_sql_addr = a.address
 ORDER BY sid, s.serial#;
-�����������sid, serial#,os_user_name, machine_name, terminal������type,mode
+查出锁定表的sid, serial#,os_user_name, machine_name, terminal，锁的type,mode
 SELECT s.sid, s.serial#, s.username, s.schemaname, s.osuser, s.process, s.machine,
 s.terminal, s.logon_time, l.type
 FROM v$session s, v$lock l
@@ -9027,9 +9027,9 @@ WHERE s.sid = l.sid
 AND s.username IS NOT NULL
 ORDER BY sid;
 
-�����佫���ҵ����ݿ������е�DML�����������������Է��֣�
-�κ�DML�����ʵ��������������һ���Ǳ�����һ����������
-ɱ������
+这个语句将查找到数据库中所有的DML语句产生的锁，还可以发现，
+任何DML语句其实产生了两个锁，一个是表锁，一个是行锁。
+杀锁命令
 alter system kill session 'sid,serial#'
 SELECT /*+ rule */ s.username,
 decode(l.type,'TM','TABLE LOCK',
@@ -9041,10 +9041,10 @@ FROM v$session s,v$lock l,dba_objects o
 WHERE l.sid = s.sid
 AND l.id1 = o.object_id(+)
 AND s.username is NOT NULL
-������������ȴ������ǿ��ܸ���֪����˭���˱�������˭�ĵȴ�
-���µ������Բ�ѯ��˭���˱�����˭�ڵȴ���
-���ϲ�ѯ�����һ����״�ṹ��������ӽڵ㣬���ʾ�еȴ�������
-�����֪���������ĸ��ع��Σ������Թ�����V$rollname������xidusn���ǻع��ε�USN
+如果发生了锁等待，我们可能更想知道是谁锁了表而引起谁的等待
+以下的语句可以查询到谁锁了表，而谁在等待。
+以上查询结果是一个树状结构，如果有子节点，则表示有等待发生。
+如果想知道锁用了哪个回滚段，还可以关联到V$rollname，其中xidusn就是回滚段的USN
 
 select username,v$lock.sid, trunc(id1/power(2,16)) rbs,
 bitand(id1,to_number('ffff','xxxx'))+0 slot,
@@ -9055,7 +9055,7 @@ and v$lock.sid=v$session.sid
 and v$session.username=user;
 
 
-��������������Oracle grid�����ˣ���æ��������һ�¡�
+开发测试主机，Oracle grid卷满了；帮忙安排清理一下。
 
 [root@cnsh230234 root]# su - grid
 [grid@cnsh230234 ~]$ ORACLE_SID=+ASM1
@@ -9107,8 +9107,8 @@ SELECT sn.username,
               LTRIM(TO_CHAR(m.request, '990'))) request,
        m.id1,       m.id2
   FROM v$session sn, v$lock m
- WHERE (sn.SID = m.SID AND m.request != 0) --���������󣬼�������
-    OR (sn.SID = m.SID --�����������󣬵��������Ķ��������Ự��������
+ WHERE (sn.SID = m.SID AND m.request != 0) --存在锁请求，即被阻塞
+    OR (sn.SID = m.SID --不存在锁请求，但是锁定的对象被其他会话请求锁定
        AND m.request = 0 AND lmode != 4 AND
        (id1, id2) IN (SELECT s.id1, s.id2
                          FROM v$lock s
@@ -9118,43 +9118,43 @@ SELECT sn.username,
  ORDER BY id1, id2, m.request;
 
 
-    oracle�û���¼���
- Oracle�п��԰������·�ʽ���û���½ʧ�ܽ�����ƣ�
-    1��ȷ��sys.aud$ �Ƿ���ڣ�
+    oracle用户登录审计
+ Oracle中可以按照如下方式对用户登陆失败进行审计：
+    1、确认sys.aud$ 是否存在？
 
     desc sys.aud$
 
-    2���۲�user$����lcountΪ��0���û���������������˻���������ж����п����Ǹ��û���½����ʧ�ܹ���
+    2、观察user$表中lcount为非0的用户，如果包含被锁账户，则可以判定很有可能是该用户登陆尝试失败过多
 
-    ������˻�������
+    造成了账户被锁：
 
     select name,lcount from sys.user$;
 
-    3���޸�audit������ audit_trail=none
+    3、修改audit参数： audit_trail=none
 
     alter system set audit_trail=db scope=spfile;
 
-    �������ݿ⡣������Ч��
+    重启数据库。参数生效。
 
-    4������tb��½ʧ����ƣ�
+    4、开启tb登陆失败审计：
 
     AUDIT SESSION WHENEVER NOT SUCCESSFUL;
 
-    5����½ʧ�ܳ��ԡ�
+    5、登陆失败尝试。
 
-    sqlplus w/��������
+    sqlplus w/错误密码
 
-    6�������Ƽ�¼
+    6、检查审计记录
 
     select * from sys.aud$;
 
-    �����лỰ������Ϣ�ͻ��������û����ȡ�
+    里面有会话基本信息和机器名，用户名等。
 
-    �����û�
+    解锁用户
 
     alter user atest account unlock;
 
-    �������������������������û�
+    解除由于密码连续错误而锁定用户
 
     alter profile default limit failed_login_attempts unlimited;
 
@@ -9166,7 +9166,7 @@ exec dbms_fga.disable_policy(object_schema=>'TOADATA', object_name=> 'TOA_CUSTOM
 
 
 
-�Ա�������ϸ���
+对表开启精细审计
     exec dbms_fga.disable_policy(object_schema=>'DBMGR', object_name=> 'TEST', policy_name=> 'check_test_tab',
     statement_types => 'INSERT, UPDATE, DELETE, SELECT');
     exec dbms_fga.enable_policy(object_schema=>'DBMGR', object_name=> 'TEST', policy_name=> 'check_test_tab');
@@ -9189,13 +9189,13 @@ exec dbms_fga.disable_policy(object_schema=>'TOADATA', object_name=> 'TOA_CUSTOM
 /
 
 
-  1 .�鿴AUD$��FGA_LOG$���ڱ��ռ�
+  1 .查看AUD$和FGA_LOG$所在表空间
 SELECT table_name, tablespace_name FROM dba_tables WHERE table_name IN ('AUD$', 'FGA_LOG$') ORDER BY table_name;
-2.�鿴AUD$��FGA_LOG$������
+2.查看AUD$和FGA_LOG$数据量
 select segment_name,bytes/1024/1024 size_in_megabytes from dba_segments where segment_name in ('AUD$','FGA_LOG$');
-3.����audit_tbs���ռ�
+3.创建audit_tbs表空间
 create tablespace audit_tbs datafile '/u01/app/oracle/oradata/prod/audit_tbs01.dbf' size 100M autoextend on;
-4.move AUD$��FGA_LOG$
+4.move AUD$和FGA_LOG$
 SQL> BEGIN
  DBMS_AUDIT_MGMT.set_audit_trail_location(
  audit_trail_type => DBMS_AUDIT_MGMT.AUDIT_TRAIL_AUD_STD,--this moves table AUD$
@@ -9208,7 +9208,7 @@ SQL> BEGIN
  audit_trail_location_value => 'AUDIT_TBS');
 END;
 /
-5.�鿴move���AUD$��FGA_LOG$���ڱ��ռ�
+5.查看move后的AUD$和FGA_LOG$所在表空间
 SELECT table_name, tablespace_name FROM dba_tables WHERE table_name IN ('AUD$', 'FGA_LOG$') ORDER BY table_name;
 
 
@@ -9218,121 +9218,121 @@ Alter Index lifedata.yinhw_index Noparallel;
 
 
 
-sqlplus "/ as sysdba" �����ϣ���ora-01031:insufficient privileges�������
+sqlplus "/ as sysdba" 连不上，报ora-01031:insufficient privileges解决方法
 
- ע���ļ�Ȩ��  network/admin/*
+ 注意文件权限  network/admin/*
 
-ע�������ݿ�ʵ��ʱ��set��ORACLE_SID='',
+注意多个数据库实例时候，set　ORACLE_SID='',
 
-1�����sqlnet.ora��WINDOWS��λ��%ORACLE_HOME%NETWORKADMINĿ¼���Ƿ������䣺
-SQLNET.AUTHENTICATION_SERVICES=(NTS)��û�еĻ�����
-
-
-
-2������½windows���û�(administrator��װoracleʱ��ʹ�õ��û�)�ǲ����ڰ�����ORA_DBA���У����û�û�������������ʱ�Ϳ��ܳ�����������
-
-3. Ҫ��֤ remote_login_passwordfile ���� = EXCLUSIVE .
-
-4. �����Ƿ���Ҫʹ��orapassw���ɿ����ļ� .
+1、检查sqlnet.ora（WINDOWS下位于%ORACLE_HOME%NETWORKADMIN目录）是否包含这句：
+SQLNET.AUTHENTICATION_SERVICES=(NTS)，没有的话加上
 
 
-һ�ֽ������������
 
-1�����ϵͳ������
+2、检查登陆windows的用户(administrator或安装oracle时候使用的用户)是不是在包含在ORA_DBA组中，域用户没有连上域服务器时就可能出现这种现象。
+
+3. 要保证 remote_login_passwordfile 参数 = EXCLUSIVE .
+
+4. 看看是否需要使用orapassw生成口令文件 .
+
+
+一种解决方法案例：
+
+1、检查系统参数：
 SQL> show parameter password
 
 NAME                                 TYPE        VALUE
 ------------------------------------ ----------- ------------------------------
 remote_login_passwordfile            string      EXCLUSIVE
-2��
+2、
 select * from v$pwfile_users;
 SQL>
-Ϊ��
+为空
 
-3��
+3、
 SQL> grant sysdba to sys;
 grant sysdba to sys
 *
 ERROR at line 1:
 ORA-01994: GRANT failed: password file missing or disabled
-4������password�ļ�
+4、建立password文件
 D:/>orapwd file="D:/oracle/product/10g/db_1/database/PWDoratest.ora" password=gp
 oswong entries=10
-5��
+5、
 SQL> select * from v$pwfile_users;
 
 USERNAME                       SYSDB SYSOP
 ------------------------------ ----- -----
 SYS                            TRUE  TRUE
-SYS������ʾ������
-6��������Զ����SYSDBA��¼��������ʹ�á�
+SYS正常显示出来。
+6、重新在远程以SYSDBA登录，可正常使用。
 
 
-��������ļ������������⣬Ҳ�ǻᱨ���µĴ���
+如果口令文件创建的有问题，也是会报如下的错误：
 
 ora-01031:insufficient privileges
 
-�����ļ���������ʽӦΪorapwsid������sid�����ִ�Сд�ġ�����Target Database����Auxiliary Databaseʱ��Ҫ��֤���
-���Υ�������Ϲ��򣬽�����ʾORA-01031: insufficient privileges��
+口令文件的命名格式应为orapwsid，并且sid是区分大小写的。由于Target Database连接Auxiliary Database时需要验证口令，
+如果违反了以上规则，将会提示ORA-01031: insufficient privileges。
 
 
-������linux����duplicate���ݿ��ʱ�� ������Ϊ�����ļ�������·�������Ʋ��Բ������������
+我在用linux创建duplicate数据库的时候 就是因为口令文件创建的路径和名称不对才遇到这个错误
 
 
 -----end-------
 
 
- ��Oracle���ݿ�UNDO���ռ�ļ�غ͹����������ճ�����Ҫ�Ĺ���֮һ��UNDO���ռ�ͨ������Oracle�Զ���������ͨ��undo_management��ʼ������ȷ������UNDO���ռ������ڴ洢DML������ǰ�������ݣ�����ʵ���ָ������ݻع���һ���Բ�ѯ���ܵ���Ҫ��������ǳ�������Զ����ļ�أ���ᵼ��UNDO���ռ���ܳ����������⣺
-1).�ռ�ʹ����100%������DML�����޷����С�
-2).�澯��־�г��ִ�����ORA-01555�澯����
-3).ʵ���ָ�ʧ�ܣ����ݿ��޷������򿪡�
+ 对Oracle数据库UNDO表空间的监控和管理是我们日常最重要的工作之一，UNDO表空间通常都是Oracle自动化管理（通过undo_management初始化参数确定）；UNDO表空间是用于存储DML操作的前镜像数据，它是实例恢复，数据回滚，一致性查询功能的重要组件；我们常常会忽略对它的监控，这会导致UNDO表空间可能出现以下问题：
+1).空间使用率100%，导致DML操作无法进行。
+2).告警日志中出现大量的ORA-01555告警错误。
+3).实例恢复失败，数据库无法正常打开。
 
-һ.��Oracle�Զ�������UNDO���и�Ԥ��
+一.对Oracle自动化管理UNDO进行干预。
 
-   ����UNDO���Զ����������ɸ�Ԥ�ĵط��ǳ����٣�������Ǽ�أ�ͨ�����¼����ط��ɶ�UNDO���ռ�ʵʩһ���ĸ�Ԥ��
+   由于UNDO是自动化管理，可干预的地方非常的少，更多的是监控，通过以下几个地方可对UNDO表空间实施一定的干预：
 
-1).��ʼ������
+1).初始化参数
 
-undo_management=AUTO     ��ʾʵ���Զ�������UNDO���ռ䣬��Oracle 9i��ʼ��Oracle������AUM��Automatic Undo Management����
-undo_retention=900              �����ύ����Ӧ��UNDO���ݱ�����ʱ�䣬��λ���롣
-undo_tablespace=UNDOTBS1 ���UNDO���ռ䡣
+undo_management=AUTO     表示实例自动化管理UNDO表空间，从Oracle 9i开始，Oracle引进了AUM（Automatic Undo Management）。
+undo_retention=900              事务提交后，相应的UNDO数据保留的时间，单位：秒。
+undo_tablespace=UNDOTBS1 活动的UNDO表空间。
 _smu_debug_mode=33554432
 _undo_autotune=TRUE
 
 2).Automatic UNDO Retention
 
-    Automatic UNDO Retention����10g�������ԣ�û�в����ܿ��Ƹ����ԣ���10g���������Ĭ�����õġ�
-    ��Oracle Database 10g�е��Զ�undo���������ã����Ǵ���һ����ǰ��undo retention��Oracle Database�������ٱ����ɵ�undo��Ϣ����ʱ�䡣���ݿ��ռ�ʹ�����ͳ����Ϣ��������Щͳ����Ϣ��UNDO���ռ��С������undo retention��ʱ�䡣
-    Oracle Database����undo���ռ��С��ϵͳ��Զ�����undo retention��ͨ������UNDO_RETENTION��ʼ������ָ��undo retention����Сֵ��
+    Automatic UNDO Retention这是10g的新特性，没有参数能控制该特性，在10g这个特性是默认启用的。
+    在Oracle Database 10g中当自动undo管理被启用，总是存在一个当前的undo retention，Oracle Database尝试至少保留旧的undo信息到该时间。数据库收集使用情况统计信息，基于这些统计信息和UNDO表空间大小来调整undo retention的时间。
+    Oracle Database基于undo表空间大小和系统活动自动调整undo retention，通过设置UNDO_RETENTION初始化参数指定undo retention的最小值。
 
-����UNDO RETENTION�ĵ�ǰֵ����ͨ�����²�ѯ��ã�
+调整UNDO RETENTION的当前值可以通过以下查询获得：
 SELECT TO_CHAR(BEGIN_TIME, 'MM/DD/YYYY HH24:MI:SS') BEGIN_TIME,
     TUNED_UNDORETENTION FROM V$UNDOSTAT;
 
-    ����Զ���չ��UNDO���ռ䣬ϵͳ���ٱ���UNDO������ָ����ʱ�䣬�Զ�����UNDO RETENTION�������ѯ��UNDO��Ҫ������ܵ���UNDO�������ţ����Կ��ǲ�����UNDO RETENTIONֵ��
+    针对自动扩展的UNDO表空间，系统至少保留UNDO到参数指定的时间，自动调整UNDO RETENTION以满足查询对UNDO的要求，这可能导致UNDO急剧扩张，可以考虑不设置UNDO RETENTION值。
 
-    ��Թ̶���UNDO���ռ䣬ϵͳ���������ܵ�undo retention�����Զ��������ο�����UNDO���ռ��С��ʹ����ʷ���е������⽫����UNDO_RETENTION,���Ǳ��ռ�������RETENTION GUARANTEE��
+    针对固定的UNDO表空间，系统根据最大可能的undo retention进行自动调整，参考基于UNDO表空间大小和使用历史进行调整，这将忽略UNDO_RETENTION,除非表空间启用了RETENTION GUARANTEE。
 
-�Զ�����undo retention��֧��LOB����Ϊ������undo���ռ��д洢�κ��й�LOBs�����UNDO��Ϣ��
+自动调整undo retention不支持LOB，因为不能在undo表空间中存储任何有关LOBs事务的UNDO信息。
 
-����ͨ������_undo_autotune=FALSE��ʾ�Ĺر�Automatic UNDO Retention���ܡ�
+可以通过设置_undo_autotune=FALSE显示的关闭Automatic UNDO Retention功能。
 
-3).TUNED_UNDORETENTION�����ֵ�ܴ���UNDO���ռ������ܿ죿
+3).TUNED_UNDORETENTION计算的值很大导致UNDO表空间增长很快？
 
-    ��ʹ�õ�UNDO���ռ���Զ�������tuned_undoretention�ǻ���UNDO���ռ��С��ʹ���ʼ�������ģ���һЩ����£��ر��ǽϴ��UNDO���ռ�ʱ���⽫������ϴ��ֵ��
+    当使用的UNDO表空间非自动增长，tuned_undoretention是基于UNDO表空间大小的使用率计算出来的，在一些情况下，特别是较大的UNDO表空间时，这将计算出较大的值。
 
-Ϊ�˽������Ϊ���������µ�ʵ��������
+为了解决此行为，设置以下的实例参数：
 _smu_debug_mode=33554432
 
-���øò�����TUNED_UNDORETENTION�Ͳ�����undo���ռ��С��ʹ���ʼ��㣬�����������(MAXQUERYLEN +300)��UNDO_RETENTION�����ֵ��
+设置该参数，TUNED_UNDORETENTION就不基于undo表空间大小的使用率计算，代替的是设置(MAXQUERYLEN +300)和UNDO_RETENTION的最大值。
 
-4).UNDO���ռ������ļ��Զ���չ
+4).UNDO表空间数据文件自动扩展
 
-    ���UNDO���ռ���һ���Զ���չ�ı��ռ䣬��ô���п���UNDO���ռ�״̬ΪEXPIRED��EXTENT���ᱻʹ�ã�����Ϊ�˼��ٱ�ORA-01555����ļ��ʣ����⽫����UNDO���ռ��úܴ������UNDO���ռ�����Ϊ���Զ���չ����ô״̬ΪEXPIRED��EXTENT���ܱ����ã���������һ���̶ȿ���UNDO���ռ�Ĵ�С��������������ORA-01555������UNDO�ռ䲻�㱨���ķ��ա������ķ��Զ���չ��UNDO���ռ��С���Լ�������UNDO_RETENTION���ÿ���ȷ���ȶ���UNDO�ռ�ʹ�á�
+    如果UNDO表空间是一个自动扩展的表空间，那么很有可能UNDO表空间状态为EXPIRED的EXTENT不会被使用（这是为了减少报ORA-01555错误的几率），这将导致UNDO表空间变得很大；如果将UNDO表空间设置为非自动扩展，那么状态为EXPIRED的EXTENT就能被利用，这样可以一定程度控制UNDO表空间的大小，但这样会增加ORA-01555报错和UNDO空间不足报错的风险。合理的非自动扩展的UNDO表空间大小，以及合理的UNDO_RETENTION设置可以确保稳定的UNDO空间使用。
 
-5).UNDO���ռ�guarantee����
+5).UNDO表空间guarantee属性
 
-    ���UNDO���ռ���noguarantee״̬��Oracle��ȷ���ύ��������Ӧ��UNDO���ռ��е����ݻᱣ��UNDO_RETENTIONָ����ʱ�������UNDO���ռ䲻�㣬�������񽫿���͵����Ӧ��δ���ڵĿռ䣻��UNDO���ռ�����Ϊguarantee�ܹ�ȷ���ύ��������ӦUNDO���ռ��е��������κ�����¶�������UNDO_RETENTIONָ����ʱ����
+    如果UNDO表空间是noguarantee状态，Oracle不确保提交后的事务对应的UNDO表空间中的数据会保留UNDO_RETENTION指定的时长，如果UNDO表空间不足，其他事务将可能偷盗相应的未过期的空间；将UNDO表空间设置为guarantee能够确保提交后的事务对应UNDO表空间中的数据在任何情况下都将保留UNDO_RETENTION指定的时长。
 
 SQL> SELECT tablespace_name, retention FROM dba_tablespaces where tablespace_name='UNDOTBS1';
 
@@ -9342,7 +9342,7 @@ UNDOTBS1                                                     NOGUARANTEE
 
 SQL> alter tablespace undotbs1 retention guarantee;
 
-���ռ��Ѹ��ġ�
+表空间已更改。
 
 SQL> SELECT tablespace_name, retention FROM dba_tablespaces where tablespace_name='UNDOTBS1';
 
@@ -9350,13 +9350,13 @@ TABLESPACE_NAME                                              RETENTION
 ------------------------------------------------------------ ----------------------
 UNDOTBS1                                                     GUARANTEE
 
-6).UNDO���ռ��С
+6).UNDO表空间大小
 
-   ��Բ�ͬ���͵�ҵ��ϵͳ����Ҫ�г����UNDO���ռ䣬ȷ��ϵͳ�ܹ����������С�UNDO�ռ�Ĵ�С��ҵ��ϵͳ�й�ϵ��Ҳ��UNDO_RETENTION��UNDO���ռ��GUARANTEE�����й�ϵ��ͨ�����ǿ���ͨ��V$UNDOSTAT��ͳ����Ϣ�������Ҫ��UNDO���ռ��С��
+   针对不同类型的业务系统，需要有充足的UNDO表空间，确保系统能够正常的运行。UNDO空间的大小跟业务系统有关系，也跟UNDO_RETENTION和UNDO表空间的GUARANTEE属性有关系，通常我们可以通过V$UNDOSTAT的统计信息估算出需要的UNDO表空间大小。
 
-��.���UNDO���ռ�ʹ�������
+二.监控UNDO表空间使用情况。
 
-   ��Ϊ����Ա��˵�����UNDO���ռ����Ҫ�����ճ��ļ�ع�������س��õ����µ���ͼ��
+   作为管理员来说，针对UNDO表空间更重要的是日常的监控工作，监控常用到以下的视图：
 a).DBA_ROLLBACK_SEGS
 DBA_ROLLBACK_SEGS describes rollback segments.
 
@@ -9374,21 +9374,21 @@ Each row in the view keeps statistics collected in the instance for a 10-minute 
 e).DBA_UNDO_EXTENTS
 DBA_UNDO_EXTENTS describes the extents comprising the segments in all undo tablespaces in the database.  This view shows the status and size of each extent in the undo tablespace.
 
-DBA_UNDO_EXTENTS.STATUS������ֵ��
-ACTIVE      ��ʾδ�ύ������ʹ�õ�UNDO EXTENT����ֵ��Ӧ��UNDO SEGMENT��DBA_ROLL_SEGMENTS.STATUSһ����ONLINE��PENDING OFFLINE״̬��һ��û�л��������ʹ��UNDO SEGMENT����ô��Ӧ��UNDO SEGMENT�ͱ��OFFLINE״̬��
-EXPIRED     ��ʾ�Ѿ��ύ�ҳ�����UNDO_RETENTIONָ��ʱ���UNDO EXTENT��
-UNEXPIRED ��ʾ�Ѿ��ύ���ǻ�û�г���UNDO_RETENTIONָ��ʱ���UNDO EXTENT��
+DBA_UNDO_EXTENTS.STATUS有三个值：
+ACTIVE      表示未提交事务还在使用的UNDO EXTENT，该值对应的UNDO SEGMENT的DBA_ROLL_SEGMENTS.STATUS一定是ONLINE或PENDING OFFLINE状态，一旦没有活动的事务在使用UNDO SEGMENT，那么对应的UNDO SEGMENT就变成OFFLINE状态。
+EXPIRED     表示已经提交且超过了UNDO_RETENTION指定时间的UNDO EXTENT。
+UNEXPIRED 表示已经提交但是还没有超过UNDO_RETENTION指定时间的UNDO EXTENT。
 
-   Oracle�ظ�ʹ��UNDO EXTENT��ԭ�����£�
-1).ACTIVE״̬��EXTENT���κ�����¶����ᱻռ�á�
-2).������Զ���չ��UNDO���ռ䣬Oracle�ᱣ֤EXTENT���ٱ���UNDO_RETENTIONָ����ʱ�䡣
-3).����Զ���չ�ռ䲻�����UNDO���ռ��Ƿ��Զ���չ��Oracle�᳢���ظ�ʹ��ͬһ��������EXPIRED״̬��EXTENT�����������û��������EXTENT���ͻ�ȥ͵��Ķ�����EXPIRED״̬��EXTENT�������Ȼû��������EXTENT���ͻ�ʹ�ñ���UNEXPIRED��EXTENT���������û�У���ô��ȥ͵��Ķε�UNEXPIRED��EXTENT�������û�У��ͻᱨ����
+   Oracle重复使用UNDO EXTENT的原则如下：
+1).ACTIVE状态的EXTENT在任何情况下都不会被占用。
+2).如果是自动扩展的UNDO表空间，Oracle会保证EXTENT至少保留UNDO_RETENTION指定的时间。
+3).如果自动扩展空间不足或者UNDO表空间是非自动扩展，Oracle会尝试重复使用同一个段下面EXPIRED状态的EXTENT，如果本段中没有这样的EXTENT，就会去偷别的段下面EXPIRED状态的EXTENT，如果依然没有这样的EXTENT，就会使用本段UNEXPIRED的EXTENT，如果还是没有，那么会去偷别的段的UNEXPIRED的EXTENT，这个都没有，就会报错。
 
-1.UNDO���ռ�ռ�ʹ�������
+1.UNDO表空间空间使用情况。
 
-1).UNDO���ռ��ܴ�С��
-   UNDO���ռ���Ҳ�Զε���ʽ�洢���ݣ�ÿ�������Ӧһ���Σ��������͵Ķ�ͨ������Ϊ�ع��Σ�����UNDO�Ρ�Ĭ������£����ݿ�ʵ�����ʼ��10��UNDO�Σ�����Ҫ��Ϊ�˱��������ɵ������UNDO�ε����á�
-UNDO���ռ���ܴ�С����UNDO���ռ��µ����������ļ���С���ܺͣ�
+1).UNDO表空间总大小。
+   UNDO表空间下也以段的形式存储数据，每个事务对应一个段，这种类型的段通常被称为回滚段，或者UNDO段。默认情况下，数据库实例会初始化10个UNDO段，这主要是为了避免新生成的事务对UNDO段的争用。
+UNDO表空间的总大小就是UNDO表空间下的所有数据文件大小的总和：
 SQL> select tablespace_name,contents from dba_tablespaces where tablespace_name='UNDOTBS1';
 
 TABLESPACE_NAME                                              CONTENTS
@@ -9401,8 +9401,8 @@ TABLESPACE_NAME                                                      MB
 ------------------------------------------------------------ ----------
 UNDOTBS1                                                             90
 
-2).�鿴UNDO���ռ��ʹ�������
-    ��ʹ���������ͨ��������ͼ���鿴��
+2).查看UNDO表空间的使用情况。
+    该使用情况可以通过两个视图来查看：
 SQL> select owner,segment_name,bytes/1024/1024 mb from dba_segments where tablespace_name='UNDOTBS1';
 
 
@@ -9421,7 +9421,7 @@ SYS        _SYSSMU3_3104504842$                5.125
 SYS        _SYSSMU2_2464850095$                2.125
 SYS        _SYSSMU1_2523538120$                3.125
 
-��ѡ��12�С�
+已选择12行。
 
 SQL>  select segment_name, v.rssize/1024/1024 mb
   2    From dba_rollback_segs r, v$rollstat v
@@ -9444,12 +9444,12 @@ _SYSSMU7_825858386$              .9296875
 _SYSSMU8_2280151962$            2.1171875
 _SYSSMU9_3051513041$            2.1171875
 
-��ѡ��13�С�
+已选择13行。
 
-    ͨ�������������ѯ���Կ�����������ͼ��ѯ��ֵ����һ�£�ͨ����Ѳ���ʱ������ϰ�߲�ѯdba_segments��ͼ��ȷ��UNDO���ռ��ʹ�����������ѯV$ROLLSTAT���ݸ���׼ȷ��
+    通过上面的两个查询可以看出，两个视图查询的值几乎一致，通常在巡检的时候，我们习惯查询dba_segments视图来确定UNDO表空间的使用情况，但查询V$ROLLSTAT数据更加准确。
 
-3).��ѯ����ʹ�õ�UNDO�μ���С��
-    �ܶ�ͻ���֪�����ҵ�UNDO���ռ䳬����90%������Щ�Ự������ռ������Щ�ռ䣺
+3).查询事务使用的UNDO段及大小。
+    很多客户想知道，我的UNDO表空间超过了90%，是哪些会话的事务占用了这些空间：
 SQL>  select s.sid,s.serial#,s.sql_id,v.usn,segment_name,r.status, v.rssize/1024/1024 mb
   2    From dba_rollback_segs r, v$rollstat v,v$transaction t,v$session s
   3    Where r.segment_id = v.usn and v.usn=t.xidusn and t.addr=s.taddr
@@ -9460,32 +9460,32 @@ SQL>  select s.sid,s.serial#,s.sql_id,v.usn,segment_name,r.status, v.rssize/1024
 ---------- ---------- -------------------------- ---------- ------------------------------------------------------------ -------------------------------- ----------
          8        163                                     5 _SYSSMU5_247215464$                                  ONLINE                            3.1171875
 
-    ͨ�����SQL�����Բ�ѯ���Ự��Ӧ�Ļ����ʹ�õ�UNDO�����ƣ��Լ��ö�ռ�õ�UNDO�ռ��С�����ڷǻ����ռ����UNDO�ռ�����Oracleʵ�����ݲ��������Զ��������ġ�
+    通过这个SQL语句可以查询到会话对应的活动事务使用的UNDO段名称，以及该段占用的UNDO空间大小，对于非活动事务占用了UNDO空间是由Oracle实例根据参数配置自动化管理的。
 
-2.����Oracle��UNDO���ռ��ͳ����Ϣ����UNDO��������С��
+2.根据Oracle对UNDO表空间的统计信息调整UNDO参数及大小。
 
-    �������Ҫ̸̸V$UNDOSTAT��ͼ������ͼ������������ָ������Ա����UNDO���ռ�Ĳ��������ռ��С��ÿ�б�ʾ����10���ӵ����ݣ����ɱ���576�У�4��һ�����ڣ��������ͼû�����ݣ���ôUNDO�������ֶ�������ʽ������Ը���ͼ�ֶεĺ������˵����
-BEGIN_TIME  DATE  Identifies the beginning of the time interval  ʱ������ʼʱ�䡣
-END_TIME  DATE  Identifies the end of the time interval    ʱ��������ʱ�䡣
-UNDOTSN NUMBER  Represents the last active undo tablespace in the duration of time. The tablespace ID of the active undo tablespace is returned in this column. If more than one undo tablespace was active in that period, the active undo tablespace that was active at the end of the period is reported.  ʱ�������UNDO���ռ���������ص��ǻUNDO���ռ��ID�ţ��������1�����UNDO���ռ䣬��������ʱ������󱻼����UNDO���ռ�ID�š�
-UNDOBLKS  NUMBER  Represents the total number of undo blocks consumed. You can use this column to obtain the consumption rate of undo blocks, and thereby estimate the size of the undo tablespace needed to handle the workload on your system.  ��ʾ�ܹ����ѵ�UNDO����������ʹ������ֶλ��undo������ѱ��ʣ��ɴ������㴦��ϵͳ������Ҫ��UNDO���ռ��С��
-TXNCOUNT  NUMBER  Identifies the total number of transactions executed within the period  �����ʱ�����ܹ�ִ�е���������
-MAXQUERYLEN NUMBER  Identifies the length of the longest query (in seconds) executed in the instance during the period. You can use this statistic to estimate the proper setting of the UNDO_RETENTION initialization parameter. The length of a query is measured from the cursor open time to the last fetch/execute time of the cursor. Only the length of those cursors that have been fetched/executed during the period are reflected in the view.  �����ʱ�ڸ�ʵ��ִ�е����ѯʱ�䣨��λ���룩������ʹ�����ͳ����Ϣ����UNDO_RETENTION��ʼ�������Ĵ��ֵ����ѯ��ʱ�侫ȷ�����α�򿪵������ȡ/ִ��ʱ�䡣ֻ�е���Щ�α�Ĳ�ѯʱ�������ʱ�ڱ���ȡ/ִ�в��ܱ���ӳ������ͼ��
-MAXQUERYID  VARCHAR2(13)  SQL identifier of the longest running SQL statement in the period  �����ʱ�������ʱ���SQL����ʶ����
-MAXCONCURRENCY  NUMBER  Identifies the highest number of transactions executed concurrently within the period  �����ʱ�ڲ���ִ�е������������
-UNXPSTEALCNT  NUMBER  Number of attempts to obtain undo space by stealing unexpired extents from other transactions  ���Դ���������ͨ��͵���ķ�ʽ��õ�δ���ڵ�undo�ռ���������
-UNXPBLKRELCNT NUMBER  Number of unexpired blocks removed from certain undo segments so they can be used by other transactions  ��ĳЩUNDO���Ƴ�δ���ڵĿ��������Ǳ�������������
-UNXPBLKREUCNT NUMBER  Number of unexpired undo blocks reused by transactions  ��������ʹ��δ���ڵ�undo������
-EXPSTEALCNT NUMBER  Number of attempts to steal expired undo blocks from other undo segments  ���Դ�����UNDO��͵�����ڵ�UNDO������
-EXPBLKRELCNT  NUMBER  Number of expired undo blocks stolen from other undo segments  ������UNDO��͵���Ĺ��ڵ�UNDO������
-EXPBLKREUCNT  NUMBER  Number of expired undo blocks reused within the same undo segments  ����ͬUNDO������ʹ�õĹ��ڵ�UNDO������
-SSOLDERRCNT NUMBER  Identifies the number of times the error ORA-01555 occurred. You can use this statistic to decide whether or not the UNDO_RETENTION initialization parameter is set properly given the size of the undo tablespace. Increasing the value of UNDO_RETENTION can reduce the occurrence of this error.  ��ʶORA-01555�������Ĵ���������ʹ�����ͳ����Ϣ������Ը�����UNDO���ռ��Ƿ�����UNDO_RETENTION��ʼ������������UNDO_RETENTION��ֵ���Լ����������ķ�����
-NOSPACEERRCNT NUMBER  Identifies the number of times space was requested in the undo tablespace and there was no free space available. That is, all of the space in the undo tablespace was in use by active transactions. The corrective action is to add more space to the undo tablespace.  ��UNDO���ռ�û�����ɿռ�������£��ռ�����Ĵ���������UNDO���ռ�Ŀռ䱻�������ʹ�ã�����Ҫ���Ӹ���Ŀռ䵽UNDO���ռ䡣
-ACTIVEBLKS  NUMBER  Total number of blocks in the active extents of the undo tablespace for the instance at the sampled time in the period  ��ʱ��������Ը�ʵ����UNDO���ռ�����Ŀ������
-UNEXPIREDBLKS NUMBER  Total number of blocks in the unexpired extents of the undo tablespace for the instance at the sampled time in the period  ��ʱ��������Ը�ʵ����UNDO���ռ�δ���ڵĿ������
-EXPIREDBLKS NUMBER  Total number of blocks in the expired extents of the undo tablespace for the instance at the sampled time in the period  ��ʱ��������Ը�ʵ����UNDO���ռ��������Ŀ������
-TUNED_UNDORETENTION NUMBER  Amount of time (in seconds) for which undo will not be recycled from the time it was committed. At any point in time, the latest value of TUNED_UNDORETENTION is used to determine whether data committed at a particular time in the past can be recycled.  �ύ֮��UNDO���ܱ����յ���ʱ�䣨��λ���룩��
-�����ǲ�ѯV$UNDOSTAT�����ӣ�
+    最后我们要谈谈V$UNDOSTAT视图，该视图的作用是用于指导管理员调整UNDO表空间的参数及表空间大小，每行表示的是10分钟的数据，最多可保留576行，4天一个周期，如果该视图没有数据，那么UNDO可能是手动管理方式。下面对该视图字段的含义进行说明：
+BEGIN_TIME  DATE  Identifies the beginning of the time interval  时间间隔开始时间。
+END_TIME  DATE  Identifies the end of the time interval    时间间隔结束时间。
+UNDOTSN NUMBER  Represents the last active undo tablespace in the duration of time. The tablespace ID of the active undo tablespace is returned in this column. If more than one undo tablespace was active in that period, the active undo tablespace that was active at the end of the period is reported.  时间间隔活动的UNDO表空间个数，返回的是活动UNDO表空间的ID号，如果大于1个活动的UNDO表空间，将报告在时间间隔最后被激活的UNDO表空间ID号。
+UNDOBLKS  NUMBER  Represents the total number of undo blocks consumed. You can use this column to obtain the consumption rate of undo blocks, and thereby estimate the size of the undo tablespace needed to handle the workload on your system.  表示总共消费的UNDO块数，可以使用这个字段获得undo块的消费比率，由此来估算处理系统负载需要的UNDO表空间大小。
+TXNCOUNT  NUMBER  Identifies the total number of transactions executed within the period  在这个时期内总共执行的事务数。
+MAXQUERYLEN NUMBER  Identifies the length of the longest query (in seconds) executed in the instance during the period. You can use this statistic to estimate the proper setting of the UNDO_RETENTION initialization parameter. The length of a query is measured from the cursor open time to the last fetch/execute time of the cursor. Only the length of those cursors that have been fetched/executed during the period are reflected in the view.  在这个时期该实例执行的最长查询时间（单位：秒），可以使用这个统计信息估算UNDO_RETENTION初始化参数的大概值。查询的时间精确到从游标打开到最后提取/执行时间。只有当这些游标的查询时间在这个时期被提取/执行才能被反映到该视图。
+MAXQUERYID  VARCHAR2(13)  SQL identifier of the longest running SQL statement in the period  在这个时期运行最长时间的SQL语句标识符。
+MAXCONCURRENCY  NUMBER  Identifies the highest number of transactions executed concurrently within the period  在这个时期并行执行的最大事务数。
+UNXPSTEALCNT  NUMBER  Number of attempts to obtain undo space by stealing unexpired extents from other transactions  尝试从其他事务通过偷盗的方式获得的未过期的undo空间区间数。
+UNXPBLKRELCNT NUMBER  Number of unexpired blocks removed from certain undo segments so they can be used by other transactions  从某些UNDO段移除未过期的块数，他们被用于其它事务。
+UNXPBLKREUCNT NUMBER  Number of unexpired undo blocks reused by transactions  事务重新使用未过期的undo块数。
+EXPSTEALCNT NUMBER  Number of attempts to steal expired undo blocks from other undo segments  尝试从其他UNDO段偷盗过期的UNDO块数。
+EXPBLKRELCNT  NUMBER  Number of expired undo blocks stolen from other undo segments  从其他UNDO段偷盗的过期的UNDO块数。
+EXPBLKREUCNT  NUMBER  Number of expired undo blocks reused within the same undo segments  在相同UNDO段重新使用的过期的UNDO块数。
+SSOLDERRCNT NUMBER  Identifies the number of times the error ORA-01555 occurred. You can use this statistic to decide whether or not the UNDO_RETENTION initialization parameter is set properly given the size of the undo tablespace. Increasing the value of UNDO_RETENTION can reduce the occurrence of this error.  标识ORA-01555错误发生的次数，可以使用这个统计信息决定针对给定的UNDO表空间是否设置UNDO_RETENTION初始化参数。增加UNDO_RETENTION的值可以减少这个错误的发生。
+NOSPACEERRCNT NUMBER  Identifies the number of times space was requested in the undo tablespace and there was no free space available. That is, all of the space in the undo tablespace was in use by active transactions. The corrective action is to add more space to the undo tablespace.  在UNDO表空间没有自由空间活动的情况下，空间请求的次数，所有UNDO表空间的空间被活动的事务使用，这需要添加更多的空间到UNDO表空间。
+ACTIVEBLKS  NUMBER  Total number of blocks in the active extents of the undo tablespace for the instance at the sampled time in the period  在时间间隔，针对该实例，UNDO表空间活动区间的块个数。
+UNEXPIREDBLKS NUMBER  Total number of blocks in the unexpired extents of the undo tablespace for the instance at the sampled time in the period  在时间间隔，针对该实例，UNDO表空间未过期的块个数。
+EXPIREDBLKS NUMBER  Total number of blocks in the expired extents of the undo tablespace for the instance at the sampled time in the period  在时间间隔，针对该实例，UNDO表空间过期区间的块个数。
+TUNED_UNDORETENTION NUMBER  Amount of time (in seconds) for which undo will not be recycled from the time it was committed. At any point in time, the latest value of TUNED_UNDORETENTION is used to determine whether data committed at a particular time in the past can be recycled.  提交之后UNDO不能被回收的总时间（单位：秒）。
+下面是查询V$UNDOSTAT的例子：
 
 SELECT TO_CHAR(BEGIN_TIME, 'MM/DD/YYYY HH24:MI:SS') BEGIN_TIME,
   TO_CHAR(END_TIME, 'MM/DD/YYYY HH24:MI:SS') END_TIME,
@@ -9493,16 +9493,16 @@ SELECT TO_CHAR(BEGIN_TIME, 'MM/DD/YYYY HH24:MI:SS') BEGIN_TIME,
   MAXQUERYLEN, TUNED_UNDORETENTION
   FROM v$UNDOSTAT;
 
-ͨ�����ֶ�UNXPSTEALCNT��EXPBLKREUCNT�Ƿ���ֵ����ʾ�пռ�ѹ����
-����ֶ�SSOLDERRCNT�Ƿ���ֵ����ʾUNDO_RETENTION���ò�������
-����ֶ�NOSPACEERRCNT�Ƿ���ֵ����ʾ��һϵ�пռ����⡣
-��10g DBA_HIST_UNDOSTAT��ͼ������V$UNDOSTAT����ͳ����Ϣ��
-ע�⣺�������_undo_autotune=FALSE,X$KTUSMST2��û���������ɣ��ñ�ʾDBA_HIST_UNDOSTATS��ͼ��Դ����
+通常当字段UNXPSTEALCNT和EXPBLKREUCNT是非零值，表示有空间压力。
+如果字段SSOLDERRCNT是非零值，表示UNDO_RETENTION设置不合理。
+如果字段NOSPACEERRCNT是非零值，表示有一系列空间问题。
+在10g DBA_HIST_UNDOSTAT视图包括了V$UNDOSTAT快照统计信息。
+注意：如果参数_undo_autotune=FALSE,X$KTUSMST2将没有数据生成，该表示DBA_HIST_UNDOSTATS视图的源表。
 
 
-��.�ͷ�UNDO���ռ䡣
+三.释放UNDO表空间。
 
-    UNDO���ռ䱻�ŵù�����Щʱ��������Ҫ�ͷ���Щ�ռ䣬ͨ�����������½�һ��UNDO��Ȼ������ʹ���½���UNDO���ռ䣬���DROPԭ��UNDO���ռ䡣����ͨ��һ����������ʾ������̣�
+    UNDO表空间被撑得过大，有些时候我们需要释放这些空间，通常的做法是新建一个UNDO，然后设置使用新建的UNDO表空间，最后DROP原有UNDO表空间。下面通过一个例子来演示这个过程：
 SQL> col segment_name format a30
 SQL> col tablespace_name format a30
 SQL>
@@ -9529,13 +9529,13 @@ _SYSSMU7_825858386$            UNDOTBS1                       ONLINE            
 _SYSSMU8_2280151962$           UNDOTBS1                       ONLINE                                  128            64       32765          3
 _SYSSMU9_3051513041$           UNDOTBS1                       ONLINE                                  128            64       32765          2
 
-��ѡ��13�С�
+已选择13行。
 
-��ǰ���еĻع���������UNDOTBS1���ռ䡣
+当前所有的回滚段在属于UNDOTBS1表空间。
 
 SQL> create undo tablespace undotbs2 datafile 'E:\APP\ORADATA\ORCL3\undotbs02.dbf' size 20m autoextend on next 100m;
 
-���ռ��Ѵ�����
+表空间已创建。
 
 SQL> show parameter undo
 
@@ -9546,7 +9546,7 @@ undo_retention                       integer                900
 undo_tablespace                      string                 UNDOTBS1
 SQL> alter system set undo_tablespace='UNDOTBS2';
 
-ϵͳ�Ѹ��ġ�
+系统已更改。
 
 SQL> show parameter undo
 
@@ -9589,8 +9589,8 @@ _SYSSMU7_825858386$            UNDOTBS1                       ONLINE            
 _SYSSMU8_2280151962$           UNDOTBS1                       OFFLINE                                 128            64       32765
 _SYSSMU9_3051513041$           UNDOTBS1                       OFFLINE                                 128            64       32765
 
-��ѡ��23�С�
-    ��Ȼ�����ݿ�ʵ��ʹ�õ�UNDO���ռ�ָ�����±��ռ䣬������Ȼ�й�ȥ��������ʹ��UNDOTBS1���ռ�����ĶΣ����ʱ����ֱ��DROP UNDOTBS1��ִ��DROP����Ҳ�ᱨ����������ȴ�UNDOTBS1���ռ��µ����ж�״̬���OFFLINE����DROP��
+已选择23行。
+    虽然将数据库实例使用的UNDO表空间指向了新表空间，但是依然有过去的事务在使用UNDOTBS1表空间下面的段，这个时候不能直接DROP UNDOTBS1（执行DROP命令也会报错），必须等待UNDOTBS1表空间下的所有段状态变成OFFLINE才能DROP。
 
 SQL> r
   1  select segment_name, tablespace_name, r.status,
@@ -9627,15 +9627,15 @@ _SYSSMU7_825858386$            UNDOTBS1                       OFFLINE           
 _SYSSMU8_2280151962$           UNDOTBS1                       OFFLINE                                 128            64       32765
 _SYSSMU9_3051513041$           UNDOTBS1                       OFFLINE                                 128            64       32765
 
-��ѡ��23�С�
+已选择23行。
 
-    UNDOTBS1���ռ��µ����ж�״̬�������OFFLINE�����ʱ�����DROP UNDOTBS1���ͷſռ䡣
+    UNDOTBS1表空间下的所有段状态都变成了OFFLINE，这个时候可以DROP UNDOTBS1来释放空间。
 
 SQL> drop tablespace undotbs1 including contents and datafiles;
 
-���ռ���ɾ����
+表空间已删除。
 
-    ��Ȼ��DROP��ֻ��˵��û��������ʹ�þɵ�UNDO���ռ䣬�Ⲣ����ʾ���е�UNDO EXTENT�Ѿ����ڣ�DBA_UNDO_EXTENTS.STATUS���������ĳЩ��ѯ��Ҫ�õ���Щ�洢�ھ�UNDO���ռ��Ϲ��ڻ�δ���ڵ�EXTENTʱ�����յ�ORA-01555�ı�����
+    虽然能DROP，只是说明没有事务在使用旧的UNDO表空间，这并不表示所有的UNDO EXTENT已经过期（DBA_UNDO_EXTENTS.STATUS），如果有某些查询需要用到这些存储在旧UNDO表空间上过期或未过期的EXTENT时，将收到ORA-01555的报错。
 
 SQL> select segment_name, tablespace_name, r.status,
   2    (initial_extent/1024) InitialExtent,(next_extent/1024) NextExtent,
@@ -9659,11 +9659,11 @@ _SYSSMU20_910603223$           UNDOTBS2                       ONLINE            
 _SYSSMU21_1261247597$          UNDOTBS2                       ONLINE                                  128            64       32765          0
 _SYSSMU22_1117177365$          UNDOTBS2                       ONLINE                                  128            64       32765          0
 
-��ѡ��11�С�
+已选择11行。
 
-    �й�AUM������ϸ����Ϣ����ο����£�
-   ��FAQ �C Automatic Undo Management (AUM) / System Managed Undo (SMU) (�ĵ� ID 461480.1)��
-   ��AUM ���÷���/��Ͻű� (�ĵ� ID 1526122.1)��
+    有关AUM更多详细的信息，请参考文章：
+   《FAQ – Automatic Undo Management (AUM) / System Managed Undo (SMU) (文档 ID 461480.1)》
+   《AUM 常用分析/诊断脚本 (文档 ID 1526122.1)》
 
 --end--
 
@@ -9671,131 +9671,131 @@ _SYSSMU22_1117177365$          UNDOTBS2                       ONLINE            
 
 
 -bash: /bin/rm: Argument list too long
-��xargs���� ɾ�������Ƚ϶���ļ���
+用xargs命令 删除数量比较多的文件：
 
  find . -name '*.aud' -print0 | xargs -0 rm            ---ok
 find . -name '*.trm' -print0 | xargs -0 rm
 
 ls -l *.aud| xargs -n 50 rm -fr
-2��������
-1��find
+2个方法：
+1）find
 find . -name *.aud -exec rm {}\;
 
-2) �ܵ�
+2) 管道
 ls -l |awk '{print $9}'|rm
 
 find . -name '*.aud' -print0 | xargs -0 rm
 
 
-To work around this you can get the list of filenames using find and pipe it to xargs which in turn invokes rm for every single file. There is no limit on the size of a pipe (or at least none that I am aware of for this practical purpose). Here��s the full command:
+To work around this you can get the list of filenames using find and pipe it to xargs which in turn invokes rm for every single file. There is no limit on the size of a pipe (or at least none that I am aware of for this practical purpose). Here’s the full command:
 
 find . -name 'spam*' -print0 | xargs -0 rm
 
 This differs from similar commands you might find in the -print0 and -0 arguments: These are needed in case you have spaces in your filenames.
 
-For an in-depth explanation of both the 128K buffer and the spaces in filenames issue you may also want to read the May 2004 update in this blog post. (See, I told you it��s not really new.)
+For an in-depth explanation of both the 128K buffer and the spaces in filenames issue you may also want to read the May 2004 update in this blog post. (See, I told you it’s not really new.)
 
 
-DML���Ҫ�õ����жȣ��ͱ�������alter session enable parallel dml; ���������������òſ�����Ч��
+DML语句要用到并行度，就必须先做alter session enable parallel dml; 这样参数调整设置才可以生效！
 
-Oracle������־�ļ���������
-1.��ѯϵͳʹ�õ�����һ����־�ļ���
+Oracle关于日志文件基本操作
+1.查询系统使用的是哪一组日志文件：
 select * from v$log;
 
-2.��ѯ����ʹ�õ�������Ӧ����־�ļ���
+2.查询正在使用的组所对应的日志文件：
 select * from v$logfile;
 
-3.ǿ����־�л���
+3.强制日志切换：
 alter system switch logfile;
 
-4.��ѯ��ʷ��־��
+4.查询历史日志：
 select * from v$log_history;
 
-5.��ѯ��־�Ĺ鵵ģʽ��
+5.查询日志的归档模式：
 select dbid,name,created,log_mode from v$database;
 
-6.��ѯ�鵵��־����Ϣ��
+6.查询归档日志的信息：
 select recid,stamp,thread#,sequence#,name from v$archived_log;
 
-7.������ɾ����־�ļ���
+7.增加与删除日志文件组
 alter database add logfile group 1 ('/home1/Oracle/oradata/ora8i/log1a.log'),'/home2/oracle/oradata/ora8i/log1b.log') size 100M;
 
 alter database drop logfile group 1;
 
-8.������ɾ����־��Ա
+8.增加与删除日志成员
 alter database add logfile member '/home1/oracle/oradata/ora8i/log1a.log' to group 1,'/home1/oracle/oradata/ora8i/log2a.log' to group 2;
 
 alter database drop logfile member '/home1/oracle/oradata/ora8i/log1a.log' ;
 
-9.��־�ļ��ƶ�
+9.日志文件移动
 alter database rename file '/home1/oracle/oradata/ora8i/log1a.log' to '/home2/oracle/oradata/ora8i/log1a.log';
-ִ�и�����֮ǰ���뱣֤����־�ļ��������Ѿ��ƶ�����Ŀ¼
+执行该命令之前必须保证该日志文件物理上已经移动到新目录
 
-10.�����־�ļ�
+10.清除日志文件
 alter database clear logfile '/home1/oracle/oradata/ora8i/log1a.log';
-���������ڲ�����ɾ���鼰���Ա����ɾ����־ʱʹ��
+该命令用于不能用删除组及组成员命令删除日志时使用
 
-8.�鿴�鵵��־ռ�ÿռ䣺
+8.查看归档日志占用空间：
 SELECT space_limit/1024/1024/1024 AS "Quota_G",space_used/1024/1024 AS "Used_M",space_used/space_limit*100 "Used_%",space_reclaimable AS reclaimable,number_of_files AS files FROM v$recovery_file_dest ;
 
-9.�޸Ĺ鵵��־�ռ��С
+9.修改归档日志空间大小
 alter system set DB_RECOVERY_FILE_DEST_SIZE=40g;
 
-10.�鿴�鵵��־�б�
+10.查看归档日志列表
 RMAN> list archivelog all;
-ɾ���鵵��־
+删除归档日志
 RMAN> delete archivelog until time 'sysdate-1' ;
-˫����Ҳ������
+双机下也可以用
 delete obsolete;
 crosscheck archivelog all;
 delete expired archivelog all;
 
-11. ��list expired�����Ƿ���ʧЧ��archive log,֤��û��ʧЧ��archive log:
+11. 用list expired看看是否有失效的archive log,证明没有失效的archive log:
 RMAN> list expired archivelog all;
 
 
 
-��ORACLE �鵵��־���˺󣬽��޷���������ORACLE����Ҫɾ��һ���ֹ鵵��־������������ORACLE��
+当ORACLE 归档日志满了后，将无法正常登入ORACLE，需要删除一部分归档日志才能正常登入ORACLE。
 
 
 
-һ������ɾ���鵵��־�����ļ����鵵��־һ�㶼��λ��archiveĿ¼�£�AIXϵͳ���ļ���ʽΪ��1_17884_667758186.dbf�����������ǰ�ȶ����ݿ���б��ݣ�ɾ��ʱ���ٱ�������������־�������ݿ�ָ���
+一、首先删除归档日志物理文件，归档日志一般都是位于archive目录下，AIX系统下文件格式为“1_17884_667758186.dbf”，建议操作前先对数据库进行备份，删除时至少保留最近几天的日志用于数据库恢复。
 
 
 
-�����ѹ鵵��־�������ļ�ɾ�������ǾͿ�����������ORACLE�ˣ����ǻ�û��ȫ�ѹ鵵��־ɾ���ɾ���ORACLE��controlfile���� Ȼ��¼����Щarchivelog����Ϣ����oracle��OEM���������п��ӻ�����־չ�ֳ����������ֹ����archiveĿ¼�µ��ļ�����Щ��¼ ��û�б����Ǵ�controlfile�������������ȥ����Ҫ���ľ������������
+二、把归档日志的物理文件删除后，我们就可以正常登入ORACLE了，但是还没完全把归档日志删除干净，ORACLE的controlfile中仍 然记录着这些archivelog的信息，在oracle的OEM管理器中有可视化的日志展现出，当我们手工清除archive目录下的文件后，这些记录 并没有被我们从controlfile中清除掉，接下去我们要做的就是这个工作。
 
-��������RMAN����ɾ�������������������£�(window�ͻ���ϵͳΪ��)
+我们利用RMAN进行删除操作，操作步骤如下：(window客户端系统为例)
 
-1.ָ�����ݿ�ʵ��
+1.指定数据库实例
 
 C:/Documents and Settings/Administrator>SET ORACLE_SID =orcl
 
-2.�������ݿ�
+2.连接数据库
 
 C:/Documents and Settings/Administrator>RMAN TARGET SYS/sysadmin@orcl
 
-3.�鿴�鵵��־��״̬
+3.查看归档日志的状态
 
 RMAN> list archivelog all;
 
-4.�ֹ�ɾ���鵵��־�ļ�
+4.手工删除归档日志文件
 
 RMAN> DELETE ARCHIVELOG ALL COMPLETED BEFORE 'SYSDATE-7';
 
- ˵����
- SYSDATA-7��������ǰ��ϵͳʱ��7��ǰ��before�ؼ��ֱ�ʾ��7��ǰ�Ĺ鵵��־�����ʹ�������ع��ܣ�Ҳ��ɾ�����ص����ݡ�
-ͬ��������Ҳ����ɾ����7��ǰ�����ڵ�ȫ����־�������������Ҫ����������������ɾ����������Ͻ���ȫ�������ݿ�
-DELETE ARCHIVELOG from TIME 'SYSDATE-7'; ɾ����7��ǰ�����ڵ�ȫ����־,����
-UNIX/LINUX��Ҳ����ͨ��FIND�ҵ�7��ǰ�Ĺ鵵���ݣ�ʹ��EXEC�Ӳ���ɾ��
+ 说明：
+ SYSDATA-7，表明当前的系统时间7天前，before关键字表示在7天前的归档日志，如果使用了闪回功能，也会删除闪回的数据。
+同样道理，也可以删除从7天前到现在的全部日志，不过这个命令要考虑清楚，做完这个删除，最好马上进行全备份数据库
+DELETE ARCHIVELOG from TIME 'SYSDATE-7'; 删除从7天前到现在的全部日志,慎用
+UNIX/LINUX下也可以通过FIND找到7天前的归档数据，使用EXEC子操作删除
 find /oraarchive -xdev -mtime +7 -name "*.dbf" -exec rm -f {} ;
-��������Ȼ����RMAN������δ�����Ĺ鵵�ļ�
-����Ҫ��RMAN��ִ������2������
+这样做仍然会在RMAN里留下未管理的归档文件
+仍需要在RMAN里执行下面2条命令
 crosscheck archivelog all;
 delete expired archivelog all;
-���Ի���������ķ������ã�������FIND�ĺô����ǣ������������ϣ���EXEC���������ܶ������ʵ�ָ����ӵĹ���
+所以还不如上面的方法好用，不过用FIND的好处就是，可以在条件上，和EXEC子项上做很多操作，实现更复杂的功能
 
-5.�˳�rman
+5.退出rman
 
 RMAN> exit
 
@@ -9809,72 +9809,72 @@ select s.SID, round(t.used_ublk * p.value/1024/1024, 2) undo_M
 
 
 
-2012-09-21 13:20 Oracle�쳣ORA-01502: ���������������ķ������ڲ�����״̬
-ԭ�� ����������⣬��������move����������disable ��������
-1. alter table xxxxxx move tablespace xxxxxxx ����������ͻ�ʧЧ��
-2. alter index index_name  unusable������ʹ����ʧЧ��
+2012-09-21 13:20 Oracle异常ORA-01502: 索引或这类索引的分区处于不可用状态
+原因： 出现这个问题，可能有人move过表，或者disable 过索引。
+1. alter table xxxxxx move tablespace xxxxxxx 命令后，索引就会失效。
+2. alter index index_name  unusable，命令使索引失效。
 
-����취��
-1. �ؽ��������ǽ�������������ȫ�ķ�����
+解决办法：
+1. 重建索引才是解决这类问题的完全的方法。
      alter index index_name rebuild (online);
 
-     ����alter index index_name rebuild;
-2. ����Ƿ�������ֻ��Ҫ�ؽ��Ǹ�ʧЧ�ķ��� ��
+     或者alter index index_name rebuild;
+2. 如果是分区索引只需要重建那个失效的分区 。
      alter index index_name rebuild partition partition_name (online);
 
-     ����alter index index_name rebuild partition partition_name ;
+     或者alter index index_name rebuild partition partition_name ;
 
-3. ���߸ı䵱ǰ���������֡�
+3. 或者改变当前索引的名字。
 
-˵����
-1. alter session set skip_unusable_indexes=true;�Ϳ�����session����������Ч��������ѯ��
-2. ��������Ӧ����user_ind_partitions��
-3. ״̬��4�֣�
-    N/A˵������Ƿ���������Ҫ��user_ind_partitions����user_ind_subpartitions��ȷ��ÿ�������Ƿ���ã�
-    VAILD˵������������ã�
-    UNUSABLE˵��������������ã�
-    USABLE ˵����������ķ����ǿ��õġ�
+说明：
+1. alter session set skip_unusable_indexes=true;就可以在session级别跳过无效索引作查询。
+2. 分区索引应适用user_ind_partitions。
+3. 状态分4种：
+    N/A说明这个是分区索引需要查user_ind_partitions或者user_ind_subpartitions来确定每个分区是否可用；
+    VAILD说明这个索引可用；
+    UNUSABLE说明这个索引不可用；
+    USABLE 说明这个索引的分区是可用的。
 
-4. ��ѯ��ǰ������״̬��select distinct status from user_indexes;
+4. 查询当前索引的状态：select distinct status from user_indexes;
 
-5. ��ѯ�Ǹ�������Ч��select index_name from  user_indexes where status <> 'valid';
+5. 查询那个索引无效：select index_name from  user_indexes where status <> 'valid';
 
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-20.���Чɾ���ظ���¼�ķ�����ʹ��α��rowid  ɾ���ظ�
+20.最高效删除重复记录的方法，使用伪例rowid  删除重复
 DELETE FROM EMP E WHERE E.ROWID > (SELECT MIN(X.ROWID) FROM EMP X WHERE X.EMP_NO = E.EMP_NO);
-     a�����ұ��ж�����ظ���¼���ظ���¼�Ǹ��ݵ����ֶΣ�peopleId�����ж�
-����select * from people
-����where peopleId in (select   peopleId from   people group by   peopleId having count(peopleId) > 1)
-����b��ɾ�����ж�����ظ���¼���ظ���¼�Ǹ��ݵ����ֶΣ�peopleId�����жϣ�ֻ���� rowid��С�ļ�¼
-����delete from people
-����where peopleId in (select   peopleId from people group by   peopleId   having count(peopleId) > 1)
-����and rowid not in (select min(rowid) from   people group by peopleId having count(peopleId )>1)
-����ע:rowidΪOracle�Դ����ø�.....
-����c�����ұ��ж�����ظ���¼������ֶΣ�
-����select * from vitae a
-����where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
-����d��ɾ�����ж�����ظ���¼������ֶΣ���ֻ����rowid��С�ļ�¼
-����delete from vitae a
-����where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
-����and rowid not in (select min(rowid) from vitae group by peopleId,seq having count(*)>1)
-����e�����ұ��ж�����ظ���¼������ֶΣ���������rowid��С�ļ�¼
-����select * from vitae a
-����where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
-����and rowid not in (select min(rowid) from vitae group by peopleId,seq having count(*)>1)
-����(��)
-�����ȷ�˵
-������A���д���һ���ֶΡ�name����
-�������Ҳ�ͬ��¼֮��ġ�name��ֵ�п��ܻ���ͬ��
-�������ھ�����Ҫ��ѯ���ڸñ��еĸ���¼֮�䣬��name��ֵ�����ظ����
-����Select Name,Count(*) From A Group By Name Having Count(*) > 1
-������������Ա�Ҳ��ͬ��������:
-����Select Name,sex,Count(*) From A Group By Name,sex Having Count(*) > 1
+     a、查找表中多余的重复记录，重复记录是根据单个字段（peopleId）来判断
+　　select * from people
+　　where peopleId in (select   peopleId from   people group by   peopleId having count(peopleId) > 1)
+　　b、删除表中多余的重复记录，重复记录是根据单个字段（peopleId）来判断，只留有 rowid最小的记录
+　　delete from people
+　　where peopleId in (select   peopleId from people group by   peopleId   having count(peopleId) > 1)
+　　and rowid not in (select min(rowid) from   people group by peopleId having count(peopleId )>1)
+　　注:rowid为Oracle自带不用该.....
+　　c、查找表中多余的重复记录（多个字段）
+　　select * from vitae a
+　　where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
+　　d、删除表中多余的重复记录（多个字段），只留有rowid最小的记录
+　　delete from vitae a
+　　where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
+　　and rowid not in (select min(rowid) from vitae group by peopleId,seq having count(*)>1)
+　　e、查找表中多余的重复记录（多个字段），不包含rowid最小的记录
+　　select * from vitae a
+　　where (a.peopleId,a.seq) in   (select peopleId,seq from vitae group by peopleId,seq having count(*) > 1)
+　　and rowid not in (select min(rowid) from vitae group by peopleId,seq having count(*)>1)
+　　(二)
+　　比方说
+　　在A表中存在一个字段“name”，
+　　而且不同记录之间的“name”值有可能会相同，
+　　现在就是需要查询出在该表中的各记录之间，“name”值存在重复的项；
+　　Select Name,Count(*) From A Group By Name Having Count(*) > 1
+　　如果还查性别也相同大则如下:
+　　Select Name,sex,Count(*) From A Group By Name,sex Having Count(*) > 1
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-21.copy�����﷨
-copy�﷨��
+21.copy命令语法
+copy语法：
 usage: COPY FROM <db> TO <db> <opt> <table> { (<cols>) } USING <sel>
   <db>   : database string, e.g., hr/your_password@d:chicago-mktg
   <opt>  : ONE of the keywords: APPEND, CREATE, INSERT or REPLACE
@@ -9891,7 +9891,7 @@ copy from dbaqry/kai123fa456dba789@liferpt to dbmgr/duan5lzh@lolapstg insert LOL
 copy from dbaqry/kai123fa456dba789@liferpt to dbmgr/duan5lzh@lolapstg insert LOLAPDATA.PUB_LBS_PRE_APP_PREM  using select COUNT(1) from LOLAPDATA.PUB_LBS_PRE_APP_PREM where DEPTNO like '104%' and APP_DATE >= date '2012-05-01' and APP_DATE < date '2012-06-01';
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-22.exp�﷨
+22.exp语法
 userid='/ as sysdba'
 filesize=10000m
 file=
@@ -9911,7 +9911,7 @@ PA18DATA.FINANCE_OPERATION_LOG_INFO,
 PA18DATA.PA18_CLIENT_INFORMATION)
 
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-23.listener����
+23.listener配置
 t0csms =
   (DESCRIPTION_LIST =
     (DESCRIPTION =
@@ -9931,7 +9931,7 @@ SID_LIST_t0csms=
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-24.ƴ��statsqltext ƴ��sql
+24.拼接statsqltext 拼接sql
   declare
   cursor cur is select distinct hash_value as hash_value from stats$sqltext where sql_text like '%CIT_JOURNAL_INTERFACE%';
   temp_sql clob;
@@ -9950,38 +9950,38 @@ SID_LIST_t0csms=
   end;
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-25.ѹ��dmp�ļ�  EXPֱ�ӵ���ѹ���ʽ�IMPֱ�ӵ���ѹ���ļ��ķ��� .
-��10G֮ǰ
-exp����
-gzipѹ��
-gzip��ѹ
-imp����
-EXP������$ mknod p p
+25.压缩dmp文件  EXP直接导出压缩问津，IMP直接导入压缩文件的方法 .
+在10G之前
+exp导出
+gzip压缩
+gzip解压
+imp导入
+EXP导出：$ mknod p p
 $ gzip < p > test.dmp.gz & exp system/xxxx tables=TEST buffer=31457280 CONSISTENT=Y COMPRESS=N file=p
 $ rm -rf p
-IMP���룺
+IMP导入：
 $ mknod p p
 $ gunzip < test.dmp.gz > p & imp system/xxx file=p full=y buffer=31457280
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-26.��Oracle������������ѯ���ݿ� ������
-select t2.username||'�� '||t2.sid||'
-'||t2.serial#||'�� '||t2.logon_time||'
+26.　Oracle的死锁　　查询数据库 死锁：
+select t2.username||'　 '||t2.sid||'
+'||t2.serial#||'　 '||t2.logon_time||'
 '||t3.sql_text
 from v$locked_object t1,v$session t2,v$sqltext t3
 where t1.session_id=t2.sid
 and t2.sql_address=t3.address
 order by t2.logon_time;
 
-���������Ľ��̣�
-sqlplus "/as sysdba"�� (sys/change_on_install)
+查找死锁的进程：
+sqlplus "/as sysdba"　 (sys/change_on_install)
 SELECT s.username,l.OBJECT_ID,l.SESSION_ID,s.SERIAL#,
 l.ORACLE_USERNAME,l.OS_USER_NAME,l.PROCESS
 FROM V$LOCKED_OBJECT l,V$SESSION S WHERE l.SESSION_ID=S.SID;
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-27.����ѯ��table����������
+27.　查询是table锁还是行锁
 select   /*+ rule */ s.username,s.SID,s.SERIAL#,
 decode(l.type,'TM','TABLE LOCK',
               'TX','ROW LOCK',
@@ -9994,11 +9994,11 @@ AND l.id1 = o.object_id(+)
 AND s.username is NOT NULL;
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-28.��-----��ʱ���ռ�ʹ�����
+28.　-----临时表空间使用情况
 
 
-�鿴��ʱ���ռ��ʵ��ռ�������
-select blocks*���С��from v$sort_usage ;
+查看临时表空间的实际占用情况：
+select blocks*块大小　from v$sort_usage ;
 
 
  select t.*
@@ -10039,87 +10039,87 @@ order by "USED_RATE(%)" desc;
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-29.����ȨdebugȨ��
-ԭ�����û�Ȩ�޲�����ʹ��������������Ȩ�ޣ�
+29.　授权debug权限
+原因是用户权限不够，使用以下命令授予权限：
 
 GRANT debug any procedure, debug connect session TO username
 GRANT alter  any procedure TO pub_test
 
-plsqlDev���Թ��������ð�dbms_debug��ʵ�ֵģ�
+plsqlDev调试功能是利用包dbms_debug包实现的，
 
-dbms_debug���İ�װ����sys�û���¼������: sql> @ /rdbms/admin/prvtpb.plb
+dbms_debug包的安装，以sys用户登录后运行: sql> @ /rdbms/admin/prvtpb.plb
 
-������plsqlDevIDE������ʱ����ʱ�ᷢ��ʧȥ��Ӧ����ʱ��ִ��alter system flush shared_pool���ԣ�
+在利用plsqlDevIDE做调试时，有时会发生失去响应，此时可执行alter system flush shared_pool试试，
 
-��������У��������TOAD�����ԡ�plsqlDev�ڵ�����һ�����Ĳ����ơ�
+如果还不行，建议改用TOAD来调试。plsqlDev在调试这一块做的不完善。
 
 
 
 CPUs=8     Cores=8     Sockdets=2
 
-NUM_CPUS 8   ��ʾ�߼�CPU����(Oracle���ݿ��б��ֳ����ĳ�ʼ���� cpu_count)
-NUM_CPU_CORES 8    ��ӦCPU Cores����
-NUM_CPU_SOCKETS 2  CPU Sockets����
+NUM_CPUS 8   表示逻辑CPU数量(Oracle数据库中表现出来的初始参数 cpu_count)
+NUM_CPU_CORES 8    对应CPU Cores数量
+NUM_CPU_SOCKETS 2  CPU Sockets数量
 
 -        stat_name = NUM_CPUS. This value should correspond to the number of logical CPUs. For systems with CMT or
 hyper-threaded processors, this value should correspond to the total number of hardware threads.  For systems with
 multi-core processors, this value should correspond to the total number of hardware threads across all cores in the
 system.  NUM_CPUS should be greater than or equal to NUM_CPU_CORES and NUM_CPU_SOCKETS.
-��Ӧ�߼�CPU������
-����CPU���̻߳��̣߳�ֵӦ��ָhardware threads������
-���ڶ�˴�������ֵӦ�ö�Ӧ��ϵͳ�����к˵�hardware threads������
-NUM_CPUSֵ���ڵ���NUM_CPU_CORES and NUM_CPU_SOCKETS
-��ôҲ����˵�����CPU��������Ϊ2����ôSockets=2 (��������Ϊ���)     ÿ�� CPU ����4�ˣ�ÿ��4�߳� ,  ��ô��������CMT��
-�ܹ�֧��16������ִ�е�Ӳ�̣߳� ��Ӧ�� NUM_CPUS �ǲ��ǵ��� 2 * 4 * 4 = 32 (���ݵڶ����ɫ���)      NUM_CPU_CORES=2*4 =8   
+对应逻辑CPU数量，
+对于CPU多线程或超线程，值应该指hardware threads总数。
+对于多核处理器，值应该对应于系统中所有核的hardware threads总数。
+NUM_CPUS值大于等于NUM_CPU_CORES and NUM_CPU_SOCKETS
+那么也就是说，如果CPU物理个数为2，那么Sockets=2 (初略理解为插槽)     每颗 CPU 采用4核，每核4线程 ,  那么处理器（CMT）
+能够支持16个并发执行的硬线程， 对应到 NUM_CPUS 是不是等于 2 * 4 * 4 = 32 (根据第二句红色语句)      NUM_CPU_CORES=2*4 =8   
 
-CPUs���߼�cpu�������Դ�oracle���ݿ��ʼ������cpu_count�鿴��show parameter cpu_count����
-Cores��cpu������
-Sockets��CPU��ۣ�CPU�����Ҫ��ΪSocket��Slot�����֡��������ڰ�װCPU�Ĳ�������
+CPUs：逻辑cpu数量可以从oracle数据库初始化参数cpu_count查看（show parameter cpu_count）。
+Cores：cpu核数。
+Sockets：CPU插槽（CPU插槽主要分为Socket、Slot这两种。就是用于安装CPU的插座。）
 
 
 
-AWR�ڴ������ߣ�����Ϊĳ����Χ�ڵĿ��գ������������������ս��бȽϡ�
+AWR内创建基线，定义为某个范围内的快照，可以用来与其它快照进行比较。
 
-�������ߣ�
+创建基线：
 
 exec dbms_workload_repository.create_baseline (start_snap_id=>1109, end_snap_id=>1111, baseline_name=>'EOM Baseline');
 
-�鿴���ߣ�
+查看基线：
 
 select baseline_id, baseline_name, start_snap_id, end_snap_id from dba_hist_baseline;
 
-ɾ�����ߣ�
+删除基线：
 
 exec dbms_workload_repository.drop_baseline(baseline_name=>'EOM Baseline', Cascade=>FALSE);
 
-����Cascade�������Ϊtrue���ͻ�ɾ��������صĿ��գ��˴���ɾ��1109��1111��������صĿ��ա�����AWR�Զ����̻��Զ������Щ���ա�
+参数Cascade如果设置为true，就会删除所有相关的快照，此处会删除1109和1111这两个相关的快照。否则AWR自动进程会自动清除这些快照。
 
-���ڵ���Ȩ��
+关于调试权限
 
-Debug��ǰschema�Ĺ��̣���������ǰshema��Ӧ���û�������Ȩ�ޣ�
+Debug当前schema的过程，则必须给当前shema对应的用户授如下权限：
 
-����socttҪ����scott.myfunction
-����sysִ��grant debug connect session to SCOTT;
+例如soctt要调试scott.myfunction
+则以sys执行grant debug connect session to SCOTT;
 
-Debug����schema�Ĺ��̣����Լ�debug any procedure Ȩ�޵���
+Debug其它schema的过程，可以加debug any procedure 权限调试
 
-����
+或是
 
-ֻ��Ե��������ԵĹ�����Ȩ grant debug on �����̡� to �������û���;
+只针对单个被调试的过程授权 grant debug on “过程” to “调试用户”;
 
 
 
-�ر�ע�⣺
+特别注意：
 
-���洢���̱���ɵ���״̬���ſ���ִ�е������ԡ�
+将存储过程编译成调试状态，才可以执行单步调试。
 
-ʾ����������DAY����ɵ���״̬��
+示例：将函数DAY编译成调试状态：
 
 ALTER FUNCTION DAY COMPILE DEBUG
 
-ȥ������DAY�ĵ�����Ϣ��ִ��ALTER FUNCTION DAY COMPILE��
+去除函数DAY的调试信息，执行ALTER FUNCTION DAY COMPILE。
 
-�鿴ĳ�����Ƿ��ڵ���״̬��
+查看某对象是否处于调试状态：
 
 SELECT DEBUGINFO
   FROM SYS.ALL_PROBE_OBJECTS PO
@@ -10129,16 +10129,16 @@ SELECT DEBUGINFO
 
 
 
----��ƽ��,Ҳ����ֱ�Ӳ�ѯsys.aud$��
-select  *  from  DBA_AUDIT_TRAIL  ---�鿴��Ƽ�¼,���õ�sys.aud$��
-select  *  from  DBA_AUDIT_OBJECT   where (obj_name ='UMS_MENU_ROLE_RELATION' or obj_name ='UMS_MENU_INFO' )---�鿴������Ƽ�¼
-select  *  from  DBA_AUDIT_SESSION  -- session��Ƽ�¼
-select  *  from  DBA_AUDIT_STATEMENT   -- �鿴�����Ƽ�¼
-select  *  from  DBA_AUDIT_EXISTS    -- ʹ��BY AUDIT NOT EXISTSѡ������
-select  *  from  DBA_AUDIT_POLICIES    -- ���POLICIES
-select  *  from  DBA_COMMON_AUDIT_TRAIL  -- ��׼���+��ϸ��Ƽ�¼
+---审计结果,也可以直接查询sys.aud$表
+select  *  from  DBA_AUDIT_TRAIL  ---查看审计记录,调用的sys.aud$表
+select  *  from  DBA_AUDIT_OBJECT   where (obj_name ='UMS_MENU_ROLE_RELATION' or obj_name ='UMS_MENU_INFO' )---查看对象审计记录
+select  *  from  DBA_AUDIT_SESSION  -- session审计记录
+select  *  from  DBA_AUDIT_STATEMENT   -- 查看语句审计记录
+select  *  from  DBA_AUDIT_EXISTS    -- 使用BY AUDIT NOT EXISTS选项的审计
+select  *  from  DBA_AUDIT_POLICIES    -- 审计POLICIES
+select  *  from  DBA_COMMON_AUDIT_TRAIL  -- 标准审计+精细审计记录
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-30.����aud$���ڵı��ռ䣬���ۿ��ж�󡣡�
+30.增加aud$所在的表空间，无论空闲多大。。
 While connecting to the database using sqlplus the following errors occur:
 ERROR:
 ORA-00604: error occurred at recursive SQL level 3
@@ -10157,7 +10157,7 @@ select sum(bytes)/1024/1024 from dba_free_space where tablespace_name ='<TABLESP
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 31
 
-���ݿ��Сʹ������sql��
+数据库大小使用下面sql：
 select ceil(a.tempfile_size + b.datafile_size +c.logfile_size) GB from
 (select sum(bytes)/1024/1024/1024 tempfile_size from dba_temp_files) a,
 (select sum(bytes)/1024/1024/1024 datafile_size from dba_data_files) B,
@@ -10185,11 +10185,11 @@ select round(sum(s.bytes / 1024 / 1024 / 1024), 2) Sum_G,
 
 
 
-���Ȼع���flash_point1��Ȼ��ɾ��flash_point1
+请先回滚到flash_point1，然后删除flash_point1
 
-�����ع��ر�֤�ع��㣺
+三、回滚回保证回滚点：
 
-1��ͣ�⣺
+1、停库：
 
 alter system switch logfile;
 
@@ -10197,17 +10197,17 @@ alter system archive log current;
 
 shutdown immediate;
 
-2���ع����ع��㣺
+2、回滚到回滚点：
 
 Startup mount;
 
 FLASHBACK DATABASE TO RESTORE POINT flash_point1;
 
-3����⣺
+3、起库：
 
 alter database open resetlogs;
 
-�ġ�����������
+四、清理环境：
 
 drop restore point flash_point1;
 
@@ -10223,41 +10223,41 @@ alter database flashback on;
 
 alter database open;
 
-flashback �ع����ݿ�
+flashback 回滚数据库
 startup mount;
 select guarantee_flashback_database,to_char(time,'yyyymmdd hh24:mi:ss'),name from v$restore_point;  +++FCR_TEST_RP
 flashback database to restore point FCR_TEST_RP;
 alter database open resetlogs;
 shutdown immediate
 
-����һ��guarantee restore point
+创建一个guarantee restore point
 
 SQL> create restore point flash_point guarantee flashback database;
-����һ����ͨ��restore point
+创建一个普通的restore point
 
 SQL> create restore point b;
-flashback dtaase to restore point:(������guarantee restore point for flashback database�����)
+flashback dtaase to restore point:(必须在guarantee restore point for flashback database的情况)
 
-ɾ����ԭ��
+删除还原点
 
 SQL> drop RESTORE POINT restore2;
 
-Flashback Restore Point�����ػ�ԭ�㣩
+Flashback Restore Point（闪回还原点）
 
-���ػ�ԭ������֣�һ����Normal Restore Points��������ԭ�㣩����һ����Guaranteed Restore Points��������ԭ�㣩
+闪回还原点分两种，一种是Normal Restore Points（正常还原点），另一种是Guaranteed Restore Points（担保还原点）
 
-������ԭ��͵�����ԭ�����Ϣ���Ǳ����ڿ����ļ�����������������ԭ�����Ϣ������ֶ�ɾ�������ļ�Ҳ���Զ�ά������ɾ������������ԭ��������ֶ�ɾ���������ļ��ǲ����Զ�ɾ���ģ�Ҳ��˵ֻҪ�����˵�����ԭ��û���ֶ�ɾ�������ݿ��һ���ָܻ����Ǹ���ԭ��״̬�����������ԭ���Flashback Databaseһ��ʹ�ã���ô���ݿ�������ص�������ԭ�����֮����κ�ʱ��㡣
+正常还原点和担保还原点的信息都是保存在控制文件，区别在于正常还原点的信息如果不手动删除控制文件也会自动维护管理删除，而担保还原点如果不手动删除，控制文件是不会自动删除的，也就说只要设立了担保还原点没有手动删除，数据库就一定能恢复到那个还原点状态。如果担保还原点和Flashback Database一起使用，那么数据库就能闪回到担保还原点起和之后的任何时间点。
 
 The database can retain up to 2048 restore point. Restore points are retained in the database for at least the number of days specified for the CONTROL_FILE_RECORD_KEEP_TIME initialization parameter. The default value of that parameter is 7 days. Guaranteed restore points are retained in the database until explicitly dropped by the user.
 
 
-���ûع��㡢�⻹ԭ�Ĳ����������£��������ûع��㣨����һ��������лл
-�ÿ�汾10.2.0.5
-��ز�����
+设置回滚点、库还原的操作步骤如下，请先设置回滚点（步骤一、二），谢谢
+该库版本10.2.0.5
+相关参数：
 alter system set db_recovery_file_dest_size=30g scope=both;
 db_recovery_file_dest_size big integer 600G
 db_flashback_retention_target integer 1440
-��ز�����汾��֧��flashback database�ġ�
+相关参数与版本是支持flashback database的。
 SQL> select name,current_scn,flashback_on from v$database;
 NAME CURRENT_SCN FLASHBACK_ON
 --------- ----------- ------------------
@@ -10268,33 +10268,33 @@ Automatic archival Disabled
 Archive destination USE_DB_RECOVERY_FILE_DEST
 Oldest online log sequence 328
 Current log sequence 339
-һ���������ݿ⻷����
+一、调整数据库环境：
 shutdown immediate
 Startup nomount
 alter database archivelog
 alter database flashback on
 alter database open;
 select FLASHBACK_ON from v$database;
-����������֤�ع��㣺
-1��������֤�ع��㣺
+二、创建保证回滚点：
+1、创建保证回滚点：
 shutdown immediate;
 startup mount;
 create restore point flash_point2 guarantee flashback database;
-2�����˸ûع����Ƿ�������ȷ��
+2、复核该回滚点是否设置正确：
 select name from v$restore_point;
-3���������ݿ⣺
+3、启动数据库：
 Alter database open;
-�����ع��ر�֤�ع��㣺
-1��ͣ�⣺
+三、回滚回保证回滚点：
+1、停库：
 alter system switch logfile;
 alter system archive log current;
 shutdown immediate;
-2���ع����ع��㣺
+2、回滚到回滚点：
 Startup mount;
 FLASHBACK DATABASE TO RESTORE POINT flash_point;
-3����⣺
+3、起库：
 alter database open resetlogs;
-�ġ�����������
+四、清理环境：
 drop restore point flash_point1;
 select * from v$restore_point;
 shutdown immediate
@@ -10304,13 +10304,13 @@ alter database flashback off;
 alter database open;
 
 
-������ԭ���ʹ��
+正常还原点的使用
 
- ����������ԭ��
+ 创建正常还原点
 
 SQL> CREATE RESTORE POINT restore1;
 
-�鿴flashbackģʽ
+查看flashback模式
 
 SQL> select flashback_on from v$database;
 
@@ -10318,11 +10318,11 @@ FLASHBACK_ON
 ------------------
 NO
 
-ִ�����ػ�ԭ��
+执行闪回还原点
 
-SQL> FLASHBACK database TO RESTORE POINT restore1��  --mount״̬��ִ��
+SQL> FLASHBACK database TO RESTORE POINT restore1；  --mount状态下执行
 
-ɾ����ԭ��
+删除还原点
 
 SQL> drop restore point restore1;
 
@@ -10332,25 +10332,25 @@ Restore point dropped.
 
 
 
-������ԭ���ʹ��
+担保还原点的使用
 
-����������ԭ��
+创建担保还原点
 
 SQL> CREATE RESTORE POINT restore2 GUARANTEE FLASHBACK DATABASE;
 
-��ѯflashbackģʽ
+查询flashback模式
 
 SQL> select flashback_on from v$database;
 
 FLASHBACK_ON
 ------------------
-RESTORE POINT ONLY        --û����Flashback Databaseģʽ��
+RESTORE POINT ONLY        --没开启Flashback Database模式下
 
-ִ�����ػ�ԭ��
+执行闪回还原点
 
-SQL> FLASHBACK database TO RESTORE POINT restore2;    --mount״̬��ִ��
+SQL> FLASHBACK database TO RESTORE POINT restore2;    --mount状态下执行
 
-ɾ����ԭ��
+删除还原点
 
 SQL> drop RESTORE POINT restore2;
 
@@ -10358,35 +10358,35 @@ SQL> drop RESTORE POINT restore2;
 
 
 
-11g������ָ����ȥ��scn��timestamp
+11g还可以指定过去的scn或timestamp
 
 CREATE RESTORE POINT res1 AS OF SCN 1229570;
 CREATE RESTORE POINT res2 AS OF TIMESTAMP to_date('2013-10-10 23:12:12','YYYY-MM-DD HH24:MI');
 
 
 
-�Ñ� ����table   TabA
-A1 �Ñ�����view (V_TabA) , view��������A �Ñ��µ�TabA .
-A2 �Ñ�Ҫ select  A1 �û��µ����view .
+用戶 下有table   TabA
+A1 用戶建立view (V_TabA) , view中是引用A 用戶下的TabA .
+A2 用戶要 select  A1 用户下的这个view .
 
-����ֱ�Ӹ���Ȩ�޵ķ�ʽ���ܿ��ܻ���������  ORA-01720: grant option does not exist for  ......
+采用直接赋予权限的方式，很可能会碰到错误  ORA-01720: grant option does not exist for  ......
 
-һ���ȡ�ķ����� ��
-1.    �Ի����û�A ����(��������������ô�������)
+一般采取的方法是 ：
+1.    以基表用户A 登入(如果多个基表，那么多次运行)
 sql >  connect    A/A
 sql >  grant  select   on   TabA   to    A1  with  grant  option ;
-2.  ��view ��ӵ���û�����
+2.  以view 的拥有用户登入
 sql>  connect   A1/A1
 sql>  grant   select   on   A1.V_TabA    to   A2  ;
-3.  OK,  �� A2 ���뼴���Է���view��
+3.  OK,  以 A2 登入即可以访问view了
 sql >  connect  A2/A2
 sql>  select    *   from   A1.V_TabA     ;
 
-�ַ���
-����/�������ַ���
-    �������ݵĵ��뵼��ʱ������Ҫע������ַ��������⡣��EXP/IMP������������Ҫע���ĸ��ַ����Ĳ����������˵Ŀͻ����ַ��������������ݿ��ַ���������˵Ŀͻ����ַ�������������ݿ��ַ�����
-����������Ҫ�鿴���ĸ��ַ���������
-�鿴���ݿ���ַ�������Ϣ��
+字符集
+导出/导入与字符集
+    进行数据的导入导出时，我们要注意关于字符集的问题。在EXP/IMP过程中我们需要注意四个字符集的参数：导出端的客户端字符集，导出端数据库字符集，导入端的客户端字符集，导入端数据库字符集。
+我们首先需要查看这四个字符集参数。
+查看数据库的字符集的信息：
 SQL> select * from nls_database_parameters;
 PARAMETER                      VALUE
 ------------------------------ --------------------------------------------------------------------------------
@@ -10400,44 +10400,44 @@ NLS_CHARACTERSET               ZHS16GBK
 NLS_COMP                       BINARY
 NLS_NCHAR_CHARACTERSET         ZHS16GBK
 NLS_RDBMS_VERSION              8.1.7.4.1
-NLS_CHARACTERSET��ZHS16GBK�ǵ�ǰ���ݿ���ַ�����
+NLS_CHARACTERSET：ZHS16GBK是当前数据库的字符集。
 
-���������鿴�ͻ��˵��ַ�����Ϣ��
-�ͻ����ַ����Ĳ���NLS_LANG=_< territory >.
-language��ָ��oracle��Ϣʹ�õ����ԣ��������պ��µ���ʾ��
-Territory��ָ�����Һ����ֵĸ�ʽ�������ͼ������ڼ����ڵ�ϰ�ߡ�
-Characterset�����ƿͻ���Ӧ�ó���ʹ�õ��ַ�����ͨ�����û���ڿͻ��˵Ĵ���ҳ�����߶���unicodeӦ����ΪUTF8��
-��windows�У���ѯ���޸�NLS_LANG����ע����н��У�
+我们再来查看客户端的字符集信息：
+客户端字符集的参数NLS_LANG=_< territory >.
+language：指定oracle消息使用的语言，日期中日和月的显示。
+Territory：指定货币和数字的格式，地区和计算星期及日期的习惯。
+Characterset：控制客户端应用程序使用的字符集。通常设置或等于客户端的代码页。或者对于unicode应用设为UTF8。
+在windows中，查询和修改NLS_LANG可在注册表中进行：
 HKEY_LOCAL_MACHINE\SOFTWARE\Oracle\HOMExx\
-xxָ���ڶ��Oracle_HOMEʱ��ϵͳ��š�
+xx指存在多个Oracle_HOME时的系统编号。
 
-��unix�У�
+在unix中：
 $ env|grep NLS_LANG
 NLS_LANG=simplified chinese_china.ZHS16GBK
 
-�޸Ŀ��ã�
+修改可用：
 $ export NLS_LANG=AMERICAN_AMERICA.UTF8
 
-ͨ���ڵ���ʱ��ðѿͻ����ַ������õú����ݿ����ͬ�����������ݵ���ʱ����Ҫ���������������
-(1)    Դ���ݿ��Ŀ�����ݿ������ͬ���ַ������á�
-��ʱ��ֻ�����õ����͵���˵Ŀͻ���NLS_LANG�������ݿ��ַ������ɡ�
-(2)    Դ���ݿ��Ŀ�����ݿ��ַ�����ͬ��
-    �Ƚ������˿ͻ��˵�NLS_LANG���óɺ͵����˵����ݿ��ַ���һ�£��������ݣ�Ȼ�󽫵���˿ͻ��˵�NLS_LANG���óɺ͵�����һ�£��������ݣ�����ת��ֻ���������ݿ�ˣ�����ֻ����һ�Ρ�
-    ��������£�ֻ�е���������ݿ��ַ���Ϊ���������ݿ��ַ������ϸ񳬼�ʱ�����ݲ�����ȫ���ɹ������򣬿��ܻ������ݲ�һ�»��������
+通常在导出时最好把客户端字符集设置得和数据库端相同。当进行数据导入时，主要有以下两种情况：
+(1)    源数据库和目标数据库具有相同的字符集设置。
+这时，只需设置导出和导入端的客户端NLS_LANG等于数据库字符集即可。
+(2)    源数据库和目标数据库字符集不同。
+    先将导出端客户端的NLS_LANG设置成和导出端的数据库字符集一致，导出数据，然后将导入端客户端的NLS_LANG设置成和导出端一致，导入数据，这样转换只发生在数据库端，而且只发生一次。
+    这种情况下，只有当导入端数据库字符集为导出端数据库字符集的严格超集时，数据才能完全导成功，否则，可能会有数据不一致或乱码出现
 
 
-package�б�����ͼ������
+package中表或视图不存在
 
-�����ߵ���package��������.package����������������package������Ҫpackage���������ʵ��ı�����ͼ���жϣ��������Ե����ߵ�Ȩ�����ж��Ƿ���Ȩ�޷���..
+调用者调用package是以属主.package中属主的身份运行package，即需要package中属主访问到的表或视图来判断，并不是以调用者的权限来判断是否有权限访问..
 
 
 
-�ڱ�����ִ��alter database recover managed standby database using current logfile disconnect;����RTA���ɹ� ��
-�����������еı��в��뼸�����ݲ�commit��
-�ڱ�����ִ��alter database recover managed standby database cancel;
-alter database open read only��
-��ִ��select�Ǹ������ݣ����ּ�¼������û�䡣Ϊʲô�أ�����ʵʱ����
-lnsr��������
+在备库上执行alter database recover managed standby database using current logfile disconnect;开启RTA，成功 。
+在主库上已有的表中插入几条数据并commit。
+在备库上执行alter database recover managed standby database cancel;
+alter database open read only。
+再执行select那个表数据，发现记录数还是没变。为什么呢？不是实时传吗？
+lnsr开启监听
 
 SQL> alter database open resetlogs;
 alter database open resetlogs
@@ -10445,7 +10445,7 @@ alter database open resetlogs
 ERROR at line 1:
 ORA-01139: RESETLOGS option only valid after an incomplete database recovery
 
-����취��
+解决办法：
 
 SQL> recover database until cancel;
 Media recovery complete.
@@ -10453,7 +10453,7 @@ Elapsed: 00:00:00.00
 SQL> alter database open resetlogs;
  Database altered
 
-������־�Ѿ��ָ���ϣ�ֱ��open�Ϳ�����
+或是日志已经恢复完毕，直接open就可以了
 [oracle@DB2 dbs]$ oerr ora 1403
 01403, 00000, "no data found"
 // *Cause:
@@ -10466,19 +10466,19 @@ SQL> alter database open resetlogs;
 
 SQL>alter database open;
 
-oracleͬ��ʵ�һ���ص� ͬ���ʧЧ
+oracle同义词的一个特点 同义词失效
 
-2011-02-09 16:27:29|  ���ࣺ oracle |�ٱ�|�ֺ� ����
-�ܽ᣺����ԭ�������ddl������ͬ��ʵ�״̬����INVALID�����ٴ��������ͬ���ʱ��ͬ��ʻ��Զ����룬״̬����VALID�������˹���Ԥ����Ȼǰ���ǲ��ı�ԭ��������ơ�
+2011-02-09 16:27:29|  分类： oracle |举报|字号 订阅
+总结：当对原对象进行ddl操作后，同义词的状态会变成INVALID；当再次引用这个同义词时，同义词会自动编译，状态会变成VALID，无需人工干预，当然前提是不改变原对象的名称。
 
 su - dbcom
 cd /etc/paic/shell/db_info.txt
 
-��Դ��  �����л�
+资源组  主备切换
 /oracle_grid/11.2.0/grid/crs/public/
 
 cnsh281003:t2ipm2 > cp -r t0caiku testk
-cnsh281003:t2ipm2 > sed -i "s/t0caiku/testk/g" `ls`      ----�����нű��к����ַ���t0caiku ��Ϊ testk.
+cnsh281003:t2ipm2 > sed -i "s/t0caiku/testk/g" `ls`      ----将所有脚本中含有字符串t0caiku 改为 testk.
 cnsh281003:t2ipm2 > grep testk *.ksh
 
 
@@ -10492,20 +10492,20 @@ cnsz181002:d0ptos > cat /etc/paic/network/tnsnames.ora|grep d0ptos
 d0ptos = (DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=10.25.18.47)(PORT=1555))(CONNECT_DATA=(sid=d0ptos)))
 
 
-reset���ݿ��Ĭ��ֵ
+reset数据库的默认值
 alter system reset db_recovery_file_dest_size scope=spfile sid='*';
 
-ɾ��pfile ��spfile�еĶ�Ӧ��
+删除pfile 或spfile中的对应列
 
 
 
-psu ����  Oracle ����
+psu 升级  Oracle 升级
  @ /rdbms/admin/catbundle.sql psu apply
 
   @ /rdbms/admin/utlrp.sql
 
 
--- �޸�ORA-04023����
+-- 修复ORA-04023报错
 sqlplus / as sysdba
 drop table PUIU$DBUA;
 
@@ -10516,9 +10516,9 @@ vi  sqlnet.ora
 SQLNET.EXPIRE_TIME=10
 
 
-ɾ�����ݿ�
+删除数据库
 
-����10g���ϰ汾����ִ���������ɾ����
+若是10g以上版本，可执行下面操作删除：
 sqlplus '/as sysdba'
 
 startup nomount;
@@ -10529,11 +10529,11 @@ alter system enable restricted session;
 
 drop database;
 
- ע�⣺
+ 注意：
 
-�뱣�����ļ�ɾ��ǰ��þ��Ĵ�С�Աȣ����ظ����ò������档�Ա����洢����Կ������߿�������ļ�ȷʵ��ɾ���ˡ�
+请保留库文件删除前后该卷的大小对比，并回复到该步骤里面。以便后面存储组可以看出下线库的数据文件确实被删除了。
 
-�滻����    �滻Ŀ¼  ����   sed
+替换变量    替换目录  变量   sed
 
 olive:~/tmp> cat some.txt
 some other output lines
@@ -10550,13 +10550,13 @@ olive:~/tmp>
 
 Select distinct b.Text, c.Is_Correct, c.Text Atext
   From Test_Question a, Question b, Response_Value c, Response_Type d
- Where b.Text Like '%��SGA�е���%'
+ Where b.Text Like '%在SGA中的有%'
     And
    a.Question_Id = b.Id
    And b.Id = d.Question_Id
    And d.Id = c.Response_Type_Id order by text;
 
-������Ϣ���������ű�
+敏感信息屏蔽生产脚本
 
 declare
 v_sys   sensitive_info_shield.sys_name%type;
@@ -10633,9 +10633,9 @@ end if;
           'batchrows number:='||v_batch_num||';'||chr(10)||
           'v_last_rowid urowid;'||chr(10)||
           'loopno number;'||chr(10)||
-          'v_file_name varchar2(100);'||chr(10)|| --�ű����������쳣����
-          'v_sqlcode varchar2(100);'||chr(10)||--�ű����������쳣����
-          'v_sqlerr varchar2(500);'||chr(10)||--�ű����������쳣����
+          'v_file_name varchar2(100);'||chr(10)|| --脚本名，用于异常处理
+          'v_sqlcode varchar2(100);'||chr(10)||--脚本名，用于异常处理
+          'v_sqlerr varchar2(500);'||chr(10)||--脚本名，用于异常处理
           'procedure log(seq number, info varchar2) is'||chr(10)||
           'begin'||chr(10)||
           'insert into stg_data_mask_log values(seq, substrb(info,1,300), sysdate);'||chr(10)||
@@ -10682,9 +10682,9 @@ end if;
           'batchrows number:='||v_batch_num||';'||chr(10)||
           'v_last_rowid urowid;'||chr(10)||
           'loopno number;'||chr(10)||
-          'v_file_name varchar2(100);'||chr(10)|| --�ű����������쳣����
-          'v_sqlcode varchar2(100);'||chr(10)||--�ű����������쳣����
-          'v_sqlerr varchar2(500);'||chr(10)||--�ű����������쳣����
+          'v_file_name varchar2(100);'||chr(10)|| --脚本名，用于异常处理
+          'v_sqlcode varchar2(100);'||chr(10)||--脚本名，用于异常处理
+          'v_sqlerr varchar2(500);'||chr(10)||--脚本名，用于异常处理
           'procedure log(seq number, info varchar2) is'||chr(10)||
           'begin'||chr(10)||
           'insert into stg_data_mask_log values(seq, substrb(info,1,300), sysdate);'||chr(10)||
@@ -10735,8 +10735,8 @@ end;
 /
 
 
-������   �޸����� ����
-alt_passwd.sql�����ݣ�
+改密码   修改密码 秘文
+alt_passwd.sql的内容：
 set verify off
 accept username char prompt 'username:'
 accept passwd prompt 'new password of this user: ' hide
@@ -10746,7 +10746,7 @@ alter user &username identified by &passwd;
 
 
 set NLS_LANG=SIMPLIFIED CHINESE_CHINA.ZHS16GBK
-Ӱ�������
+影响分析：
 set NLS_LANG=SIMPLIFIED CHINESE_CHINA.ZHS16GBK
 
 set autotrace traceonly;
@@ -10758,41 +10758,41 @@ alter system flush shared_pool;
 alter system flush buffer_cache;
 
 
-alter session set events 'immediate trace name flush_cache';--������ݻ�����
+alter session set events 'immediate trace name flush_cache';--清空数据缓冲区
 
 
-��ִ�мƻ�
+仅执行计划
  set autot trace exp
-��ͳ����Ϣ
+仅统计信息
 set autot trace stat
 
 
 
-ʹ�ö�ʱ�ƻ�ִ������
-һ��ʹ��exp
-(1)�ű�����
+使用定时计划执行任务
+一、使用exp
+(1)脚本内容
 @echo off
 rem  dbbackup.bat
 exp scott/tiger owner=scott  file=D:\DB_backup\laofangkuai_%date:~8,2%%date:~5,2%%date:~0,4%.dmp   log=%date:~8,2%%date:~5,2%%date:~0,4%.log
 
-(2)���˽ű���������ƻ�������ÿ���賿2��ִ��
+(2)将此脚本加入任务计划，设置每天凌晨2点执行
 
 --==========================================
 
-����ʹ��expdp
+二、使用expdp
 sqlplus  / as sysdba
 SQL> create  directory  backup_dir  as  'd:\db_backup';
 SQL> grant  read , write  on  directory  backup_dir  to  scott;
 
-(1)�ű�����
+(1)脚本内容
 @echo off
 rem  dbbackup.bat
 expdp scott/tiger directory=backup_dir  schemas=scott dumpfile=laofangkuai_%date:~8,2%% date:~5,2%%date:~0,4%.dmp  logfile=%date:~8,2%%date:~5,2%%date:~0,4%.log
-(2)���˽ű���������ƻ�������ÿ���賿2��ִ��
+(2)将此脚本加入任务计划，设置每天凌晨2点执行
 
 
 
-��ѯ�ָ�����
+查询恢复进度
 
 select sid, serial#, context, sofar, totalwork,
        round(sofar/totalwork*100,2) "%_complete"
@@ -10803,7 +10803,7 @@ and totalwork != 0
 and sofar <> totalwork;
 
 
-��ѯ�ָ�����
+查询恢复进度
 SQL> declare
 l_start number;  2
   3  l_end number;
@@ -10818,11 +10818,11 @@ l_start number;  2
 
 
 
-pl sql ִ�� ��ͣ����
+pl sql 执行 暂停任务
 
-07.SQL> conn /as sysdba����--��SYSDBA���ݵ�½
+07.SQL> conn /as sysdba　　--以SYSDBA身份登陆
 08.Connected.
-09.SQL> @ /rdbms/admin/dbmslock.sql��--��װϵͳ��
+09.SQL> @ /rdbms/admin/dbmslock.sql　--安装系统包
 10.
 11.Package created.
 12.
@@ -10832,23 +10832,23 @@ pl sql ִ�� ��ͣ����
 16.
 17.Grant succeeded.
 18.
-19.SQL> grant execute on dbms_lock to public;��--��ȨPUBLICִ��Ȩ��
+19.SQL> grant execute on dbms_lock to public;　--授权PUBLIC执行权限
 20.
 21.Grant succeeded.
 22.
-23.SQL> create table test1(id number,name varchar2(40),time date);   --����test1��ʱ��
+23.SQL> create table test1(id number,name varchar2(40),time date);   --创建test1临时表
 24.
 25.Table created.
 26.
-27.SQL> select * from test1;  --������
+27.SQL> select * from test1;  --无数据
 28.
 29.no rows selected
 30.
 31.
-32.SQL> SET TIMING ON  --��ʱ����ʾ
-33.SQL> begin  --��ʼִ�в��Խű�
+32.SQL> SET TIMING ON  --打开时间显示
+33.SQL> begin  --开始执行测试脚本
 34.  2    insert into test1(id,name,time) values(1,'Andy',sysdate);
-35.  3    DBMS_LOCK.SLEEP(10);  --�ó�����ʱ10����
+35.  3    DBMS_LOCK.SLEEP(10);  --让程序暂时10秒钟
 36.  4    insert into test1(id,name,time) values(2,'Shirley',sysdate);
 37.  5    commit;
 38.  6  end;
@@ -10857,28 +10857,28 @@ pl sql ִ�� ��ͣ����
 
 
 
- 1����linux��̨��ӦĿ¼���洴��һ���ļ� ,
+ 1、在linux后台相应目录下面创建一个文件 ,
 $ vi  test.sh
-2�����ļ����ڱ༭ģʽ�����������ı� ����
+2、打开文件，在编辑模式下输入如下文本 。。
 
 
-sqlplus username/PWD <<EOF      --ע�� ��ʾ���� ��oracle
-set timing on;                       --ע���þ���SQLplus�±�ʾ��ӡSQL����ִ��ʱ��
+sqlplus username/PWD <<EOF      --注： 表示连接 到oracle
+set timing on;                       --注：该句在SQLplus下表示打印SQL语句的执行时间
 
 /*
-����Ҫִ�е�SQL�ı�
+你想要执行的SQL文本
 */
 
-EOF    --ע����ʾ����  end of file
+EOF    --注：表示结束  end of file
 
 
-3��Ϊ�ļ�����ִ��Ȩ��  chmod
+3、为文件附可执行权限  chmod
 
 
-4�������·�ʽ�ں�ִ̨��
+4、以如下方式在后台执行
 $ nohup sh test.sh &
 
-�ŵ���ִ̨�У���������־�ļ�����һ������
+放到后台执行，并拷贝日志文件到另一个主机
 
 sqlplus dbmgr/duan5lzh@'sid' <<EOF
 set timing on;
@@ -10896,7 +10896,7 @@ select sysdate from dual;
 EOF
 scp /paic/cx/epcis/data/osepcis/nohup.out  dongkuifeng611@10.11.108.76:/home/dongkuifeng611/
 
-�ź�̨����¼��־
+放后台并记录日志
 [padep@cnsz081003 trustdw]$ dscp padba@g3ah1020:/paic/xt/trustdw/data/oradata/trustdw/* padba@z4ah8020:/paic/xt/t0tdw/data/oradata/t0tdw >data.out 2>&1 &
 [1] 26051
 [padep@cnsz081003 trustdw]$ dscp padba@g3ah1020:/paic/xt/trustdw/data1/oradata/trustdw/* padba@z4ah8020:/paic/xt/t0tdw/data1/oradata/t0tdw >data1.out 2>&1 &
@@ -10908,55 +10908,55 @@ total 12
 
 
 
-��Ҫ�Ƚ�nohup.out �ļ���������Կ���Ƶ�Ŀ�������ϣ�
+需要先将nohup.out 文件主机的密钥复制到目标主机上：
 
-# ssh-keygen  -t  rsa      ----������Կ�ļ�
+# ssh-keygen  -t  rsa      ----生成密钥文件
 
-#scp -r id_rsa.pub 10.10.10.17:/root/.ssh/authorized_keys   ----homeĿ¼��.ssh��
+#scp -r id_rsa.pub 10.10.10.17:/root/.ssh/authorized_keys   ----home目录的.ssh下
 
 scp /paic/cx/epcis/data/osepcis/.ssh/id_rsa.pub  dongkuifeng611@10.11.108.76:/home/dongkuifeng611/.ssh/authorized_keys
 
-�鿴���������Ĳ��ж�
+查看表或索引的并行度
 
 select * from dba_tables  where table_name='JZ_BDL_CUST_INFO';
 select degree from user_indexes where index_name='IND_T_CHG_MAIN_F';
-���Ӧ���Ǵ���1��
+这个应该是大于1的
 
 alter index IND_T_CHG_MAIN_F noparallel;
 
 select /*+ no_parallel(t) */  count(1)  from NETSPOCDBA.JZ_BDL_CUST_INFO t;
 
 
-���������ļ���λ��
+更改数据文件的位置
 
 SQL> startup mount
 
 SQL> alter database rename file 'D:/ORACLE/DB_CREATE_FILE_DEST/ORCL/DATAFILE/O1_
 MF_TEST_5JDZLKB6_.DBF' to 'D:/ORACLE/ORADATA/ORCL/O1_MF_TEST_5JDZLKB6_.DBF';
 
-//�˴���Ҫ�Ǹ��Ŀ����ļ��е�����
+//此处主要是更改控制文件中的内容
 Database altered.
 
 SQL> alter database open;
 
 
----���ٽ���
----�������������ļ�·����
+---快速交付
+---批量更改数据文件路径。
 
-�ڶ������޸������ļ���·��
-�鿴�ж��ٸ���ͬ·����Ҫ�޸ģ����ص��Ǿ������ļ���oldpath
+第二步：修改数据文件的路径
+查看有多少个不同路径需要修改，返回的是旧数据文件的oldpath
 select distinct substr(df.name,1,instr(df.name,'/',-1,1)) oldpath from v$datafile df;
 
 
-���������޸���־�ļ���·��(�˲����ܻ��������󣬴����������ұ�)��
-�鿴�ж��ٸ���ͬ·����Ҫ�޸ģ����ص��Ǿ���־�ļ���oldpath
+第三步：修改日志文件的路径(此步可能会遇到错误，处理方法见右边)：
+查看有多少个不同路径需要修改，返回的是旧日志文件的oldpath
 select distinct substr(df.MEMBER,1,instr(df.MEMBER,'/',-1,1)) oldpath from v$logfile df;
 
 select distinct substr(df.name,1,instr(df.name,'/',-1,1)) oldpath from v$tempfile df;
 
-����Ƿ��޸����(û���ؼ�¼���ʾ�����޸����ˣ�
-select name from v$datafile where upper(name) not like '%/' || trim(upper('�²��Կ�SID')) || '/%';
-select member from v$logfile where upper(member) not like '%/' || trim(upper('�²��Կ�SID')) || '/%';
+检查是否都修改完毕(没返回记录则表示都已修改完了）
+select name from v$datafile where upper(name) not like '%/' || trim(upper('新测试库SID')) || '/%';
+select member from v$logfile where upper(member) not like '%/' || trim(upper('新测试库SID')) || '/%';
 
 
 
@@ -10985,7 +10985,7 @@ ORA-00312: online log 7 thread 1: '/paic/sx/ics/redo/oradata/ics/redo07.log'
 
 
 
-ѡȡָ���м�¼
+选取指定行记录
 
 with test as
 (
@@ -11019,10 +11019,10 @@ Database altered.
 
 
 col name format a30
-col ��ʼSCNֵ format 9999999999999999999
-col ����SCNֵ format 9999999999999999999
+col 起始SCN值 format 9999999999999999999
+col 结束SCN值 format 9999999999999999999
 
-select a.name,a.checkpoint_change# "��ʼSCNֵ",b.checkpoint_change# "����SCNֵ" from v$datafile_header a,v$datafile b where a.file#=b.file#;
+select a.name,a.checkpoint_change# "起始SCN值",b.checkpoint_change# "结束SCN值" from v$datafile_header a,v$datafile b where a.file#=b.file#;
 
 col checkpoint_change# format 9999999999999999999
 col checkpoint_change# format 9999999999999999999
@@ -11032,7 +11032,7 @@ where a.file#=b.file#;
 
 
 
-----�ܵ������ļ�.
+----管道与多个文件.
 # +---------------------------------------+
 # | Make two new pipes (Compress / Split) |
 # +---------------------------------------+
@@ -11054,27 +11054,27 @@ nohup gzip < compress_pipe > export_pipe &
 nohup exp dbmgr/***** tables=dbmgr.CBO_STATS_BAK file=compress_pipe direct=y buffer=1048576000 log=exp3rdfull.log &
 
 
-mknod total.pipe p //����һ���ܵ��ļ�
+mknod total.pipe p //建立一个管道文件
 cat total.pipe | compress > Reddy.`date +%b_%d_%H_%M_%S`.dmp.Z &
 exp u/p owner=Reddy(which ever your case) consistent=y file=total.pipe log=reddy.`date +%b_%d_%H_%M_%S.`log indexes=n buffer=10485760
 
 
-������
-����:
+这样做
+导出:
 mknod exp_pipe p
 gzip <exp_pipe >test.dmp.gz &
 exp username/passwd file=exp_pipe
-����:
+导入:
 mknod imp_pipe p
 gunzip <test.dmp.gz >imp_pipe &
 imp username/passwd file=imp_pipe full=y
 
 
-4.  ȫ�⵼���һ�㲽��
-ע�⣺�ڵ���ʱ����Ҫͨ��toad������������ȡԴ���ݿⴴ�������������Ľű�
-1.  ��ȫ��� rows=n �ѽṹ����ȥ
+4.  全库导入的一般步骤
+注意：在导出时，需要通过toad或其他工具提取源数据库创建主键和索引的脚本
+1.  先全库加 rows=n 把结构导进去
 $ imp system/manager file=exp.dmp log=imp.log full=y rows=n indexes=n
-2.  ʹҵ���û��Ĵ�����ʧЧ/ɾ��������Ψһ����
+2.  使业务用户的触发器失效/删除主键和唯一索引
 spool drop_pk_u.sql
 select 'alter table '||table_name||' drop constraint '||constraint_name||';'
 from user_constraints
@@ -11090,10 +11090,10 @@ spool off
 @drop_pk_u.sql
 @disable_trigger.sql
 
-3.  �� ignore=y ȫ�⵼��
+3.  以 ignore=y 全库导入
 $ imp system/manager file=exp.dmp log=imp.log full=y ignore=y
-4.  ͨ�� toad ������������ȡԴ���ݿⴴ�������������Ľű�,��Ŀ�����ݿ��д�������
-��������ʹ��������Ч��
+4.  通过 toad 或其他工具提取源数据库创建主键和索引的脚本,在目标数据库中创建主键
+和索引。使触发器生效。
 
 
 
@@ -11103,9 +11103,9 @@ SQL> select to_char(sysdate,'yyyymmddhh24miss')||'.txt' F from dual;
 20050124174926.txt SQL> spool &F
 
 
-oracle Ĭ�ϸ��뼶��
+oracle 默认隔离级别
 
-��ֻ��GOOGLE�������
+我只能GOOGLE到这个：
 http://dba.stackexchange.com/que ... ion-level-in-oracle
 
 Using the query from the SO answer Vincent Malgrat referenced, here is how you can get the transaction isolation level for the transaction in progress:
@@ -11132,33 +11132,33 @@ It seems like there would be an easier way than this. I don't know how to get th
 EXP-00091 Exporting questionable statistics
 
 
-�������������������⣬���䲻�ٳ��֣�
+下面我们来解决这个问题，让其不再出现：
 
-��һ����
+第一步：
 
-�鿴DB�е�NLS_CHARACTERSET��ֵ���ṩ���ַ�������
+查看DB中的NLS_CHARACTERSET的值（提供两种方法）：
 
-��ѯNLS_CHARACTERSET��ֵ��
+查询NLS_CHARACTERSET的值：
 select * from nls_database_parameters t where t.parameter='NLS_CHARACTERSET'
 or
 select * from v$nls_parameters  where parameter='NLS_CHARACTERSET';
 SQL> select * from v$nls_parameters where parameter='NLS_CHARACTERSET';
 
-PARAMETER��������      VALUE
------------------------����----------------------------------------------
+PARAMETER　　　　      VALUE
+-----------------------　　----------------------------------------------
 NLS_CHARACTERSET    ZHT16BIG5
 
-�ڶ�����
+第二步：
 
-���ݵ�һ�������NLS_CHARACTERSET��ZHT16BIG5�����趨exp�Ļ���������
+根据第一步查出的NLS_CHARACTERSET（ZHT16BIG5）来设定exp的环境变量：
 
 
 WINNT> set NLS_LANG=AMERICAN_AMERICA.ZHT16BIG5
 
-�����趨���ڻ��������в鿴NLS_LANG��ֵ�Ƿ�һ�£������һ�¿��ڻ��������������޸ġ�
+进行设定后，在环境变量中查看NLS_LANG的值是否一致，如果不一致可在环境变量中手中修改。
 LINUX> export NLS_LANG=AMERICAN_AMERICA.ZHT16BIG5
 
-����exp-00091��oracle error message ��Q����˵����
+附上exp-00091的oracle error message 解決方案说明：
 
 error exp 91
 00091, 00000, "Exporting questionable statistics."
@@ -11417,7 +11417,7 @@ UNION ALL SELECT    dbms_metadata.get_ddl(object_type => 'TRIGGER',name => 'NBZ_
 UNION ALL SELECT    dbms_metadata.get_ddl(object_type => 'TRIGGER',name => 'NBZ_RCL_ROWID_BI',schema => 'CGIDATA') ||';'  FROM DUAL
 UNION ALL SELECT    dbms_metadata.get_ddl(object_type => 'TRIGGER',name => 'NBZ_RCL_ROWID_BU',schema => 'CGIDATA') ||';'  FROM DUAL ;
 
-�����û���Ȩ�� ��ɫ grant
+保存用户及权限 角色 grant
 
 select 'create user '||username||chr(10)||'identified by values '''||password||''''||chr(10)||
 'default tablespace '||default_tablespace||chr(10)||'temporary tablespace '||TEMPORARY_TABLESPACE||chr(10)||
@@ -11455,14 +11455,14 @@ select 'create user '||username||chr(10)||'identified by values '''||password||'
  order by username;
 
 
- �����û������ռ��޶����:
+ 不对用户做表空间限额控制:
     GRANT UNLIMITED TABLESPACE TOuser;
-���ַ�ʽ��ȫ���Եġ�  ����
+这种方式是全局性的。  或者
     alter user  user  quota unlimited on  user_tablespace;
- ���ַ�ʽ������ض��ı��ռ��.
-���ձ��ռ��޶����:
+ 这种方式是针对特定的表空间的.
+回收表空间限额控制:
     revoke unlimited tablespace from  user;
-����
+或者
     alter user  user  quota 0 on  user_tablespace;
 
 --1.3 sys priv
@@ -11501,7 +11501,7 @@ in
 order by grantee;
 
 
---2 ��󻹱��� tab priv (BIN$������ɾ����)
+--2 最后还保存 tab priv (BIN$表是已删除表)
 select 'grant '||privilege||' on '||owner||'.'||table_name||' to '||grantee||';' from dba_tab_privs
 where grantee in
 (
@@ -11519,7 +11519,7 @@ where grantee in
 );
 
 
-����������ʱ�ļ� temp
+批量添加临时文件 temp
 select 'alter tablespace '||a.tablespace_name|| ' add tempfile '''||
 substr(b.file_name,1,instr(b.file_name,'system')-1)||lower(a.tablespace_name)||'01.dbf'' size 500M reuse
 autoextend off;'
@@ -11529,9 +11529,9 @@ a.contents='TEMPORARY' and a.tablespace_name not in (select distinct tablespace_
 and b.file_id=1;
 
 
-11g�и������ԣ����¼��ֶβ�����defaultֵʱ��oracle���¼�������ֵ��У������������޸����ݡ�
+11g有个新特性：表新加字段并赋予default值时，oracle会记录到数据字典中，而不会逐行修改数据。
 
-��������������кܶ����ƣ�ʹ��ʱ��Ҫע�⡣�뿴����Ĳ��ԣ�
+不过，这个特性有很多限制，使用时需要注意。请看下面的测试：
 
 SQL> select banner from v$version where rownum=1;
 
@@ -11539,22 +11539,22 @@ BANNER
 --------------------------------------------------------------------------------
 Oracle Database 11g Enterprise Edition Release 11.2.0.2.0 - 64bit Production
 
---�������Ա�������ʼ������
+--创建测试表，并初始化数据
 SQL> create table t_def as select * from dba_objects;
 
-���Ѵ�����
+表已创建。
 
 SQL> insert into t_def select * from t_def;
 
-�Ѵ���62116�С�
+已创建62116行。
 
 SQL> /
 
-�Ѵ���124232�С�
+已创建124232行。
 
 SQL> commit;
 
-�ύ��ɡ�
+提交完成。
 
 SQL> select count(*) from t_def;
 
@@ -11576,12 +11576,12 @@ BYTES/1024/1024     BLOCKS
 
 SQL> set timing on
 
---defaultֵΪ����������Ϊnot nullʱ����ʱֻ��0.52s
+--default值为常量，并且为not null时，耗时只有0.52s
 SQL> alter table t_def add def1 varchar2(10) default 'asdfasdf' not null;
 
-���Ѹ��ġ�
+表已更改。
 
-����ʱ��:  00: 00: 00.52
+已用时间:  00: 00: 00.52
 
 SQL> select * from sys.ecol$;
 
@@ -11595,7 +11595,7 @@ COLUMN_NAME                     COLUMN_ID
 ------------------------------ ----------
 DEF1                                   16
 
-�����10046 trace�����Կ����ݹ���õĹ��̡���һ��������£�
+如果做10046 trace，可以看到递归调用的过程。有一条语句如下：
 insert into ecol$ values (:1, :2, :3)
 END OF STMT
 PARSE #47096684507784:c=1000,e=1098,p=0,cr=3,cu=0,mis=1,r=0,dep=1,og=4,plh=0,tim=1346910433235212
@@ -11616,14 +11616,14 @@ Bind#2
   kxsbbbfp=2ad58cb36dc8  bln=4000  avl=4000  flg=05
   value=Unhandled datatype (113) found in kxsbndinf
 
-�����ԣ�oracle��defaultֵ��¼��ecol$����
+很明显，oracle将default值记录在ecol$表。
 
---defaultֵΪ����������Ϊnullʱ����ʱ5.65�룬�鿴ecol$����û�м�¼
+--default值为常量，可以为null时，耗时5.65秒，查看ecol$表，没有记录
 SQL> alter table t_def add def2 varchar2(10) default 'asdfasdf';
 
-���Ѹ��ġ�
+表已更改。
 
-����ʱ��:  00: 00: 05.65
+已用时间:  00: 00: 05.65
 
 SQL> select * from sys.ecol$;
 
@@ -11631,14 +11631,14 @@ SQL> select * from sys.ecol$;
 ---------- ---------- ------------------------------
     166509         16 6173646661736466
 
-����ʱ��:  00: 00: 00.07
+已用时间:  00: 00: 00.07
 
---defaultֵΪ��������not null����ʱ11.21�룬�鿴ecol$����û�м�¼
+--default值为变量，且not null。耗时11.21秒，查看ecol$表，没有记录
 SQL> alter table t_def add def3 varchar2(32) default sys_guid() not null;
 
-���Ѹ��ġ�
+表已更改。
 
-����ʱ��:  00: 00: 11.21
+已用时间:  00: 00: 11.21
 
 SQL> select * from sys.ecol$;
 
@@ -11646,7 +11646,7 @@ SQL> select * from sys.ecol$;
 ---------- ---------- ------------------------------
     166509         16 6173646661736466
 
---dump���ݿ鿴��
+--dump数据块看看
 block_row_dump:
 tab 0, row 0, @0x1eed
 tl: 147 fb: --H-FL-- lb: 0x3  cc: 18
@@ -11673,52 +11673,52 @@ col 17: [32]
 43 39 30 33 44 39 45 46 34 44 42 44 43 39 37 45 45 30 34 30 31 46 30 41 41
 32 30 39 30 45 36 35
 
-���Կ�����ǰ�������ӵ�col15��col16��col17���������ж�����ʵ�����ݵġ�
+可以看到，前面新增加的col15、col16、col17，后面两列都是有实际数据的。
 
-С�᣺
-1��	oracle�ĵ�����������������Եģ�
+小结：
+1、	oracle文档是这样描述这个特性的：
 For some types of tables (for example, tables without LOB columns), if you specify both a NOT NULL constraint and a default value, the database can optimize the column add operation and greatly reduce the amount of time that the table is locked for DML.
-�������ֶ�ʱ������¼��ֶ�ָ����defaultֵ�����Ҹ��зǿգ�������������dml����ʱ�䡣
-��Ϊ���п���Ϊ��ʱ��oracle�޷�������defaultֵ�����Ǳ������ǿ�ֵ��
-2��	��defaultֵΪ����ʱ������sys_guid()��sysdate����ֻ�ܽ�ֵд�뵽���У���Ҳ���������⡣
+表添加字段时，如果新加字段指定了default值，并且该列非空，可以显著减少dml锁的时间。
+因为该列可以为空时，oracle无法区分是default值，还是本来就是空值。
+2、	当default值为变量时（例如sys_guid()、sysdate），只能将值写入到行中，这也很容易理解。
 
-���ԣ�Ӧ�ø�����ʱ��һ��Ҫע��������ԣ��������һִ�оͱ����ˡ�
+所以，应用该特性时，一定要注意其局限性，否则语句一执行就悲剧了。
 
 
- �޸ı������ֶ�Ĭ��ֵdefault
-���ࣺ Oracle ���� 2013-09-27 15:20 2948���Ķ� ����(0) �ղ� �ٱ�
-�Ը�������ı�����1���ֶ�.�ֶ�������INT��, ��������2ǧ����, alter table table_name add xxoo number(4) default  0 ;
-��� ����Ҫ�޸��ֵ�,��Ҫˢ��ȫ������.
-1�� ��ALTER sql���д�ȱʡֵ��ORACLE��ֱ��ˢ��ȫ���ļ�¼��
-2�� ��ALTER sql��û�д�ȱʡֵ��ORACLEֻ��Ӱ�쵽�����ļ�¼��
+ 修改表增加字段默认值default
+分类： Oracle 管理 2013-09-27 15:20 2948人阅读 评论(0) 收藏 举报
+对个生产库的表增加1个字段.字段类型是INT型, 表数据有2千万条, alter table table_name add xxoo number(4) default  0 ;
+因此 不仅要修改字典,还要刷新全部数据.
+1） 在ALTER sql中有带缺省值，ORACLE会直接刷新全部的记录。
+2） 在ALTER sql中没有带缺省值，ORACLE只会影响到后来的记录。
 alter table table_name add xxoo number(4) default null;
 Table altered
 
 Executed in 0.062 seconds
-����default null �Ϳ�����
+带有default null 就可以了
  alter table table_name add xxoo number(4) default 0;
 
 Table altered
 Executed in 1.625 seconds
-ԭ���Ļ� Ҫ�������е���,�ᵼ��UNDO��ռ��
-ʹ�����Alter table a add test number(10) default 0;����һ��������ֶ�ʱ�������ĸ����������ݴﵽ��ʮ���У�����һ���ֶξ�ȻҪ����Сʱ��ʱ�䣬�޸�������Nologging ����ôû�������أ�ȥ���ǲ������������أ�ʹ����� select * from dba_locks where lock_id1=33784;����Session_idΪ14��һֱ��ִ�У���ô����ִ��ʲô�أ���ѯһ�°ɡ�
-ʹ����䣺
+原来的话 要更新所有的行,会导致UNDO段占用
+使用语句Alter table a add test number(10) default 0;更新一个大表中字段时，表有四个分区，数据达到几十亿行，增加一个字段竟然要几个小时的时间，修改语句加上Nologging ，怎么没有作用呢？去找是不是哪有锁了呢，使用语句 select * from dba_locks where lock_id1=33784;发现Session_id为14的一直在执行，那么他在执行什么呢！查询一下吧。
+使用语句：
 select a.sid,a.username,c.SQL_TEXT from v$session a, dba_locks b,v$sqlarea c
   where b.lock_id1=33784 and a.SID=b.session_id
    and a.SQL_ADDRESS=c.ADDRESS;
-Ŷ��ԭ������Update Test �ֶ�ֵΪ0.�����ܽᵽ��ԭ��Alter֮�����ľ�Ȼ��Update��Ҳ������ΪʲôUndo���ռ�ᱬ�ǡ�ȥ��Default 0���Ǻǣ��ܿ��OK�ˡ�
-����û�б�Ҫʱ����Default
+哦，原来他在Update Test 字段值为0.至此总结到，原来Alter之后做的竟然是Update，也明白了为什么Undo表空间会爆涨。去掉Default 0，呵呵，很快就OK了。
+建议没有必要时慎用Default
 
 
 
 
 
-��һ���������һ���ֶΣ�������������
-Author�� Kewin
+给一个大表增加一个字段，给怎样操作。
+Author： Kewin
 Date: 2008-11-7
 
-������
-�и�100�����ݵ�TABLE:
+背景：
+有个100万数据的TABLE:
 SQL> desc t2
 Name                                      Null     Type
 ----------------------------------------- -------- ----------------------------
@@ -11735,11 +11735,11 @@ STATUS                                             VARCHAR2(7)
 TEMPORARY                                          VARCHAR2(1)
 GENERATED                                          VARCHAR2(1)
 SECONDARY                                          VARCHAR2(1)
-��Ҫ����һ���ֶΣ�KONG INT DEFAULT 100��
-������޸ģ���Ҫע��ʲôϸ�ڡ�
+需要添加一个字段（KONG INT DEFAULT 100）
+在如何修改，需要注意什么细节。
 
-ģ����ԣ�
-�����������TABLE�ϣ���ALTER ���ִ��ʧ�ܡ���ΪDML����ӹ�������table�ϣ���ALTER��Ҫ����������alterʧ�ܡ�
+模拟测试：
+如果有事务在TABLE上，那ALTER 语句执行失败。因为DML语句会加共享锁在table上，而ALTER需要排他锁。故alter失败。
 SQL> alter table t2 add (kong int );
 alter table t2 add (kong int )
 *
@@ -11748,31 +11748,31 @@ ORA-00054: resource busy and acquire with NOWAIT specified
 
 
 Elapsed: 00:00:00.00
-��ֻ��rollback transaction ����kill session��
-ֱ��ȥ����һ���ֶΣ�ע��û�м���ȱʡֵ��
+那只能rollback transaction 或者kill session；
+直接去添加一个字段，注意没有加上缺省值。
 SQL> /
 
 Table altered.
 
 Elapsed: 00:00:00.04
-ִ�е��ٶȺܿ졣���ڶ�����Ѹ�����ִ����ϡ�
-��ʱ����DUMP BLOCK���������ݿ��еļ�¼û�������ӵ��ֶΡ���ֻ��ִ��DDL���޸�table�Ķ��壩
-����ʱɾ��һ���ֶ��أ�
+执行的速度很快。在掩耳不及迅雷情况执行完毕。
+这时可以DUMP BLOCK，看到数据块中的记录没有新添加的字段。（只是执行DDL，修改table的定义）
+那这时删除一个字段呢？
 SQL> alter table t2 drop column kong;
 
 Table altered.
 
 Elapsed: 00:00:11.42
-����������������һ��ȫ��ɨ�衣�ҵ�kong �ֶΣ������ݲ�ȥ��
-�����ALTER�м�����ȱʡֵ�����ֻ�������
-����������¥�ϡ�һ��ȥ���������������¼��
+可以想象，这是做了一个全表扫描。找到kong 字段，把内容搽去。
+如果在ALTER中加上了缺省值，那又会怎样？
+来来来，上楼上。一起去看看（易中天的语录）
 
 SQL> alter table t2 add (kong int default 10);
 
 Table altered.
 
 Elapsed: 00:01:34.34
-���Կ���ִ��ʱ����1����34�롣��ͬʱ����sessionִ�е�sqlֻ�ܱ��ȴ���
+可以看到执行时间是1分钟34秒。而同时其他session执行的sql只能被等待。
 
 SQL> select * from v$lock;
 
@@ -11782,10 +11782,10 @@ ADDR             KADDR                   SID TY        ID1        ID2      LMODE
 07000000FDC5AB28 07000000FDC5AB50          9 TM       6291          0          6          0         25          0
 07000000FB9B8308 07000000FB9B8328         13 CU   32906288  117440513          6          0         21          0
 
-�������޹ص�lock��SID=13�� ִ����DDL�� SID=9��ִ��DML��
-�����и����⣬SID=9�� ӵ�� table������sid=13Ҳӵ��table��������Ϊʲôsid=13 Ҫִ����ô����ʱ�䣬��sid=9 ҲҪ
-LONG TIME������û�п�����ص������������û��������û�вµ����ɣ�
-��DDLʱ��ORACLE�ᵱ��һ��ԭ����ִ�У�sid=13�Ѿ��޸������ݱ��Ķ��壬���Ÿ���block�����ݣ���SID=9ֻ�ܵȴ����ȴ�sid=13ִ����ϡ���SID=9��session���Կ���SID=13ִ�к�Ľ����
+（忽略无关的lock。SID=13， 执行了DDL； SID=9，执行DML）
+这里有个问题，SID=9， 拥有 table的锁；sid=13也拥有table的锁；那为什么sid=13 要执行那么长的时间，而sid=9 也要
+LONG TIME，但是没有看到相关的阻塞。（这个没有阻塞，没有猜到理由）
+在DDL时，ORACLE会当作一个原子来执行，sid=13已经修改了数据表的定义，接着更改block的数据；而SID=9只能等待，等待sid=13执行完毕。在SID=9的session可以看到SID=13执行后的结果：
 SQL> select * from t2
   2  where owner='KONG2' AND ROWNUM < 2;
 
@@ -11799,7 +11799,7 @@ KONG2                          T1
                                      6290           6290 TABLE
 05-NOV-08       05-NOV-08       2008-11-05:22:15:13 VALID   N N N         10
 
-������޸�ͬʱ������ȱʡֵ������������session������������أ��ȼ��ֶΣ��ټ���ȱʡֵ��
+如果在修改同时，加上缺省值，会阻塞其他session；那如果分来呢？先加字段，再加上缺省值。
 SQL> alter table t2 add (kong int );
 
 Table altered.
@@ -11811,24 +11811,24 @@ SQL> alter table t2 modify (kong default 2000);
 Table altered.
 
 Elapsed: 00:00:00.03
-�����ٶ��Ǻܿ졣�������Ǻ�ǰһ��������ʲô�������ѵ����û��ȱ�㣿
+看到速度是很快。。。可是和前一个方法有什么区别吗？难道快就没有缺点？
 
-�����еģ�
-1�� ��ALTER sql���д�ȱʡֵ��ORACLE��ֱ��ˢ��ȫ���ļ�¼��
-2�� ��ALTER sql��û�д�ȱʡֵ��ORACLEֻ��Ӱ�쵽�����ļ�¼�������׿��������ص��ؾ���
+还是有的：
+1） 在ALTER sql中有带缺省值，ORACLE会直接刷新全部的记录。
+2） 在ALTER sql中没有带缺省值，ORACLE只会影响到后来的记录。（明白快是有隐秘的秘诀）
 
-��ѡ�����ַ���ʱ��Ҫ���Ӿ���������ʵʩ���Ƿ���INDEX���Ƿ���Ӧ�õĸ߲����׶Σ��ȵȡ�
-
-
+在选择哪种方法时，要更加具体的情况来实施：是否有INDEX，是否在应用的高并发阶段，等等。
 
 
 
- Oracle11g������ - ������������not null�ֶ� 2011-12-29 18:21:53
-���ࣺ Linux
-���⣺ĳ����ϵͳҵ��������һ�ű�����������Ϣ��¼�����Һ���Ҫ��Ҫ���ڲ�ͣ��Ͳ�����������£��Ըñ�����һ���µ��ֶΣ����ʵ�֡�
-��11g��ǰ���ڱ�������һ��NOT NULL�ֶ��Ǽ�ʮ��ʹ������飬�������ڱ��ܴ�����������ִ���ٶ����������DDL����Ӱ�������û��������������������ݳ��ȵ����ӣ���������ɱ��д����������������Ӱ�����ܡ�
-��11g�У���������õ��˳��׵ĸ��ƣ�Oracleͨ���������ֵ䣨ecol$���м�¼DEFAULTֵ�������˷��صĸ��²��������ӷǿ��ֶε�ʱ�������һ���ɿ��ֶε�ʱ����ȫһ����
-�����ȿ�10g�е������
+
+
+ Oracle11g新特性 - 快速在线新增not null字段 2011-12-29 18:21:53
+分类： Linux
+问题：某电信系统业务，其中有一张表有上亿条信息记录，而且很重要；要求在不停库和不锁表的情况下；对该表增加一个新的字段，如何实现。
+在11g以前，在表中新增一个NOT NULL字段是件十分痛苦的事情，尤其是在表很大的情况，不但执行速度慢（会产生DDL锁，影响其它用户操作），而且由于数据长度的增加，很容易造成表中大量的行链接情况，影响性能。
+在11g中，这种情况得到了彻底的改善，Oracle通过在数据字典（ecol$）中记录DEFAULT值，避免了繁重的更新操作，增加非空字段的时间和增加一个可空字段的时间完全一样。
+下面先看10g中的情况：
 SQL> select * from v$version where rownum<2;
 
 BANNER
@@ -11851,9 +11851,9 @@ Table altered.
 
 Elapsed: 00:00:20.34
 
-���Կ�����ʹ����ֻ��2��������ݵı�������20�룬��������20���ڼ䣬�ñ�����DDL���������ڸñ���DML�������ᱻ������
+可以看到即使对于只有2万多条数据的表，用了20秒，而且在这20秒期间，该表上有DDL锁，所有在该表的DML操作都会被阻塞。
 
-ע�⣬�������������Ƿǿյģ����û�зǿ�������ƣ���10g��Ҳ�Ǻܿ�ģ�
+注意，这里新增的列是非空的，如果没有非空这个限制，在10g中也是很快的：
 
 SQL> alter table test add new_col2 varchar(1000);
 
@@ -11861,7 +11861,7 @@ Table altered.
 
 Elapsed: 00:00:00.59
 
-�����ٿ�11g�е������
+下面再看11g中的情况：
 SQL> select * from v$version where rownum<2;
 
 BANNER
@@ -11885,26 +11885,26 @@ Table altered.
 
 Elapsed: 00:00:01.34
 
-���Կ�����11g��ֻ����1�룬��ôOracle�ǲ��ú��ַ���ʵ������˴�����������أ�˵����Ҳ�򵥣���Oracle11g�У�������һ������DEFAULTֵ��NOT NULL�ֶΣ�Oracle����ȥ�������е����ݣ������ǽ�Ĭ��ֵ�Լ���Ӧ�ı���Ϣ������Ϣһ��洢��һ�����������ֵ��ecol$�С���Oracle�ڶ�ȡ����ʱ���������ĳһ��Ϊ�ǿգ�����ʵ�ʴ洢ȴΪ�գ��ͻ��ECOL$�ж�ȡ���е�Ĭ��ֵ��
+可以看到在11g中只用了1秒，那么Oracle是采用何种方法实现了如此大的性能提升呢？说起来也简单，在Oracle11g中，当添加一个包含DEFAULT值的NOT NULL字段，Oracle不会去更新现有的数据，仅仅是将默认值以及对应的表信息、列信息一起存储在一个新增数据字典表ecol$中。当Oracle在读取数据时，如果发现某一列为非空，但是实际存储却为空，就会从ECOL$中读取该列的默认值。
 
-�������ĺô��ǲ���������ִ��ʱ�䣬���Ҳ������DDL������������Ӱ�������û��Ĳ�����
+这样做的好处是不但减少了执行时间，而且不会产生DDL锁，进而不会影响其它用户的操作。
 
 ============
 
-�ص��ʼ�����⣬������ݿ�汾����11g���Ǹ���ô���أ���ʵ�������½�һ�������յ��ֶΣ�Ȼ��Ѹ��ֶ��޸Ļ�ǿգ��ڶ�֮ǰ�����ݽ���update������
-1. �½�һ�������յ��ֶΡ�
+回到最开始的问题，如果数据库版本不是11g，那该怎么办呢，其实可以先新建一个允许空的字段，然后把该字段修改会非空，在对之前的数据进行update操作：
+1. 新建一个允许空的字段。
 SQL> alter table test add new_col varchar(1000);
 
 Table altered.
 
 Elapsed: 00:00:00.14
-2. �޸ĸ��ֶ�Ϊ�ǿգ������ֻ��֮��ļ�¼�����ã�ԭ�м�¼�ĸ��л���Ϊ��ֵ����˸ò���Ҳ�ܿ졣
+2. 修改该字段为非空，该语句只对之后的记录起作用，原有记录的该列还是为空值，因此该操作也很快。
 SQL> alter table test modify new_col varchar(1000) default 'LARGE COLUMN';
 
 Table altered.
 
 Elapsed: 00:00:00.48
-3. ����ԭ�е��ֶ�ΪĬ��ֵ��
+3. 更新原有的字段为默认值。
 SQL> alter session enable parallel dml;
 SQL> update /*+ parallel(t 8) */ test set new_col='LARGE COLUMN' where new_col is null;
 
@@ -11915,23 +11915,23 @@ SQL> alter session disable parallel dml;
 
 
 
-Solaris�ڴ���
+Solaris内存监控
 
-Solaris�ڴ���Ҫ�������¼������棺���ģ����̣��ļ�ϵͳ���档�����Ǽ���ڴ�ʹ�õķ�����
+Solaris内存主要用在以下几个方面：核心，进程，文件系统缓存。如下是监控内存使用的方法。
 
-����ϵͳ�����ڴ�
+可用系统物理内存
 
-�����Solaris���ĵ��ڴ�����
+分配给Solaris核心的内存数量
 
-�ļ�ϵͳ����ʹ�õ��ڴ�����
+文件系统缓存使用的内存数量
 
-����ʹ�õ��ڴ�����
+进程使用的内存数量
 
-ϵͳʣ����ڴ�����
+系统剩余的内存数量
 
 Total Physical Memory
 
-ʹ��prtconf����쿴ϵͳ�����ڴ�������
+使用prtconf命令，察看系统物理内存数量。
 
 prtconf | head -2
 
@@ -11941,7 +11941,7 @@ Memory size: 49152 Megabytes
 
 Kernel Memory
 
-ʹ��sar �Ck�쿴ϵͳ����ռ�õ��ڴ棬����3���ڴ��֮�ͼ��ǣ���λbyte
+使用sar –k察看系统核心占用的内存，如下3个内存池之和即是，单位byte
 
 sar -k 1 1
 
@@ -11953,9 +11953,9 @@ SunOS lonespappb33 5.8 Generic_117350-13 sun4u 11/28/05
 
 File System Caching Memory
 
-�ļ�ϵͳ����ʹ��ϵͳ���õ�ʣ���ڴ滺���ļ�����Solaris�ϣ����õ�ʣ���ڴ棨free memory���󲿷���������ǽӽ�0��Solaris8֮ǰ��vmstat ��ʾ��free�б�ʾ���õ�ʣ���ڴ棬������ϵͳ������booted����ʱ��ܸߣ�����ϵͳ������������Ϊ0�����������ģ���Ϊ�ļ�ϵͳ��������Ŀ�ľ����������ϵͳ�����ڴ�������������ʵ��ļ���
+文件系统缓存使用系统可用的剩余内存缓存文件。在Solaris上，可用的剩余内存（free memory）大部分情况下总是接近0；Solaris8之前，vmstat 显示的free列表示可用的剩余内存，往往在系统启动（booted）的时候很高，随着系统运行慢慢降低为0，这是正常的，因为文件系统缓存的设计目的就是最大化利用系统可用内存来缓存最经常访问的文件。
 
-��Solaris8�У�vmstat ��ʾ��free��ϵͳ���õ�ʣ���ڴ棨free memory���Ϳ�pageable���ļ�ϵͳ���棨file system cache memory����man�Ľ��ͣ�free size of the free list (Kbytes) ���ļ�ϵͳ����Ҳ�����ڴ�Free List�ϡ�
+在Solaris8中，vmstat 显示的free是系统可用的剩余内存（free memory）和可pageable的文件系统缓存（file system cache memory），man的解释：free size of the free list (Kbytes) 。文件系统缓存也挂在内存Free List上。
 
 vmstat 1 5
 
@@ -11965,33 +11965,33 @@ r b w swap free re mf pi po fr de sr s0 s1 s2 s3 in sy cs us sy id
 
 0 1 0 62618064 33156520 5220 0 1144 0 0 0 0 0 1 0 0 8093 47291 1895 9 7 85
 
-����Solaris 8,vmstat �����ʾ���ļ�ϵͳ����ռ���˽���33156520k�ڴ档
+如上Solaris 8,vmstat 结果表示，文件系统缓存占用了将近33156520k内存。
 
 Free Memory
 
-�����ļ�ϵͳ�������Ǿ������ÿ��õ�ʣ���ڴ滺���ļ�����˴󲿷������Free memory���ǽӽ�0.
+由于文件系统缓存总是尽量利用可用的剩余内存缓存文件，因此大部分情况下Free memory总是接近0.
 
 Memory Shortage Detection
 
-ϵͳ����ʱ�᲻�ϵ�page in page out;��æ��paging�������ɵ���Page Scaner����Ƶ������˰����нϸߵ�scan-rage(sr)��page-out(po);�������Ϊϵͳ��æpaging �ı�ʾ��
+系统运行时会不断的page in page out;繁忙的paging操作，可导致Page Scaner运行频繁，因此伴随有较高的scan-rage(sr)和page-out(po);这可以作为系统繁忙paging 的表示。
 
-����н��̱�swap(w>0),��ͨ����ʾ�ڴ��ȱ����ʱ������swap�豸��IO�ȽϷ�æ��
+如果有进程被swap(w>0),则通常表示内存短缺，这时候往往swap设备的IO比较繁忙。
 
 Swap Space
 
-Solaris �����ռ䣨swap space����2����Ҫ��״̬������(swap reservation)�ͷ���(physical swap allocation).
+Solaris 交换空间（swap space）有2个重要的状态：保留(swap reservation)和分配(physical swap allocation).
 
-����(swap reservation)��ָProcess����segment��ʱ��ϵͳ�����Process������ڴ��ַ�ռ䣨virtual memory address space��,ͬʱΪ�˱�֤��segment�Ժ���Ա�page out��swap,�����Process���segmentͬ����С�����⽻���ռ䣨virtual swap space��.
+保留(swap reservation)是指Process创建segment的时候，系统分配给Process虚拟的内存地址空间（virtual memory address space）,同时为了保证该segment以后可以被page out到swap,分配给Process与该segment同样大小的虚拟交换空间（virtual swap space）.
 
-���磬process����һ��100M��segment,ϵͳ��������process100M��virtual memory address space,����������process�����ڴ棨physical memory��;ͬʱ��Swap space��Ԥ�ȱ���(reservation)100M���⽻���ռ䣨virtual swap space��.
+例如，process创建一个100M的segment,系统会分配给该process100M的virtual memory address space,但不会分配给process物理内存（physical memory）;同时在Swap space中预先保留(reservation)100M虚拟交换空间（virtual swap space）.
 
-����(physical swap allocation)��ָsegment driver��process segment���������ڴ�ʱ��Ԥ��Ϊswap reservation������ͬ����С�����������ռ䣨physical swap space��,����page-out.
+分配(physical swap allocation)是指segment driver给process segment分配物理内存时，预先为swap reservation区分配同样大小的物理交换空间（physical swap space）,用来page-out.
 
-���磬process������100M��virtual memory address space������,ͨ��trap/page-fault/zero-fill-on-demand���䵽10M�������ڴ�;ͬʱ��ΪԤ�ȱ���(reservation)��100M���⽻���ռ䣨virtual swap space������10M����swap space.
+例如，process在已有100M的virtual memory address space基础上,通过trap/page-fault/zero-fill-on-demand分配到10M的物理内存;同时会为预先保留(reservation)的100M虚拟交换空间（virtual swap space）分配10M物理swap space.
 
 Virtual Swap Space
 
-ϵͳ���⽻���ռ������Ϊ�������̽����ռ��С��disk swap space��+Solaris���ڴ��з���Ľ����ռ��С��memory swap space��.ʹ��swap �Cs�쿴���⽻���ռ���Ϣ��
+系统虚拟交换空间的数量为物理磁盘交换空间大小（disk swap space）+Solaris在内存中分配的交换空间大小（memory swap space）.使用swap –s察看虚拟交换空间信息。
 
 $ swap -s
 
@@ -11999,7 +11999,7 @@ total: 929688k bytes allocated + 57408k reserved = 987096k used, 17715000k avail
 
 Physical Swap Space
 
-ϵͳ���������ռ������Ϊ/etc/vfstab�����õĴ��̽����ռ��С��ʹ��swap �Cl�쿴��
+系统物理交换空间的数量为/etc/vfstab中配置的磁盘交换空间大小。使用swap –l察看。
 
 $ swap -l
 
@@ -12007,30 +12007,30 @@ swapfile dev swaplo blocks free
 
 /dev/vx/dsk/swapvol 230,6 16 25165808 25165808
 
-����ȷ��swap �Cs��swap �Cl ��available & free ��0�������޷��������⽻���ڴ�������������ڴ棻
+必须确保swap –s和swap –l 的available & free 非0，否则将无法分配虚拟交换内存或者物理交换内存；
 
-��ʱ��Oracleͨ��������ORA-4030��ORA-12500����
+此时，Oracle通常会遇见ORA-4030和ORA-12500错误。
 
-�ɼ���memory swap space: 987,096k+17,715,000k-25165808/2k=6,119,192k
+可计算memory swap space: 987,096k+17,715,000k-25165808/2k=6,119,192k
 
 Process Memory Usage , ps, and pmap
 
-���̵��ڴ�Ҳ�ɷ�Ϊ2�֣������ڴ�ʹ�ú������ڴ�ʹ�á����������ڴ���ָ�Ѿ���������̵������ַ�ռ䣨virtual address space��;�����ڴ���ָ��������̵���ʵ�������ڴ棨real physical memory pages��������
+进程的内存也可分为2种，虚拟内存使用和物理内存使用。进程虚拟内存是指已经分配给进程的虚拟地址空间（virtual address space）;物理内存是指分配给进程的真实的物理内存（real physical memory pages）数量。
 
-Ps��vsz��ʾ�����ڴ棬rss��ʾ�����ڴ�
+Ps的vsz表示虚拟内存，rss表示物理内存
 
 $ ps -opid,vsz,rss,args
 
 PID VSZ RSS COMMAND
 
-27495 1912 1016 �Cksh
+27495 1912 1016 –ksh
 
 
- AWRʹ��
+ AWR使用
 
 SQL>@ /rdbms/admin/awrrpt.sql
 
-�û�Ҳ����ʹ������������ֹ��������ֹ����ɿ��գ���
+用户也可以使用下面的命令手工采样（手工生成快照）：
 
 BEGIN
 DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT ();
@@ -12039,64 +12039,64 @@ END;
 
 
 
- ��ʾSTATISTICS_LEVEL�ĵ�ǰֵ��
+ 显示STATISTICS_LEVEL的当前值：
 
 SQL> SHOW PARAMETER STATISTICS_LEVEL
 
-SQL����ִ�н���ǣ�
+SQL语句的执行结果是：
 NAME                                 TYPE        VALUE
 ------------------------------------ ----------- ------------------------------
 statistics_level                     string      TYPICAL
-���STATISTICS_LEVEL��ֵΪTYPICAL���� ALL����ʾ����AWR�����STATISTICS_LEVEL��ֵΪBASIC����ʾ����AWR��
-*BASIC��awrͳ�Ƶļ��������ֵ�ر�.ֻ�ռ����������ݿ�ͳ����Ϣ.
-*TYPICAL��Ĭ��ֵ��ֻ�в��ֵ�ͳ���ռ�.���Ǵ�����Ҫ�ĵ��ͼ��oracle���ݿ����Ϊ.
-*ALL : ���п��ܵ�ͳ�ƶ�����׽. �����в���ϵͳ��һЩ��Ϣ.�������Ĳ�׽Ӧ���ں��ٵ������,������Ҫ�����sql�����Ϣ��ʱ���ʹ��.
+如果STATISTICS_LEVEL的值为TYPICAL或者 ALL，表示启用AWR；如果STATISTICS_LEVEL的值为BASIC，表示禁用AWR。
+*BASIC：awr统计的计算和衍生值关闭.只收集少量的数据库统计信息.
+*TYPICAL：默认值．只有部分的统计收集.他们代表需要的典型监控oracle数据库的行为.
+*ALL : 所有可能的统计都被捕捉. 并且有操作系统的一些信息.这个级别的捕捉应该在很少的情况下,比如你要更多的sql诊断信息的时候才使用.
 
---�鿴���յ�Ƶ�ʺͱ���ʱ�䣨Ĭ��Ϊÿ1Сʱ����һ�Σ�������Ϣ����ʱ��Ϊ7�죩
+--查看快照的频率和保留时间（默认为每1小时采样一次，采样信息保留时间为7天）
  select * from dba_hist_wr_control;
  select DBID, SNAP_INTERVAL, SNAPINT_NUM, RETENTION from wrm$_wr_control;
 
 exec dbms_workload_repository.modify_snapshot_settings(interval=>60, retention=>90*24*60);
 
 
---�޸� ���յ�Ƶ�ʺͱ���ʱ�䣨��λ�÷��ӣ�
+--修改 快照的频率和保留时间（单位用分钟）
 exec dbms_workload_repository.modify_snapshot_settings(interval=>60, retention=>7*24*60);
 
-�û�Ҳ����ʹ������������ֹ��������ֹ����ɿ��գ���
+用户也可以使用下面的命令手工采样（手工生成快照）：
     BEGIN
     DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT ();
     END;
 
-�ֹ�ɾ��ָ����Χ�Ŀ���
+手工删除指定范围的快照
   begin
   dbms_workload_repository.drop_snapshot_range(low_snap_id => 3965, high_snap_id => 3966, dbid => 3437504306);
   end;
 
- --�鿴�ж��ٸ�����
+ --查看有多少个快照
  select count(1) from wrh$_active_session_history;
  select count(1) from dba_hist_active_sess_history;
 
-ͨ����ѯ��ͼDBA_HIST_SNAPSHOT������֪��ϵͳ�в�������Щ���ա�
+通过查询视图DBA_HIST_SNAPSHOT，可以知道系统中产生了哪些快照。
 select * from DBA_HIST_SNAPSHOT;
 
 
-��SYSAUX���ռ�����AWR���Զ����ǵ��ɵ���Ϣ�����ھ�����־�м�¼һ�������Ϣ��
+当SYSAUX表空间满后，AWR将自动覆盖掉旧的信息，并在警告日志中记录一条相关信息：
 ORA-1688: unable to extend table SYS.WRH$_ACTIVE_SESSION_HISTORY partition WRH$_ACTIVE_3533490838_1522 by 128 in                 tablespace SYSAUX
 
 select table_name from dba_tables where table_name like 'WRH$%';
 
 
-  �ٶ�һ������Ϊ apply_interest ���� 2:00 �� 4:00 ֮�����У���Ӧ���� ID 4150 �� 4151�����ǿ���Ϊ��Щ���ն���
-һ������Ϊ apply_interest_1 �Ļ�׼�ߣ�
+  假定一个名称为 apply_interest 上午 2:00 到 4:00 之间运行，对应快照 ID 4150 到 4151。我们可以为这些快照定义
+一个名称为 apply_interest_1 的基准线：
 
 SQL> exec dbms_workload_repository.create_baseline(4150, 4151, 'apply_interest_1');
 
-��һ���������մ� 4150 �� 4151 ��ţ���Ϊ����ָ���Ļ�׼�ߵ�һ���֡��鿴���еĻ�׼�ߣ�
+这一操作将快照从 4150 到 4151 编号，作为上面指定的基准线的一部分。查看现有的基准线：
 SQL> select *from dba_hist_baseline;
 
  DBID      BASELINE_ID  BASELINE_NAME        START_SNAP_ID  START_SNAP_TIME                  END_SNAP_ID END_SNAP_TIME
 ---------- ----------- -------------------- ------------- --------------------------------  ----------- -------------------------------
-3437504306     1        apply_interest_1     4150          07-3�� -11 03.00.47.627 ����       4151        07-3�� -11 04.00.12.567 ����
+3437504306     1        apply_interest_1     4150          07-3月 -11 03.00.47.627 上午       4151        07-3月 -11 04.00.12.567 上午
 
 SQL> select *from wrm$_baseline;
 
@@ -12105,65 +12105,65 @@ DBID        BASELINE_ID BASELINE_NAME                   START_SNAP_ID  END_SNAP_
 3437504306      1       apply_interest_1                 4150             4151
 
 
-��һЩ��������֮�����ǿ��Դ�����һ����׼�� �� ��������Ϊ apply_interest_2������2�㵽4�㣩��Ȼ��ֻΪ��Щ����������׼����صĿ��ձȽ����ȡ�
+在一些调整步骤之后，我们可以创建另一个基准线 — 假设名称为 apply_interest_2（下午2点到4点），然后只为那些与这两条基准线相关的快照比较量度。
 SQL> exec dbms_workload_repository.create_baseline(4162, 4163, 'apply_interest_2');
 
-�������ѿ��շָ��ڽ��������������������о����������������ȵ�Ӱ�졣
+像这样把快照分隔在仅仅几个集合中有助于研究调整对于性能量度的影响。
 
-4.2 ɾ������
-    ����֮��ʹ�� drop_baseline() ��ɾ����׼�ߣ����ս�������Ҳ�ɼ���ɾ���������⣬��������̿�ʼɾ���ɵĿ���ʱ�����׼����صĿ��ղ���
-��������Ӷ��������н�һ���ķ�����
-���Ҫɾ��һ����׼��:
+4.2 删除基线
+    分析之后使用 drop_baseline() 来删除基准线；快照将保留（也可级联删除）。此外，当清除例程开始删除旧的快照时，与基准线相关的快照不会
+被清除，从而允许进行进一步的分析。
+如果要删除一个基准线:
 SQL> exec dbms_workload_repository.drop_baseline(baseline_name=>'apply_interest_1', cascade=>false);
 
 SQL> select *from wrh$_active_session_history where snap_id in (4150,4151);
 
 SNAP_ID  DBID     INSTANCE_NUMBER  SAMPLE_ID SAMPLE_TIME                  SESSION_ID ...
-4150 3437504306    1             14900840   07-3�� -11 02.55.02.038 ����   162       ...
-4150 3437504306    1             14900200   07-3�� -11 02.44.21.942 ����   165       ...
+4150 3437504306    1             14900840   07-3月 -11 02.55.02.038 上午   162       ...
+4150 3437504306    1             14900200   07-3月 -11 02.44.21.942 上午   165       ...
 ....
-4151 3437504306    1             14901980   07-3�� -11 03.14.02.213 ����  165        ...
-4151 3437504306    1             14901790   07-3�� -11 03.10.52.183 ����  165        ...
-4151 3437504306    1             14901490   07-3�� -11 03.05.52.138 ����  167        ...
+4151 3437504306    1             14901980   07-3月 -11 03.14.02.213 上午  165        ...
+4151 3437504306    1             14901790   07-3月 -11 03.10.52.183 上午  165        ...
+4151 3437504306    1             14901490   07-3月 -11 03.05.52.138 上午  167        ...
 
---����ɾ�������������һ��ɾ��
+--级联删除（基线与快照一块删）
 SQL> exec dbms_workload_repository.drop_baseline(baseline_name=>'apply_interest_2', cascade=>true);
 
 SQL> select *from wrh$_active_session_history where snap_id in (4162,4163);
-δѡ����
+未选定行
 
-AWR���棬ֻ�ǲ�����ͬ��AWR���棬��Ҫ���в�ͬ�Ľű���
+AWR报告，只是产生不同的AWR报告，需要运行不同的脚本。
 
-    --�����������ݿ��AWR���棬���нű�awrrpt.sql��
+    --产生整个数据库的AWR报告，运行脚本awrrpt.sql。
 
    @$ORACLE_HOME/rdbms/admin/awrrpt.sql
 
-    --����ĳ��ʵ����AWR���棬���нű�awrrpti.sql��
+    --产生某个实例的AWR报告，运行脚本awrrpti.sql。
 
    @$ORACLE_HOME/rdbms/admin/awrrpti.sql
 
-    --����ĳ��SQL����AWR���棬���нű�awrsqrpt.sql��
+    --产生某条SQL语句的AWR报告，运行脚本awrsqrpt.sql。
 
    @$ORACLE_HOME/rdbms/admin/awrsqrpt.sql
 
---ע�� $ORACLE_HOME����Oracle����Ŀ¼��
+--注： $ORACLE_HOME代表Oracle的主目录。
 
 awr
 grant execute on DBMS_WORKLOAD_REPOSITORY to user;
 
 
-��װstatpack��
+安装statpack：
 
-��Ҫӵ��sysdbaȨ�޵��û����������ȴ����û����ռ�,����Ҫ�������ռ�����Ϣ���Ĵ�С�����ã�һ�����ó�500M�ȿ�
+需要拥有sysdba权限的用户操作，首先创建用户表空间,这需要看我们收集的信息量的大小来设置，一般设置成500M既可
 
 
 create tablespace perfstat '/home/oracle/perfstat.dbf' size 500m extent management local;  @$ORACLE_HOME/rdbms/admin/spcreate.sql
 
-SPCPKG complete. Please check spcpkg.lis for any errors.��Ҫ��������������ɹ���������鿴.lis�ļ���ִ�У������ؽ�,����ڴ�����ʱ����������ǿ���ɾ�����½�����
+SPCPKG complete. Please check spcpkg.lis for any errors.需要出现上述语句才算成功，否则请查看.lis文件并执行，进行重建,如果在创建的时候出错，我们可以删除重新建立：
 
-@$ORACLE_HOME/rdbms/admin/spdrop.sql�������½�������
-�ռ�ϵͳ��Ϣ:execute statspack.snap
-�鿴�ռ�ͳ����Ϣ�������
+@$ORACLE_HOME/rdbms/admin/spdrop.sql，在重新建立即可
+收集系统信息:execute statspack.snap
+查看收集统计信息的情况：
 
 
 SQL> select snap_id,snap_time,startup_time from stats$snapshot;
@@ -12171,20 +12171,20 @@ SNAP_ID SNAP_TIME STARTUP_T
 ---------- --------- ---------
 1 14-AUG-11 14-AUG-11  2 14-AUG-11 14-AUG-11
 
-�Զ�ͳ��ϵͳ�������@$ORACLE_HOME/rdbms/admin/spauto.sql
-�Ƴ��Զ��ռ���
+自动统计系统的情况：@$ORACLE_HOME/rdbms/admin/spauto.sql
+移除自动收集：
 
-�鿴job�ţ�
+查看job号：
 
 
 select job,job_user,priv_user,last_date,next_date,interval from user_jobs;
-ִ�У�
+执行：
 
 
 execute dbms_jobs.remove('job');
-���ͳ�����ϣ�
+清除统计资料：
 
----�޸�jobִ��ʱ��.
+---修改job执行时间.
 declare
 x number;
 begin
@@ -12304,7 +12304,7 @@ from (select djr.SID,
         where p.addr = s.paddr ) s
 where j.sid = s.sid;
 
-����һ��
+方法一：
 
 Killing the Oracle DBMS_JOB
 
@@ -12487,29 +12487,29 @@ To make sure everything is back to normal, re-run the above scripts to validate 
 
 Oracle have given us a great tool for scheduling activities within the database. As with many things inside the database, not everything goes as planned, nor are we given adequate tools to fix some of the problems we encounter. With the eleven steps outlined here, hopefully you will have increased your arsenal to handle those run away jobs that have given the best of us a few tense moments.
 --------------------------------------------------------------------------------------------------------------------------
-ע�⣺���Ĳ� ɾ������ϵͳ��εĽ��̻��̲߳�����Oracle��Linux/Unix�к�̨�������Խ��̷�ʽ��������Windowsϵ�в���ϵͳ�������̷߳�ʽ������
-����Windows������������ʾ��:
+注意：第四步 删除操作系统层次的进程或线程操作，Oracle在Linux/Unix中后台进程是以进程方式运作，在Windows系列操作系统中是以线程方式运作。
+对于Windows，启动命令提示符:
 orakill sid spid
-����sid�����ݿ�ʵ�������ƣ�������ǰ��ű��в������sid��
-����ͨ��һ���������õ���
+其中sid是数据库实例的名称，而不是前面脚本中查出来的sid。
+可以通过一下命令来得到：
 select name from v$database;
 select instance_name from v$instance;
 
 
 
-��������
+方法二：
 
-1���鿴����job;
+1、查看所有job;
 select * from dba_jobs;
-2���鿴�������е�job;
+2、查看正在运行的job;
 select * from dba_jobs_running;
-3������sid�����Ӧ��session;
+3、根据sid查出对应的session;
 select SID,SERIAL# from V$Session where SID='&SID';
-4��kill��Ӧ��session;
+4、kill对应的session;
 alter system kill session '&SID,&SERIAL';
-5����job��Ϊbroken;
+5、将job置为broken;
 exec dbms_job.broken('&JOB',true);
-6��sysdba�û�Ȩ��ɾ��job;
+6、sysdba用户权限删除job;
 delete from dba_jobs where JOB='&JOB';
 
 
@@ -12518,19 +12518,19 @@ delete from dba_jobs where JOB='&JOB';
 
 @$ORACLE_HOME/rdbms/admin/sptrunc.sql;
 
-statpack���ռ����ͣ�
+statpack的收集类型：
 
-level���𣺿����ռ����ݵ����͡�
+level级别：控制收集数据的类型。
 
-threshold���ޣ������ռ������ݵķ�ֵ��Ĭ�ϵ��ռ�������5�����ǿ��Ը��������ռ����ͣ�
+threshold门限：设置收集的数据的乏值，默认的收集类型是5，我们可以更改她的收集类型；
 
 execute statpack.snap(i_snap_level=>10,i_modify_parameter=>'true');
 
-ֻ�޸ı����ռ���ʽ��execute statpack.snap(i_snap_level=>10);
+只修改本次收集方式：execute statpack.snap(i_snap_level=>10);
 
-threshold���ޣ���������ֻӦ����stat$sql_summary���л�ȡsql��䡣
+threshold门限：快照门限只应用于stat$sql_summary表中获取sql语句。
 
-����ϵͳ���棺@$ORACLE_HOME/rdbms/admin/spreport.sql
+生成系统报告：@$ORACLE_HOME/rdbms/admin/spreport.sql
 statspack
 
 
@@ -12540,25 +12540,25 @@ statspack
 
 =======================================================================
 
-solaris�鿴�ڴ�ʹ���������
+solaris查看内存使用情况命令
 
 1>ps -efo pmem,uid,pid,ppid,pcpu,comm | sort -r
-��PS�����-oѡ����ʵ�֣���Щѡ���У�user ruser group rgroup uid ruid gid rgid pid ppid pgid sid taskid ctid pri opri pcpu pmem vsz rss osz nice class time etime stime zone zoneid f s c lwp nlwp psr tty addr wchan fname comm args projid project pset
-�������˼����man ps���鿴��
+用PS命令的-o选项来实现，这些选项有：user ruser group rgroup uid ruid gid rgid pid ppid pgid sid taskid ctid pri opri pcpu pmem vsz rss osz nice class time etime stime zone zoneid f s c lwp nlwp psr tty addr wchan fname comm args projid project pset
+具体的意思可以man ps来查看。
 
-�鿴solaris�ڴ�ʹ���������ռ���ڴ��С����
+查看solaris内存使用情况，按占用内存大小排序
 ps -efo pmem,uid,pid,ppid,pcpu,comm | sort -r
 
 pmem   The ratio of the process's resident  set size  to  the  physical  memory  on
        the machine, expressed as a percentage.
 
-����㲻֪������������ʲôѡ� ps help���ɡ�
+如果你不知道这个命令都带有什么选项， ps help即可。
 
 2> # prtconf -vp | grep Mem
-prtconf ������/usr/sbin�£����������Եõ����ڴ档��ʵҲ������ô�鷳��top���������Ϣ���ࡣ
+prtconf 命令在/usr/sbin下，这个命令可以得到总内存。其实也不用这么麻烦，top命令看到的信息更多。
 
 3> echo ::memstat | mdb -k
-���磺
+例如：
 # echo ::memstat | mdb -k
 Page Summary                Pages                MB  %Tot
 ------------     ----------------  ----------------  ----
@@ -12571,113 +12571,113 @@ Free (freelist)              3162                24    0%
 Total                     1029015              8039
 Physical                  1026087              8016
 
-������ͣ�
+具体解释：
 Kernel: Kernel pages
 Anon: anonymous pages (such as stack, heap, shared mem etc)
 Exec and libs: executables and libraries
 Page cache:  file cache
-Free (cachelist) + Free (freelist) = freemem(vmstat �е�freeֵ)
-���������������ʱ��Ƚϳ���
+Free (cachelist) + Free (freelist) = freemem(vmstat 中的free值)
+这个命令运行起来时间比较长。
 
 4>prstat -a
- *PID      �����̵Ľ��� ID��
- *USERNAME ����ʵ�û�����¼�����ƻ���ʵ�û� ID��
- *SIZE     �����̵��������ڴ��С���� K��M �� G Ϊ��λ��
- *RSS      �����̵�פ������С (RSS)���� K��M �� G Ϊ��λ��(RSS�ǽ���פ���ڴ�Ĵ�С��SIZE�ǽ�
-             ���ܹ��Ĵ�С��һ��SIZEҪ����RSS������SIZE����RSS�Ĳ��־ͷŵ���SWAP������)
- *STATE    �����̵�״̬ (cpuN/sleep/wait/run/zombie/stop)��
- *PRI      �����̵����ȼ������ָ����ʾ���ȼ����ߡ�
- *NICE     �����ȼ�������ʹ�õ� nice ֵ��ֻ���ض��������еĽ��̲��� nice ֵ��
- *TIME     �����̵��ۼ�ִ��ʱ�䡣
- *CPU      ������ʹ�õĵ�ǰ CPU ʱ��İٷֱȡ�����ڷ�ȫ������ִ�в��ҳ��豸�ǻ�ģ��ٷֱȽ�
-             zone�󶨵ĳ���ʹ�õĴ����������д������İٷֱȡ�
- *PROCESS  �����̵����ƣ�ִ���ļ������ƣ���
- *NLWP     �������� lwps ������
+ *PID      ：进程的进程 ID。
+ *USERNAME ：真实用户（登录）名称或真实用户 ID。
+ *SIZE     ：进程的总虚拟内存大小，以 K、M 或 G 为单位。
+ *RSS      ：进程的驻留集大小 (RSS)，以 K、M 或 G 为单位。(RSS是进程驻留内存的大小，SIZE是进
+             程总共的大小。一般SIZE要大于RSS，至于SIZE大于RSS的部分就放到了SWAP区里了)
+ *STATE    ：进程的状态 (cpuN/sleep/wait/run/zombie/stop)。
+ *PRI      ：进程的优先级。数字更大表示优先级更高。
+ *NICE     ：优先级计算中使用的 nice 值。只有特定调度类中的进程才有 nice 值。
+ *TIME     ：进程的累计执行时间。
+ *CPU      ：进程使用的当前 CPU 时间的百分比。如果在非全局域中执行并且池设备是活动的，百分比将
+             zone绑定的池所使用的处理器集合中处理器的百分比。
+ *PROCESS  ：进程的名称（执行文件的名称）。
+ *NLWP     ：进程中 lwps 的数量
 
-�м仹�и�������ϵͳƽ������(Load average)��Linuxϵͳ�У�uptime��w��top���������ϵͳƽ������load average�����.
-���������������ݱ�ʾ�ڹ�ȥ��1��5��15���������ж����е�ƽ������������ ֻҪÿ��CPU�ĵ�ǰ�������������3��ôϵͳ�����ܾ������õģ����ÿ��CPU������������5����ô�ͱ�ʾ��̨�������������������⡣load average/cpu_num< 3 �������ܲ����ġ�
-˳����һ�£����CPU״̬�鿴���mpstat
+中间还有个参数：系统平均负载(Load average)在Linux系统中，uptime、w、top等命令都会有系统平均负载load average的输出.
+命令输出的最后内容表示在过去的1、5、15分钟内运行队列中的平均进程数量。 只要每个CPU的当前活动进程数不大于3那么系统的性能就是良好的，如果每个CPU的任务数大于5，那么就表示这台机器的性能有严重问题。load average/cpu_num< 3 就是性能不错的。
+顺便提一下，多个CPU状态查看命令：mpstat
 
 5>vmstat 3 4
-��vmstat�����ʱ���ӵ�2�п�ʼ�������sr����ֵ�Ƚϴ󣬾ͱ����ڴ���š�
+看vmstat的输出时，从第2行开始看，如果sr列数值比较大，就表明内存紧张。
 
 
 6>top
 
 7>sar -r 5 5
-sar -r��ʾ��freemem��ʾ���ǿ��е�ҳ��������������k�������ģ�����ʾ����ֵ��vmstat��ࡣ
-������ʾ��free memory�������������ļ�����ռ�õĵ��ڴ棬����������û��ʹ�õ��ڴ档
+sar -r标示的freemem显示的是空闲的页面数，而不是用k来衡量的，它表示的数值与vmstat差不多。
+它们显示的free memory都还包括高速文件缓存占用的的内存，并不是真正没有使用的内存。
 
-����:vmstat��ʾ���ڴ���152528k,sar -r��ʾ����18933��pages��һ��page��Լ8k����18933����8�����ǲ��150M.��ʵ�����أ����������Ͽ��е��ڴ�ֻ��6��M����ר�ŵ�memtool�����ģ���������152M��
+比如:vmstat显示的内存有152528k,sar -r显示的是18933个pages，一个page大约8k，用18933乘以8，还是差不多150M.但实际上呢，真正意义上空闲的内存只有6个M（用专门的memtool测量的），而不是152M。
 
 
 
 
 1.top
 
-ʹ��Ȩ�ޣ�����ʹ����
+使用权限：所有使用者
 
-ʹ�÷�ʽ��top [-] [d delay] [q] [c] [S] [s] [i] [n] [b]
+使用方式：top [-] [d delay] [q] [c] [S] [s] [i] [n] [b]
 
-˵������ʱ��ʾprocess�Ķ�̬
+说明：即时显示process的动态
 
-d :�ı���ʾ�ĸ����ٶȣ������ڽ�̸ʽָ����( interactive command)��s
+d :改变显示的更新速度，或是在交谈式指令列( interactive command)按s
 
-q :û���κ��ӳٵ���ʾ�ٶȣ����ʹ��������superuser��Ȩ�ޣ���top��������ߵ�������ִ��
+q :没有任何延迟的显示速度，如果使用者是有superuser的权限，则top将会以最高的优先序执行
 
-c :�л���ʾģʽ����������ģʽ��һ��ֻ��ʾִ�е������ƣ���һ������ʾ������·��������S :�ۻ�ģʽ���Ὣ����ɻ���ʧ�����г�( dead child process )��CPU time�ۻ�����
+c :切换显示模式，共有两种模式，一是只显示执行档的名称，另一种是显示完整的路径与名称S :累积模式，会将己完成或消失的子行程( dead child process )的CPU time累积起来
 
-s :��ȫģʽ������̸ʽָ��ȡ��,����Ǳ�ڵ�Σ��
+s :安全模式，将交谈式指令取消,避免潜在的危机
 
-i :����ʾ�κ�����(idle)������(zombie)���г�
+i :不显示任何闲置(idle)或无用(zombie)的行程
 
-n :���µĴ�������ɺ󽫻��˳�top
+n :更新的次数，完成后将会退出top
 
-b :���ε�ģʽ������"n"����һ��ʹ�ã�����������top�Ľ�������������
+b :批次档模式，搭配"n"参数一起使用，可以用来将top的结果输出到档案内
 
 
 
-������
+范例：
 
-��ʾ����ʮ�κ��˳�;
+显示更新十次后退出;
 
 top -n 10
 
 
 
-ʹ���߽��������ý�̸ʽָ�������г�������:
+使用者将不能利用交谈式指令来对行程下命令:
 
 top -s
 
 
 
-��������ʾ���εĽ�����뵽����Ϊtop.log�ĵ�����:
+将更新显示二次的结果输入到名称为top.log的档案里:
 
 top -n 2 -b < top.log
 
-����һ��������linux traceroutewindows tracert���������൱����������·��
+另附一个命令简介linux traceroutewindows tracert两个命令相当，跟踪网络路由
 
 
 
 2.vmstat
 
-��������֮ǰ���۵��κ�ϵͳ�����ܱȽ϶��ǻ��ڻ��ߵģ����Ҽ��CPU�����ܾ�������3�㣬���ж��С�CPUʹ���ʺ��������л���������һЩ����CPU���ձ������Ҫ��
+正如我们之前讨论的任何系统的性能比较都是基于基线的，并且监控CPU的性能就是以上3点，运行队列、CPU使用率和上下文切换。以下是一些对于CPU很普遍的性能要求：
 
-1.����ÿһ��CPU��˵���ж��в�Ҫ����3�����磬�����˫��CPU�Ͳ�Ҫ����6��
+1.对于每一个CPU来说运行队列不要超过3，例如，如果是双核CPU就不要超过6；
 
-2.���CPU�����������У�Ӧ�÷������зֲ���
+2.如果CPU在满负荷运行，应该符合下列分布，
 
-a) User Time��65%��70%
+a) User Time：65%～70%
 
-b) System Time��30%��35%
+b) System Time：30%～35%
 
-c) Idle��0%��5%
+c) Idle：0%～5%
 
 3. mpstat
 
-�����������л�Ҫ���CPUʹ�������������CPUʹ�����������ֲ����������������л�Ҳ�ǿ��Խ��ܵġ�
+对于上下文切换要结合CPU使用率来看，如果CPU使用满足上述分布，大量的上下文切换也是可以接受的。
 
-���õļ��ӹ����У�vmstat, top,dstat��mpstat.
+常用的监视工具有：vmstat, top,dstat和mpstat.
 
 # vmstat 1
 
@@ -12691,23 +12691,23 @@ r b swpd free buff cache si so bi bo in cs us sy id wa
 
 0 0 104300 16800 95328 72200 0 0 0 0 1009 59 1 1 98 0
 
-r��ʾ���ж��еĴ�С��
+r表示运行队列的大小，
 
-b��ʾ����IO�ȴ���block���߳�������
+b表示由于IO等待而block的线程数量，
 
-in��ʾ�жϵ�������
+in表示中断的数量，
 
-cs��ʾ�������л���������
+cs表示上下文切换的数量，
 
-us��ʾ�û�CPUʱ�䣬
+us表示用户CPU时间，
 
-sys��ʾϵͳCPUʱ�䣬
+sys表示系统CPU时间，
 
-wa��ʾ����IO�ȴ�����CPU����idle״̬��ʱ�䣬
+wa表示由于IO等待而是CPU处于idle状态的时间，
 
-id��ʾCPU����idle״̬����ʱ�䡣
+id表示CPU处于idle状态的总时间。
 
-dstat���Ը���ÿһ���豸�������ж�����
+dstat可以给出每一个设备产生的中断数：
 
 # dstat -cip 1
 
@@ -12723,7 +12723,7 @@ usr sys idl wai hiq siq| 15 169 185 |run blk new
 
 0 0 100 0 0 0| 0    0  3 | 0 0 0
 
-���ǿ��Կ���������3���豸��15��169��185.�豸�����豸�ŵĹ�ϵ���ǿ��Բο��ļ�/proc/interrupts,����185��������eth1.
+我们可以看到这里有3个设备号15，169和185.设备名和设备号的关系我们可以参考文件/proc/interrupts,这里185代表网卡eth1.
 
 # cat /proc/interrupts
 
@@ -12749,9 +12749,9 @@ CPU0
 
 193: 0 IO-APIC-level uhci_hcd:usb1
 
-mpstat������ʾÿ��CPU������״��������ϵͳ��4��CPU�����ǿ��Կ�����
+mpstat可以显示每个CPU的运行状况，比如系统有4个CPU。我们可以看到：
 
-# mpstat �CP ALL 1
+# mpstat –P ALL 1
 
 Linux 2.4.21-20.ELsmp (localhost.localdomain) 05/23/2006
 
@@ -12767,21 +12767,21 @@ Linux 2.4.21-20.ELsmp (localhost.localdomain) 05/23/2006
 
 05:17:32 PM 3 0.00 0.00 0.00 100.00 0.00
 
-�ܽ��˵��CPU���ܼ�ذ������·��棺
+总结的说，CPU性能监控包含以下方面：
 
-���ϵͳ�����ж��У�ȷ��ÿһ��CPU�����ж��в�����3.
+检查系统的运行队列，确保每一个CPU的运行队列不大于3.
 
-ȷ��CPUʹ�÷ֲ�����70/30ԭ���û�70%��ϵͳ30%����
+确保CPU使用分布满足70/30原则（用户70%，系统30%）。
 
-���ϵͳʱ���������������ΪƵ���ĵ��Ⱥ͸ı����ȼ���
+如果系统时间过长，可能是因为频繁的调度和改变优先级。
 
-CPU Bound�������ǻᱻ�ͷ����������ȼ�����IO Bound�����ܻᱻ������������ȼ�����
+CPU Bound进程总是会被惩罚（降低优先级）而IO Bound进程总会被奖励（提高优先级）。
 
 
 
-4.prstat����
+4.prstat命令
 
-Ҫ��ʾϵͳ�ϵ�ǰ���еĽ��̺���Ŀ�ĸ���ͳ����Ϣ����ʹ�ô���-Jѡ���prstat���
+要显示系统上当前运行的进程和项目的各种统计信息，请使用带有-J选项的prstat命令：
 
 
 
@@ -12830,7 +12830,7 @@ PROJID   NPROC SIZE  RSS MEMORY     TIME CPU PROJECT
 Total: 87 processes, 205 lwps, load averages: 0.05, 0.02, 0.02
 
 
-Ҫ��ʾϵͳ�ϵ�ǰ���еĽ��̺�����ĸ���ͳ����Ϣ����ʹ�ô���-Tѡ���prstat���
+要显示系统上当前运行的进程和任务的各种统计信息，请使用带有-T选项的prstat命令：
 
 
 
@@ -12886,80 +12886,80 @@ Total: 65 processes, 154 lwps, load averages: 0.04, 0.05, 0.06
 
 --------------------------------------------------------------------------------
 
-ע�C
+注–
 
--J��-Tѡ���һ��ʹ�á�
+-J和-T选项不能一起使用。
 
 
 purge recyclebin;
 
-�м��ַ��������ֶ����ƻ���վ�������ɾ����Ϊ TEST ���ض���֮����Ҫ�ӻ���վ�������������ִ��
+有几种方法可以手动控制回收站。如果在删除名为 TEST 的特定表之后需要从回收站中清除它，可以执行
  
-PURGE TABLE TEST;����ʹ�������վ�е����ƣ�
-purge table "BIN$04LhcpndanfgMAAAAAANPw==$0";������ӻ���վ��ɾ���� TEST ��������ض�����������Լ���ȣ��Ӷ���ʡ�˿ռ䡣���ǣ����Ҫ�ӻ���վ������ɾ�������������ʹ��������������ɹ�����
-purge index in_test1_01;���������ɾ���������������Ŀ������ڻ���վ��
-����������£�Oracle �Զ�����ñ��ռ������ڸ��û��Ķ���
-���⣬�м��ַ��������ֶ����ƻ���վ�������ɾ����Ϊ TEST ���ض���֮����Ҫ�ӻ���վ�������������ִ��
+PURGE TABLE TEST;或者使用其回收站中的名称：
+purge table "BIN$04LhcpndanfgMAAAAAANPw==$0";此命令将从回收站中删除表 TEST 及所有相关对象，如索引、约束等，从而节省了空间。但是，如果要从回收站中永久删除索引，则可以使用以下命令来完成工作：
+purge index in_test1_01;此命令将仅仅删除索引，而将表的拷贝留在回收站中
+在这种情况下，Oracle 自动清除该表空间中属于该用户的对象。
+此外，有几种方法可以手动控制回收站。如果在删除名为 TEST 的特定表之后需要从回收站中清除它，可以执行
  
-PURGE TABLE TEST;����ʹ�������վ�е����ƣ�
-PURGE TABLE "BIN$04LhcpndanfgMAAAAAANPw==$0";������ӻ���վ��ɾ���� TEST ��������ض�����������Լ���ȣ��Ӷ���ʡ�˿ռ䡣���ǣ����Ҫ�ӻ���վ������ɾ�������������ʹ��������������ɹ�����
-purge index in_test1_01;���������ɾ���������������Ŀ������ڻ���վ�С�
- ��ʱ�ڸ��߼����Ͻ���������ܻ����á����磬������ϣ��������ռ� USERS �Ļ���վ�е����ж��󡣿���ִ�У�
+PURGE TABLE TEST;或者使用其回收站中的名称：
+PURGE TABLE "BIN$04LhcpndanfgMAAAAAANPw==$0";此命令将从回收站中删除表 TEST 及所有相关对象，如索引、约束等，从而节省了空间。但是，如果要从回收站中永久删除索引，则可以使用以下命令来完成工作：
+purge index in_test1_01;此命令将仅仅删除索引，而将表的拷贝留在回收站中。
+ 有时在更高级别上进行清除可能会有用。例如，您可能希望清除表空间 USERS 的回收站中的所有对象。可以执行：
  
-PURGE TABLESPACE USERS;��Ҳ��ϣ��ֻΪ�ñ��ռ����ض��û���ջ���վ�������ݲֿ����͵Ļ����У��û�������ɾ��������ʱ������ʱ���ַ������ܻ����á������Ը�����������޶�ֻ����ض����û���
-PURGE TABLESPACE USERS USER SCOTT;���� SCOTT ���û�����ʹ����������������Լ��Ļ���վ
-PURGE RECYCLEBIN;DBA ����ʹ��������������κα��ռ��е����ж���
-PURGE DBA_RECYCLEBIN;PURGE DBA_RECYCLEBIN;���Կ���������ͨ�����ֲ�ͬ��������������վ���������ض�����Ҫ��
+PURGE TABLESPACE USERS;您也许希望只为该表空间中特定用户清空回收站。在数据仓库类型的环境中，用户创建和删除许多临时表，此时这种方法可能会有用。您可以更改上述命令，限定只清除特定的用户：
+PURGE TABLESPACE USERS USER SCOTT;诸如 SCOTT 等用户可以使用以下命令来清空自己的回收站
+PURGE RECYCLEBIN;DBA 可以使用以下命令清除任何表空间中的所有对象
+PURGE DBA_RECYCLEBIN;PURGE DBA_RECYCLEBIN;可以看到，可以通过多种不同方法来管理回收站，以满足特定的需要。
 
-���ݿ���ά���ýű�
+数据库运维常用脚本
 
-Ŀ¼
+目录
  
-һ��DB ��ؽű�
-1�����TEMPʹ�����
-	����temp���ռ䣬�½����׼����ʼֵΪ�����ļ��ܺ͵�2%������ֵ����2G�����ʼ����Ϊ2G�����ֵ���ܳ��������ļ��ܺ͵�10%��500G�Ľ�С�ߣ��������temp���ռ䲻�㱨����"ORA-1652: unable to extend temp segment by 64 in tablespace TEMP"��ʱ���ɲ�������sql���temp����Ĵ�С���Լ���ǰtemp���ģ�����11g�Ŀ�Ҳ�ɲ�ѯ��ʷʱ��temp���������
- 	��ѯtemp���ռ�ʹ����
-
- 
- 	��ѯtemp�ռ���DB�ռ�������
- 	��ѯtemp�ռ�ʹ�ý϶��session
-
+一、DB 监控脚本
+1、监控TEMP使用情况
+	关于temp表空间，新建库标准：初始值为数据文件总和的2%，若该值低于2G，则初始设置为2G；最大值不能超过数据文件总和的10%和500G的较小者；如果出现temp表空间不足报警（"ORA-1652: unable to extend temp segment by 64 in tablespace TEMP"）时，可采用下面sql检查temp分配的大小，以及当前temp消耗，对于11g的库也可查询历史时段temp消耗情况。
+ 	查询temp表空间使用率
 
  
-ע�������ݿⱨtemp���ռ䲻��ʱ������temp���ߵ�sql��temp��Դ���䲻�����ֹ��������sql�����ڲ����ݿ⵱ǰtemp�������������11g�汾�����ݿ����ͨ����
-ѯASH��ͼ��ȡtemp���Ĺ��ߵ�sql��
+ 	查询temp空间与DB空间分配比例
+ 	查询temp空间使用较多的session
+
 
  
-2��UNDO��ع���
-��1�����undoʹ�����
-	���ݿ�undo�淶��δ���Զ���չ��ռ��undo�����session���б�����ʾ
+注：当数据库报temp表空间不足时，消耗temp过高的sql因temp资源分配不足而终止，而上述sql仅用于查数据库当前temp消耗情况；对于11g版本的数据库可以通过查
+询ASH视图获取temp消耗过高的sql。
+
+ 
+2、UNDO监控管理
+（1）监控undo使用情况
+	数据库undo规范：未开自动扩展，占用undo过多的session会有报警提示
 
 
-��2��killռ��undo��session
-����kill session������ע�����¼��㣺
- 	Undoʹ��С��250M��ֵ���鳤ȷ�Ϻ�kill��
- 	Undoʹ�ô���250M������������DBAȷ�ϡ�
+（2）kill占用undo的session
+对于kill session操作需注意以下几点：
+ 	Undo使用小于250M需值班组长确认后kill；
+ 	Undo使用大于250M需升级到主管DBA确认。
 
 
 
-��3����ѯ�ع�����
+（3）查询回滚进度
 
 
 
 
-3�����redo��ʹ�����
-	���ݿ����¹淶��redo������6��redo����С����[200,1000]M֮�䣬���������������redo��Դʹ�ý�������standby redo������online redo��һ�飬��Сһ�¡�
- 	��ѯprimary��redoʹ�����
+3、监控redo的使用情况
+	数据库最新规范：redo需至少6组redo，大小介于[200,1000]M之间，大批量事物会引发redo资源使用紧张现象；standby redo组数比online redo多一组，大小一致。
+ 	查询primary端redo使用情况
 
 
- 	��ѯredo�����϶��session
+ 	查询redo产生较多的session
 
 
- 	��ѯstandby��redoʹ�����
+ 	查询standby端redo使用情况
 
 
- 	Redo����
- 	��������
+ 	Redo操作
+ 	常用命令
 alter system switch logfile;
 alter system archive log current;
 alter system checkpoint;
@@ -12972,7 +12972,7 @@ to group 3;
  	add log group
 ALTER DATABASE ADD LOGFILE THREAD 1 GROUP 4 ('/paic/hq/sales/data/oradata/sales/redo08.log', '/paic/hq/sales/data/oradata/sales/redo09.log')
 size 500M
--- <reuse> �ļ����ڵĻ�����reuse ;
+-- <reuse> 文件存在的话采用reuse ;
 
 alter database add <standby> logfile thread 1 group 7 ('/paic/mis/bkcst/data/oradata/bkcst/dgredo07.log' size 500M);
 --for 11g asm
@@ -12993,64 +12993,64 @@ alter database drop logfile group 4;
  	clear logfile
 alter database clear logfile '/paic/hq/sales/data/oradata/sales/redo08.log';
 
-4����ر��ռ�ʹ�����
-	���ռ��ʹ���ʼ�أ����ռ�ʹ���ʳ���85%�򱨾�����ʱ��Ҫ����һ�������������ļ�����������������������
+4、监控表空间使用情况
+	表空间的使用率监控：表空间使用率超过85%则报警，此时需要添加一定数量的数据文件以满足数据量的增长需求。
 
 
-5����ز���������������session
+5、监控产生大量物理读的session
 
 
-6��FS����ش���
-	����FS�������������رոþ��ϵ�datafile��tempfile���Զ���չ��ͬʱ�½���Ӧ��С��datafile��tempfile
-
-
-
-
-7�����active�ĳ�����
-	���ڲ�ͬ���ݿⳤ���ӵĶ��岻ͬ���������п�active��session�ĳ����Ӷ��������ʱ���̣ܶ���epcis���ݿ���ʱ��Ҫ�ܱ��������Ӷ��������ʱ����ܳ�
-
-
-8���ڴ���
-	���ճ������У����ݿ��ڴ���ر������� ora-4031�����ڳ������⣬���¿ɰ�����ϴ������⡣
-
- 	Ӳ����
-���ݿ�Ӳ��������ᵼ��ռ�ô�����library cache���������ݿ��ڴ治�㡣
-
-
- 	��ѯĳ���ڴ�����ʹ�����
-
-
-
- 	Shared pool�ӳ�
+6、FS卷监控处理
+	对于FS卷报警处理，关闭该卷上的datafile和tempfile的自动扩展，同时新建相应大小的datafile和tempfile
 
 
 
 
+7、监控active的长连接
+	对于不同数据库长连接的定义不同，比如银行库active的session的长连接定义的连接时长很短，而epcis数据库有时需要跑报表则长连接定义的连接时长则很长
+
+
+8、内存监控
+	在日常工作中，数据库内存相关报错（如 ora-4031）属于常见问题，以下可帮助诊断此类问题。
+
+ 	硬解析
+数据库硬解析过多会导致占用大量的library cache，导致数据库内存不足。
+
+
+ 	查询某个内存区的使用情况
 
 
 
-9���洢io���ܼ��
+ 	Shared pool子池
 
 
 
 
 
-�������ݿ�����������
-1���ȴ��¼�
-
-2����
-	���ݿ�����Ϊ���������ڴ�������latch����������ݿ���ڴ������ȴ��¼�����Ӱ�쵽���ݿ����ܡ�
- 	��ѯ���ȴ�holder-waiter
 
 
- 	��ѯ���ȴ�Դͷ
+9、存储io性能监控
 
 
- 	��ѯ������
 
 
- 	library cache pin�ȴ��¼�
-�ں�̨sys�û���ִ�У�
+
+二、数据库问题诊断相关
+1、等待事件
+
+2、锁
+	数据库锁分为对象锁和内存锁（闩latch），如果数据库存在大量锁等待事件，将影响到数据库性能。
+ 	查询锁等待holder-waiter
+
+
+ 	查询锁等待源头
+
+
+ 	查询对象锁
+
+
+ 	library cache pin等待事件
+在后台sys用户下执行：
 select s.sid || ',' || s.serial# sid_serial,
        kglpnmod "mode held",
        kglpnreq "request"
@@ -13060,7 +13060,7 @@ select s.sid || ',' || s.serial# sid_serial,
                      from v$session_wait
                     where sid = &SID_IN_LIBRARY_CACHE_PIN);
 
-���ߣ�
+或者：
 select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  from x$kglpn , v$session
  where KGLPNHDL in (select p1raw from v$session_wait
@@ -13068,7 +13068,7 @@ select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  and KGLPNMOD <> 0
  and v$session.saddr=x$kglpn.kglpnuse ;
 
-���ߣ�
+或者：
  select sql_text from v$sqlarea
   where (v$sqlarea.address,v$sqlarea.hash_value)
       in (select sql_address,sql_hash_value from v$session where sid in (
@@ -13078,20 +13078,20 @@ select sid Holder ,KGLPNUSE Sesion , KGLPNMOD Held, KGLPNREQ Req
  where wait_time=0 and event like 'library%')
  and KGLPNMOD <> 0
  and v$session.saddr=x$kglpn.kglpnuse );
-ע��
-�鵽held>0 ��sid�����local=no ���빵ͨ�Ƿ����kill���������
+注：
+查到held>0 的sid，如果local=no ，请沟通是否可以kill掉这个进程
 
-Wait_timeֵҲ�����ֺ��壺
-ֵ>0�����һ�εȴ�ʱ��(��λ��10ms)����ǰδ�ڵȴ�״̬��
-ֵ=0��session���ڵȴ���ǰ���¼���
-ֵ=-1�����һ�εȴ�ʱ��С��1��ͳ�Ƶ�λ����ǰδ�ڵȴ�״̬��
-ֵ=-2��ʱ��ͳ��״̬δ��Ϊ���ã���ǰδ�ڵȴ�״̬��
+Wait_time值也有四种含义：
+值>0：最后一次等待时间(单位：10ms)，当前未在等待状态。
+值=0：session正在等待当前的事件。
+值=-1：最后一次等待时间小于1个统计单位，当前未在等待状态。
+值=-2：时间统计状态未置为可用，当前未在等待状态。
 
-KGLLKMOD NUMBER ---��������ģʽ(0Ϊno lock/pin held�o1Ϊnull,2Ϊshare�o3Ϊexclusive)
-KGLLKREQ NUMBER ---��������ģʽ(0Ϊno lock/pin held�o1Ϊnull,2Ϊshare�o3Ϊexclusive)
+KGLLKMOD NUMBER ---持有锁的模式(0为no lock/pin held﹐1为null,2为share﹐3为exclusive)
+KGLLKREQ NUMBER ---请求锁的模式(0为no lock/pin held﹐1为null,2为share﹐3为exclusive)
 
  	Cache buffers chains
-��ѯ�ȴ��¼��������Ƿ���latch free��
+查询等待事件的类型是否是latch free：
 select sw.sid || ',' || s.serial# sids,
        s.username,
        sw.event,
@@ -13111,11 +13111,11 @@ select sw.sid || ',' || s.serial# sids,
    and sw.event not like 'PX Deq%'
  order by sw.event;
 
-�����latch free��������p2�ֶε�ֵ��ʾlatch number���ݴ˿��Բ����ʲôԭ�������latch free��
+如果是latch free，则其中p2字段的值表示latch number，据此可以查出是什么原因引起的latch free：
 select * from v$latchname where latch#=&P2;
 
-����ȴ���latch��cache buffers chains������Ҫ����p1raw��������õ�hot block��segment���ƣ�
---�ں�̨sys�û���ִ�У������ȿ�
+如果等待的latch是cache buffers chains，则需要根据p1raw查出被争用的hot block和segment名称：
+--在后台sys用户下执行，查找热块
 select /*+ RULE */
        e.owner || '.' || e.segment_name segment_name,
        e.extent_id extent#,
@@ -13137,7 +13137,7 @@ from dba_extents e,
     and e.block_id<=b.dbablk
     and e.block_id+e.blocks>b.dbablk;
 
---���Ҳ����ȿ��sql��
+--查找产生热块的sql：
 column segment_name format a35
 select /*+ rule */ hash_value,sql_text from v$sqltext
 where (hash_value,address ) in (
@@ -13152,20 +13152,20 @@ where (hash_value,address ) in (
     and b.segment_type='TABLE')
     order by hash_value,address,piece;
 
-�ҵ�latch holder����session��sid��serial#�������Ƿ����kill�����������ݿ��ѹ����
---���latchhold�仯�÷ǳ��죬ÿˢ��һ�ζ���仯
+找到latch holder所在session的sid和serial#，考虑是否可以kill掉，缓解数据库的压力：
+--这个latchhold变化得非常快，每刷新一次都会变化
 select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
   from v$session a, v$latchholder b
  where a.sid = b.sid;
 
  	Db file sequential read
---db file sequential read�ȴ�ʱ��������ִ�ж��������ع���undo���Σ��ͱ���������rowid�����ʣ��������ļ��������ļ�ͷ�ĵ��������SQL��䣨�û��͵ݹ飩������
---���ȴ��¼�Ϊdb file sequential readʱ��P1��Ӧfile_id��P2��Ӧ&block_id
---ͨ��������������Բ�ѯ�����ڵȴ�ʲô����
+--db file sequential read等待时间是由于执行对索引，回滚（undo）段，和表（当借助rowid来访问），控制文件和数据文件头的单块读操作SQL语句（用户和递归）引发。
+--当等待事件为db file sequential read时，P1对应file_id，P2对应&block_id
+--通过下面这个语句可以查询到正在等待什么对象
 
 
  	Db file scattered read
---���ȴ��¼���db file scattered readʱ�������������ִ�мƻ���
+--当等待事件是db file scattered read时，用以下语句检查执行计划：
    select hash_value,child_number,
    lpad(' ',2*depth)||operation||' '||options||decode(id,0,substr(optimizer,1,6)||' Cost='||to_char(cost)) operation,
    object_name object,cost,cardinality,round(bytes/1024) kbytes
@@ -13176,16 +13176,16 @@ select a.username, a.sid, a.serial#, a.status, b.pid, b.laddr, b.name
    and b.event='db file scattered read')
    order by hash_value,child_number,id;
 
-3�����ӷ籩
- 	��ѯ���ݿ��������
+3、连接风暴
+ 	查询数据库连接情况
 
- 	ͳ��session������
+ 	统计session连接数
 
- 	������־����perl�ű���ʹ��˵��
+ 	监听日志分析perl脚本及使用说明
 
 
-4��Trace
-	ͨ���������ַ�ʽ��ȡtracefile�����֡�
+4、Trace
+	通过以下两种方式获取tracefile的名字。
  	Oradebug
 oradebug setmypid/ oradebug setospid 1525
 oradebug tracefile_name
@@ -13219,10 +13219,10 @@ SELECT s.sid, s.server,
    AND s.type = 'USER'
  ORDER BY s.sid;
 
-����SQL�Ż����
-1��ִ�мƻ�
- 	9i�汾��ʽ�����ִ�мƻ�
-	--������sql_hash_value
+三、SQL优化相关
+1、执行计划
+ 	9i版本格式化输出执行计划
+	--需输入sql_hash_value
 set feedback off
 set long 99999
 col "ACCESS PREDICATES" for a80
@@ -13266,23 +13266,23 @@ set feedback on
 undefine hash_value
 
  	Explain plan for
-	--����Ԥ����ִ�мƻ�����ʾΪ����sql�������ִ�мƻ�,����ִ�и����
-	EXPLAIN PLAN set statement_id='MYSQL1' FOR  &SQL���
-	--��ʽ�������
+	--或者预生成执行计划：表示为以下sql语句生成执行计划,不会执行该语句
+	EXPLAIN PLAN set statement_id='MYSQL1' FOR  &SQL语句
+	--格式化输出：
 	select * from table(dbms_xplan.display('plan_table',null,'serial'));
 
  	DBMS_XPLAN
 	--for 10g or high version
 	select * from table(dbms_xplan.display_cursor( <sql_id> , <cursor_child> , <format> ));
 	select * from table(dbms_xplan.display_awr( <sql_id> , <plan_hash_value> , <db_id> , <format>));
- 	��ѯ�󶨱���ȡֵ
-2��ͳ����Ϣ
+ 	查询绑定变量取值
+2、统计信息
 
-ʹ�ð󶨱��������µ�ִ�мƻ�
+使用绑定变量情形下的执行计划
 
 [sql] view plaincopyprint 
-01.SQL> variable v_id number;   -->����󶨱���
-02.SQL> exec :v_id:=900;        -->���󶨱�����ֵ
+01.SQL> variable v_id number;   -->定义绑定变量
+02.SQL> exec :v_id:=900;        -->给绑定变量赋值
 03.
 04.PL/SQL procedure successfully completed.
 05.
@@ -13292,13 +13292,13 @@ undefine hash_value
 09.--------------
 10.        446549
 11.
-12.SQL> select * from table(dbms_xplan.display_cursor());   -->��ʱ��һ��SQL�������ȫ��ɨ�裬��SQL_ID Ϊ7qcp6urqh7d2j
+12.SQL> select * from table(dbms_xplan.display_cursor());   -->此时上一条SQL语句走了全表扫描，其SQL_ID 为7qcp6urqh7d2j
 
 
 
 
 
-3��SQL Cost
+3、SQL Cost
  	For 9i
 select to_char(sp.snap_time,'YYYY-MM-DD HH24:MI:SS') as snap_time,
        sq.hash_value,
@@ -13364,33 +13364,33 @@ select *
                   s.parsing_schema_name)
  order by per_buffer_gets desc;
 
-�ġ�CRS��������
-1��CRS  start or stop
-#crsctl start crs   --�򿪼�ȺCRS�������
-#crsctl stop crs   --�ر�
+四、CRS常用命令
+1、CRS  start or stop
+#crsctl start crs   --打开集群CRS命令程序
+#crsctl stop crs   --关闭
 
-2��CRS service
-	$ crs_start -all --�������е�crs����
-$ crs_stop -all --ֹͣ���е�crs����
-$ crsctl start crs --����crs����
-$ crsctl stop crs --ֹͣcrs����
-$ srvctl start|stop|status nodeapps -n <node_name>   -- start/stop/check���е�nodeapps�����磺VIP, GSD, listener, ONS
-$ srvctl stop listener -n host1(host2) --ֹͣĳ���ڵ��listener
-$ srvctl start|stop|status instance -d <db_name> -i <instance_name>	 -- start/stop/checkָ����ʵ��
-$ srvctl start|stop|status database -d <db_name> 		 -- start/stop/check���е�ʵ��
-$ crs_stop  ��Դ��(ora.ORCL.ORATEST.cs) ͣһ����Դ���������ͣ����Դ״̬ΪUNKNOWN����Դ
+2、CRS service
+	$ crs_start -all --启动所有的crs服务
+$ crs_stop -all --停止所有的crs服务
+$ crsctl start crs --启动crs服务
+$ crsctl stop crs --停止crs服务
+$ srvctl start|stop|status nodeapps -n <node_name>   -- start/stop/check所有的nodeapps，比如：VIP, GSD, listener, ONS
+$ srvctl stop listener -n host1(host2) --停止某个节点的listener
+$ srvctl start|stop|status instance -d <db_name> -i <instance_name>	 -- start/stop/check指定的实例
+$ srvctl start|stop|status database -d <db_name> 		 -- start/stop/check所有的实例
+$ crs_stop  资源名(ora.ORCL.ORATEST.cs) 停一个资源，此命令可停到资源状态为UNKNOWN的资源
 
-3��CRS manage
-	$ srvctl setenv database -d <db_name> -t   --����ȫ�ֻ����ͱ���
-	$ srvctl remove database -d <db_name>   --��OCR��ɾ�����е����ݿ�
-	$ srvctl add database -d <db_name> -o <oracle_home> --��OCR������һ�����ݿ�
-	$ srvctl add instance -d <db_name> -i <instance_name> -n <node n>   --��OCR������һ�����ݿ��ʵ��
-	$ srvctl add asm -n <node_name> -i <asm_inst_name> -o <oracle_home>  --��OCR������һ��ASMʵ��
-	$ srvctl add service -d <db_name>  --����һ��service
+3、CRS manage
+	$ srvctl setenv database -d <db_name> -t   --设置全局环境和变量
+	$ srvctl remove database -d <db_name>   --从OCR中删除已有的数据库
+	$ srvctl add database -d <db_name> -o <oracle_home> --向OCR中添加一个数据库
+	$ srvctl add instance -d <db_name> -i <instance_name> -n <node n>   --向OCR中添加一个数据库的实例
+	$ srvctl add asm -n <node_name> -i <asm_inst_name> -o <oracle_home>  --向OCR中添加一个ASM实例
+	$ srvctl add service -d <db_name>  --添加一个service
 
-4��crs log
-$ORA_CRS_HOME/log/�ڵ���������rachost01)/racg
-$ORA_CRS_HOME/log/�ڵ�������(rachost01)/crsd
+4、crs log
+$ORA_CRS_HOME/log/节点主机名（rachost01)/racg
+$ORA_CRS_HOME/log/节点主机名(rachost01)/crsd
 $ORA_CRS_HOME/crs/init
 $ORA_CRS_HOME/css/log
 $ORA_CRS_HOME/css/init
@@ -13398,14 +13398,14 @@ $ORA_CRS_HOME/evm/log
 $ORA_CRS_HOME/evm/init
 $ORA_CRS_HOME/srvm/log
 
-�塢Dataguard
-1��Primary�˲�ѯDG�����
+五、Dataguard
+1、Primary端查询DG步情况
 col DEST_NAME for a20;
 col RECOVERY_MODE for a15;
 select * from v$archive_dest_status
 where destination is not null;
 
-2��MRP���̿���
+2、MRP进程控制
 	alter database recover managed standby database cancel;
 alter database recover managed standby database disconnect from session;
 alter database recover managed standby database parallel 32 disconnect from session;
@@ -13414,14 +13414,14 @@ alter database recover managed standby database using current logfile disconnect
 alter database recover managed standby database delay 1440 disconnect from session;
 select PROCESS,STATUS,CLIENT_PROCESS,GROUP#,THREAD#,SEQUENCE# , BLOCK# from  v$managed_standby where process='MRP0';
 
-3��Archivelogע��
+3、Archivelog注册
 	alter database register  or replace logfile '/paic/hq/paces/log/spaces/paces_0000019850.arc';
-	--����sql��������ע�ᵱǰĿ¼�������ļ�
+	--下面sql用于生成注册当前目录下所有文件
 	ls -l *.arc | awk "{print \"alter database register or replace logfile '`pwd`/\"\$9\"';\"}">logreg.sql
 
-4����ѯrecover����
+4、查询recover进度
 	select * from v$recovery_progress;
-5��DG������
+5、DG监控语句
 select  a.dg_sid DG_SID,
         to_char(a.stat_date,'MM-DD HH24:MI') mon_time,
         c.db_dba_flag ,
@@ -13440,12 +13440,12 @@ where a.dg_id=b.dg_id and b.db_id=c.db_id
       AND a.stat_date =(SELECT MAX(stat_date) FROM db_dg_stat d WHERE d.dg_id = a.dg_id)
       and a.dg_sid=upper('&dg_sid')
 order by a.apply_time_differ desc,trunc(a.stat_date,'HH'),a.last_dg_status desc,a.apply_log_differ desc;
-6��FRA��ʹ��
-	prompt �Cͳ��FRA��ʹ����
+6、FRA区使用
+	prompt –统计FRA区使用率
 col sumused for a10;
 select sum(PERCENT_SPACE_USED)||'%' as sumused from v$flash_recovery_area_usage;
 
---��ѯFRA��ʹ�����
+--查询FRA区使用情况
 select b.TOTAL_G,
        b."TOTAL_G" * (1 - a."USED") "FREE_G",
        b."TOTAL_G" * (1 - a."USED" + a."RECLAIMABLE") "free+reclaimable_G",
@@ -13457,9 +13457,9 @@ select b.TOTAL_G,
           from v$parameter
          where name = 'db_recovery_file_dest_size') b;
 
-����Datadump
-1��resume
-	������������ʱ�趨resume���������Ա�����ռ����ⱨ����ֹ��
+六、Datadump
+1、resume
+	在做导出或导入时设定resume参数，可以避免因空间问题报错终止。
 userid='/ as sysdba'
 OWNER=EIMCDE,EIMDATA,EIMETL,EIMJOB,EIMLOGTMP,EIMMONOPR,EIMOPR
 file=/paic/hq/pa18/data2/oradata/tmp/exp_01.dmp  exp_02.dmp  exp_03.dmp exp_04.dmp exp_05.dmp
@@ -13473,18 +13473,18 @@ filesize=10G
 rows=y
 resumable=y   ---can not query the process of exp or imp if no the parameter
 resumable_timeout=20000000   --set the durning time of resume
-ͨ������sql���Բ�ѯ����������
+通过以下sql可以查询到导数进度
 
 
-2��compress
-	����11g�汾�ṩ�˹���ǿ��ĵ���ѹ�����ܣ�Ĭ��ѹ���㷨���Ժܴ�̶��϶�������ѹ��������ѹ�������ߴ�80%��������10g��Ȼ���ṩѹ�����ܣ�����ѹ��Ч���ܲ����ԡ�
-3��cross_version
-	�������ݱã��Ӹ߰汾���Ͱ汾����ʱ�����ڵ���ʱ����versionѡ�ȡֵΪĿ������COMPATIBLE��ȡֵ��
+2、compress
+	对于11g版本提供了功能强大的导出压缩功能，默认压缩算法可以很大程度上对数据做压缩导出，压缩比例高达80%；而对于10g虽然已提供压缩功能，但是压缩效果很不明显。
+3、cross_version
+	对于数据泵，从高版本到低版本导入时，需在导出时添加version选项，取值为目标库参数COMPATIBLE的取值。
 
 	version=
 
-4��table_join
-	���ڴ��ڱ����ӵ����ݵ���
+4、table_join
+	对于存在表连接的数据导出
 userid="/ as sysdba"
 directory=dp_dir
 dumpfile=expdp_0729_%U.dmp
@@ -13508,8 +13508,8 @@ polapdata.AUTO_POLICY_BASE_INFO:"where (last_begin_date>=to_date('20120101','YYY
 POLAPDATA.STAND_AUTO_EARNED_LJ:"where stat_ym like '2009%'"
 POLAPDATA.WJ_T_CARCASE_PLYRLT_HIS:"where run_time>=to_date('20090101','yyyymmdd')  and run_time<to_date('20100101','yyyymmdd')"
 )
-5��muti_where
-	��expdp����ʱ��������������������������ͬ����ɲ���������ʽ������
+5、muti_where
+	在expdp导出时，如果导出多个表，而且条件不同，则可采用下述方式导出。
 	userid="/ as sysdba"
 directory=lmw
 dumpfile=exp_20120216_where_%U.dmp
@@ -13551,8 +13551,8 @@ polapdata.KF_DEST_NL_TIME_EFFECT:"where LCD>=TO_DATE('20120101','YYYYMMDD')"
 polapdata.ICSS_T_QUERY_COUNTER:"where LCD>=TO_DATE('20120101','YYYYMMDD')"
 polapdata.KF_CD_QUESTION_DEST:"where LCD>=TO_DATE('20120101','YYYYMMDD')"
 )
-6��multiuser-multitable
-	��������û��µĶ������
+6、multiuser-multitable
+	导出多个用户下的多个表。
 userid='/ as sysdba'
 directory=dump_dir
 dumpfile=expdp_elis_tables_2011115_%U.dmp
@@ -13563,25 +13563,25 @@ include=table:"in ('POS_USER_OPERATION_RELATION','POS_ROLE_OPERATION_RELATION','
 parallel=4
 job_name=expdp_elis_tables_2011115
 
-�ߡ�Backup&Restore
-1�����ݼ��
- 	���rman�������
---��sql������ȡ������û�б�����rman���ݵ�ʱ��
+七、Backup&Restore
+1、备份检查
+ 	检查rman备份情况
+--该sql是来获取正常的没有报错的rman备份的时间
 SELECT /*+ RULE */ OBJECT_TYPE BACKUP_TYPE, (SYSDATE-MAX(END_TIME)) DAYS_SINCE_BACKUP,
  MAX(END_TIME) LAST_SUCCESSFUL_BACKUP
  FROM SYS.V_$RMAN_STATUS  WHERE STATUS = 'COMPLETED' AND OPERATION='BACKUP' GROUP BY OBJECT_TYPE;
 
---���sql��������ȷ�ϵ�ǰrman�ı�����������Կ����ܶ���COMPLETED WITH WARNINGS�������foglight��Ϊ���쳣�ġ�
+--这个sql可以用来确认当前rman的备份情况，可以看到很多是COMPLETED WITH WARNINGS。这个被foglight认为是异常的。
   select a.OBJECT_TYPE,a.end_time,a.status,a.OPERATION,b.recid,b.output from v$rman_status a,v$rman_output b
    where a.OBJECT_TYPE='ARCHIVELOG' and a.recid=b.recid(+) order by 2 desc;
---output Ϊ����ı�����Ϣ��һ��Ϊ�Ѿ����ݣ����µ��쳣��
-select * from v$archived_log where backup_count=1;  --�鿴��־�ı������
-select * from v$rman_configuration;                --�鿴rman�����������Ҳ���Ե�½����������catlog��show all��ѯ�����ŵ���Ϣ
+--output 为输出的报错信息，一般为已经备份，导致的异常。
+select * from v$archived_log where backup_count=1;  --查看日志的备份情况
+select * from v$rman_configuration;                --查看rman的配置情况，也可以登陆到主机连接catlog，show all查询更相信的信息
 select OBJECT_TYPE,end_time,status,OPERATION,recid from v$rman_status where OBJECT_TYPE='ARCHIVELOG' order by 2 desc;
---�鿴rman�ļ�¼���
+--查看rman的记录情况
 
-2������ / �ָ�
-��1��backup database
+2、备份 / 恢复
+（1）backup database
 rman
 RMAN> connect target /
 RMAN> show all;
@@ -13594,15 +13594,15 @@ ALLOCATE CHANNEL ch03 TYPE disk;
 CONFIGURE DEVICE TYPE DISK BACKUP TYPE TO COMPRESSED BACKUPSET PARALLELISM 4;
 CONFIGURE BACKUP OPTIMIZATION ON;
 SQL 'ALTER SYSTEM ARCHIVE LOG CURRENT';
-BACKUP section size 4096m FILESPERSET 4 FORMAT='<����Ŀ¼>/back_%d_%s_%p_%t' DATABASE;
-BACKUP CURRENT CONTROLFILE [For standby] FORMAT='<����Ŀ¼>/<$ORACLE_SID>_ctl.f';
+BACKUP section size 4096m FILESPERSET 4 FORMAT='<备份目录>/back_%d_%s_%p_%t' DATABASE;
+BACKUP CURRENT CONTROLFILE [For standby] FORMAT='<备份目录>/<$ORACLE_SID>_ctl.f';
 release channel ch00;
 release channel ch01;
 release channel ch02;
 release channel ch03;
 }
 RMAN> list backup;
-��2��image copy
+（2）image copy
 ORACLE_SID=$ORACLE_SID
 export ORACLE_SID
 ORACLE_HOME=/stg/oracle/otzj11g/app/oracle/product/11.2.0
@@ -13631,7 +13631,7 @@ release channel ch7;
 release channel ch8;
 }
 EOF
-��3������������scn��
+（3）增备（基于scn）
 rman target / <<EOF
 run
 {
@@ -13669,11 +13669,11 @@ run
 exit
 EOF
 
-�ˡ�Storage
-1����ѯasm����ʹ�����
+八、Storage
+1、查询asm磁盘使用情况
 
 
-2����ѯ asm disk��Ϣ
+2、查询 asm disk信息
 select d.NAME AS DG_NAME
          ,t.DISK_NUMBER
          ,t.NAME AS DISK_NAME
@@ -13684,10 +13684,10 @@ select d.NAME AS DG_NAME
   where t.GROUP_NUMBER=d.GROUP_NUMBER
   order by t.GROUP_NUMBER,t.DISK_NUMBER ;
 
-3����ѯ asm disk reblance ����
+3、查询 asm disk reblance 进度
 select * from v$asm_operation;
 
-4�������鶨λ
+4、坏块检查定位
 
 asm  controlfile   rman
 
@@ -13698,120 +13698,120 @@ restore controlfile to '+DG1/orcl/controlfile/current.307.724358011' from '+DG1/
 restore controlfile to '+DG1/orcl/controlfile/current' from '+DG1/orcl/controlfile/Current.278.723200291' ;
 
 
-��oracle�����Ŀ����ļ���ΪԴ�ָ�����, �൱�ڸ���.
+用oracle自身的控制文件作为源恢复即可, 相当于复制.
 
 
-ע��:restore�����Լ������Ŀ����ļ��������asm�Զ�����,�������ֲ��ᰴ������������,��asmcmd��ȷ������ȷ�Ŀ����ļ���,�ٸ��µ�pfile��.
+注意:restore后你自己命名的控制文件名如果是asm自动管理,可能名字不会按你命的名字来,在asmcmd中确认下正确的控制文件名,再更新到pfile中.
 
 
 
 
-�š�Install & upgrade
+九、Install & upgrade
 
 $ORACLE_HOME/oui/bin/runInstaller  -invPtrLoc $HOME/../app/oraInst.loc -silent -clone ORACLE_HOME="/paic/bank/kiss/data/app/oracle/product/10.2.0" ORACLE_HOME_NAME="oracle_home_skiss120227"
 
-��װ��������
-���֮ǰ��ORACLE_HOME
+安装种子软件
+解除之前的ORACLE_HOME
 ./runInstaller -detachHome ORACLE_HOME=<ORACLE_HOME_path>
-11g֮ǰ�汾��
+11g之前版本：
 $ORACLE_HOME/oui/bin/runInstaller -invPtrLoc xxxx/oraInst.loc -silent -clone ORACLE_HOME="<ORACLE_HOME>" ORACLE_HOME_NAME="<NAME>"
-11g�汾(����ָ��ORACLE_BASE)
+11g版本(加上指定ORACLE_BASE)
 $ORACLE_HOME/oui/bin/runInstaller -invPtrLoc xxxx/oraInst.loc -silent -clone ORACLE_BASE="<ORACLE_BASE>" ORACLE_HOME="<ORACLE_HOME>" ORACLE_HOME_NAME="<NAME>"
 
-�鿴Patch
+查看Patch
 $ORACLE_HOME/OPatch/opatch lsinventory -invPtrLoc $HOME/../app/oraInst.loc
 $ORACLE_HOME/OPatch/opatch lsinventory -invPtrLoc $ORACLE_HOME/oraInst.loc
-opatch ���°汾���أ� 68806880
+opatch 最新版本下载： 68806880
 
-�鿴PSU
-$ORACLE_HOME/OPatch/opatch lsinventory �CinvPtrLoc   /../oraInst.loc -bugs_fixed | grep -i 'Patch Set Update'
+查看PSU
+$ORACLE_HOME/OPatch/opatch lsinventory –invPtrLoc   /../oraInst.loc -bugs_fixed | grep -i 'Patch Set Update'
 
 apply & rollback
 $ORACLE_HOME/OPatch/opatch apply -invPtrLoc $HOME/../app/oraInst.loc
 $ORACLE_HOME/OPatch/opatch rollback -id PATCH_NO -invPtrLoc $HOME/../app/oraInst.loc
 
-RAC �� the cluster database(DB_NAME) already exits
+RAC — the cluster database(DB_NAME) already exits
 
-���������ԭ��ܼ򵥣�����rac ������ݿ����Ϣû�г��׵Ĵ�OCR������ɾ������������������Щ��Ϣ��
+出现这个的原因很简单，就是rac 这个数据库的信息没有彻底的从OCR中清除干净。下面我们来清除这些信息。
 
-[oracle@rac1 bin]$ srvctl config   -- �������������ʾ������SRVM�����ļ��е�������Ϣ
+[oracle@rac1 bin]$ srvctl config   -- 这个命令用来显示保存在SRVM配置文件中的配置信息
 Rac
-[oracle@rac1 bin]$ srvctl remove database -d rac  -- ɾ��������ݿ�
+[oracle@rac1 bin]$ srvctl remove database -d rac  -- 删除这个数据库
 Remove the database rac  (y/[n]) y
-[oracle@rac1 bin]$ srvctl config   -- �ٴβ鿴�������ڣ������
+[oracle@rac1 bin]$ srvctl config   -- 再次查看，还存在，很奇怪
 rac
 
-[oracle@rac1 bin]$ srvctl remove database -d rac �Cf  -- ����-f ������ǿ��ɾ��
-[oracle@rac1 bin]$ srvctl config    -- �鿴����������Ϣ�Ѿ���ɾ����
+[oracle@rac1 bin]$ srvctl remove database -d rac –f  -- 加上-f 参数，强制删除
+[oracle@rac1 bin]$ srvctl config    -- 查看，正常，信息已经被删除掉
 [oracle@rac1 bin]$
 
 
-��Ϊ֮ǰ������ݿ��ʵ����Ϣ���Ѿ�ɾ���ˣ�����rac������ݿ����ϢҲ�ǲ������ģ����ڲ���������Ϣɾ��������Ҫǿ��ɾ����
+因为之前这个数据库的实例信息我已经删除了，所以rac这个数据库的信息也是不完整的，对于不完整的信息删除，还是要强制删除。
 
 
 
-����asm�������
+拷贝asm磁盘里的
 
-����ʱ��������ǡ� CPU used by this session��,��CPU����Ự�����ѵ�����ʱ�䡣
+服务时间代表的是“ CPU used by this session”,是CPU服务会话所花费的所有时间。
 
-ʵ������  ͳ������CPU used by this session
-ע�⣹i��ʱ�䵥λ��1�����֮1
+实例级：  统计名叫CPU used by this session
+注意９i后时间单位是1百万分之1
 
 select  a.value "Total CPU time"
 from v$sysstat a
 where a.name ='CPU used by this session';
 
-�Ự����
+会话级：
 
 select statistic# from v$statname where name ='CPU used by this session';
-ͬ���鿴ͳ����CPU used by this session
+同样查看统计名CPU used by this session
 
-�������ҵ�CPU used by this session��ͳ�ƺ�
+我们先找到CPU used by this session的统计号
 
 12
 
 
-��ȥ��v$sesstat
+再去查v$sesstat
 select sid ,a.value "Total CPU time"
 from v$sesstat a
 where a.statistic#=12;
 
 
-Service Time������SQL����ʱ�䡡�����ݹ����ʱ�䡡��������ʱ��
+Service Time　＝　SQL解析时间　＋　递归调用时间　＋　其它时间
 
 
-SQL/PLSQL�Ƚ���ʱ������ʱ�䣬�������ʱ�䳬���ܵ�CPU����ʱ�䣲��������ô��Ҫ����Ӧ�ó�����룬����󶨱�����SESSION_CURSOR_CACHE��
-Service Time������SQL����ʱ�䡡�����ݹ����ʱ�䡡��������ʱ��
+SQL/PLSQL等解析时所花的时间，如果解析时间超过总的CPU服务时间２０％，那么需要调优应用程序代码，比如绑定变量、SESSION_CURSOR_CACHE等
+Service Time　＝　SQL解析时间　＋　递归调用时间　＋　其它时间
                  -----------
-                  ��Ҫ����Service Time��20%
+                  不要超过Service Time的20%
 
-�鿴SQL����ʱ���أ�
+查看SQL解析时间呢？
 
 
-����Ҳ��ʵ�����ͻỰ��
-  ʵ������
+我们也分实例级和会话级
+  实例级：
 select a.value "Total parse time"
 from v$sysstat a
 where a.name ='parse time cpu';
 
-�Ự����
+会话级：
 select name, statistic# from v$statname where name
 like '%parse%';
-ͳ������Ȼ��parse time cpu��ͳ�ƺ���230
-Ȼ���ѯv$sesstat
+统计名仍然是parse time cpu，统计号是230
+然后查询v$sesstat
 select sid,a.value "Total parse Cpu time"
 from v$sesstat a
 where a.statistic#=230;
 
-����parse count�����ж����ݿ�sql������Ч�ʡ�
+另外parse count可以判断数据库sql解析的效率。
 
-�ݹ����ʱ����������������׶β��������ֵ����PLSQL�ڲ�����ɵĽ���������CPUʱ�䡣
+递归调用时间是用在语义分析阶段查找数据字典或者PLSQL内部包造成的解析所花的CPU时间。
 select name,sid,value "Total parse Cpu time"
 from v$statname a,v$mystat b
 where a.name like '%parse%'
 and a.statistic#=b.statistic#;
 
-�鿴���Ự��ͳ��
+查看本会话的统计
 select name ,statistic# from v$statname where name like '%cpu%';
 
 
@@ -13819,11 +13819,11 @@ select a.value "Total recursive Cpu time"
 from v$sysstat a
 where a.name ='recursive cpu usage'
 
-����v$sysstat,v$sesstat,���ǿ��Բ鿴���ݹ���õ�ʱ����
+查找v$sysstat,v$sesstat,我们可以查看到递归调用的时间了
 
-����CPUʱ��
+其它CPU时间
 
-����CPUʱ��ͨ��ռ�������������ִ���ڴ�BUFFER������������ȫ��ɨ���漰��IO������ռ�е�CPU.
+其它CPU时间通常占绝大多数，它是执行内存BUFFER搜索，索引和全表扫描涉及的IO操作所占有的CPU.
 select a.value "Total CpU",
 b.value "parse cpu",
 c.value "recursive cpu",
@@ -13834,9 +13834,9 @@ and b.name ='parse time cpu'
 and c.name ='recursive cpu usage';
 
 
-�󲿷ֿ��еȴ��¼����ǿͻ�����ص���Ϣ�����¼�
+大部分空闲等待事件都是客户端相关的消息传输事件
 
-�������鿴�����ݿ�ĵȴ��¼�����
+我们来查看下数据库的等待事件数据
  select event,time_waited,average_wait from
  v$system_event where
  event not in('pmon timer',
@@ -13849,11 +13849,11 @@ and c.name ='recursive cpu usage';
  'NULL event')
  order by time_waited desc;
 
- ����,NOT IN��Щ�����¼������Բ鿴�ǿ��еȴ��¼���ͳ����Ϣ
+ 上例,NOT IN这些空闲事件，可以查看非空闲等待事件的统计信息
 
 
 
-�ҵ�����CPU��ߵ������4Сʱ��½�ģ������Сʱ�й���ĻỰ
+找到消耗CPU最高的是最近4小时登陆的，最近半小时有过活动的会话
 
 find sessions with the highest cpu consumption
 select s.sid,s.serial#,p.spid as "os pid",
@@ -13870,7 +13870,7 @@ where sn.name ='CPU used by this session
  order by st.value;
 
 
-���ҵȴ������صĻỰ
+查找等待最严重的会话
 
 find sessinos with highest waits of a certain type
 
@@ -13885,12 +13885,12 @@ order by se.time_waited;
 
 
 
- ����Ҫ�������Ự����ʱ�䣬�ȴ�ʱ�����ܵ�DB TIME����ռ�ı���
- һ���Ự�ķ���ʱ��ռ�������ݿ�DB TIME�ı���
+ 我们要来分析会话服务时间，等待时间在总的DB TIME中所占的比例
+ 一个会话的服务时间占整个数据库DB TIME的比例
 
 10g or higher:find sessions with the highest db time
 select  s.sid,s.serial#,p.spid as "OS PID",s.username,s.module,st.value/100 as "db time (sec)"
-,stcpu.value/100 as "cpu time(sec)",round��stcpu.value/st.value*100,2) as "% cpu"
+,stcpu.value/100 as "cpu time(sec)",round（stcpu.value/st.value*100,2) as "% cpu"
 from v$sesstat st,v$statname sn,v$session s, v$sesstat stcpu ,v$statname sncpu ,v$process p
 where sn.name=DB time' ---cpu
 and st.statistic#=sn.statistic#
@@ -13913,56 +13913,56 @@ ORA-30514: system trigger cannot modify tablespace being made read only
 
 
 
-ԭ��û�н��õ�goldengate��DDL��������
-����취�����õ�goldengate��DDL������
+原因：没有禁用掉goldengate的DDL触发器。
+解决办法：禁用掉goldengate的DDL触发器
 
-ALTER TRIGGER sys.GGS_DDL_TRIGGER_BEFORE DISABLE;  �Cע��ô���������SYS
+ALTER TRIGGER sys.GGS_DDL_TRIGGER_BEFORE DISABLE;  –注意该触发器属于SYS
 
-���ۣ��ڶ԰�װ��OGG�����ݿ��������������ΪĳЩԭ��Ҫִ��catalog.sql�Ƚű�����ˢ�������ֵ����Ϊʱ��Ҫȷ��sys.GGS_DDL_TRIGGER_BEFORE�ǽ��õġ�
+结论：在对安装有OGG的数据库进行升级或者因为某些原因要执行catalog.sql等脚本进行刷新数据字典的行为时需要确保sys.GGS_DDL_TRIGGER_BEFORE是禁用的。
 
 
-Oracle AWR �ֶ�����
-1.�鿴��ǰ��AWR�������
+Oracle AWR 手动配置
+1.查看当前的AWR保存策略
 select * from dba_hist_wr_control;
 
 DBID,SNAP_INTERVAL,RETENTION,TOPNSQL
 860524039,+00 01:00:00.000000,+07 00:00:00.000000,DEFAULT
-���Ͻ����ʾ,ÿСʱ����һ��SNAPSHOT������7��
-2.����AWR����
-AWR���ö���ͨ��dbms_workload_repository����������
-2.1����AWR����snapshot��Ƶ�ʺͱ������ԣ��磺�罫�ռ����ʱ���Ϊ30 ����һ�Ρ����ұ���5��ʱ�䣨ע����λ����Ϊ���ӣ���
+以上结果表示,每小时产生一个SNAPSHOT，保留7天
+2.调整AWR配置
+AWR配置都是通过dbms_workload_repository包进行配置
+2.1调整AWR产生snapshot的频率和保留策略，如：如将收集间隔时间改为30 分钟一次。并且保留5天时间（注：单位都是为分钟）：
 exec dbms_workload_repository.modify_snapshot_settings(interval=>30, retention=>5*24*60);
-2.2�ر�AWR,��interval��Ϊ0��ر��Զ���׽����
-2.3�ֹ�����һ������
+2.2关闭AWR,把interval设为0则关闭自动捕捉快照
+2.3手工创建一个快照
 exec DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT ();
-2.4 �鿴����
+2.4 查看快照
 select * from sys.wrh$_active_session_history
-2.5�ֹ�ɾ��ָ����Χ�Ŀ���
+2.5手工删除指定范围的快照
 exec WORKLOAD_REPOSITORY.DROP_SNAPSHOT_RANGE(low_snap_id => 22, high_snap_id => 32, dbid => 3310949047);
-2.6����baseline
+2.6创建baseline
 exec dbms_workload_repository.create_baseline (56,59,'apply_interest_1')
-2.7ɾ��baseline
+2.7删除baseline
 exec DBMS_WORKLOAD_REPOSITORY.DROP_BASELINE(baseline_name => ' apply_interest_1', cascade => FALSE);
 
-3.����AWR����
+3.生产AWR报告
 $ORACLE_HOME/rdbms/admin/awrrpt.sql
 
-4.1 Snapshots( ����)
-����ǰ�������������ʱ��snap����ؼ����Ѿ����ֹ�����ˣ����������������ɻ����������������զ����˭���������أ���ʵ�ϣ�Snap��Snapshot�ļ�д��������AWR���Զ��Է�������֣���Ȼ��û�д���������AWR�Զ����㴴����(��ȻҲ�����ֶ�����snapshot)�������Ƕ�ʱ(ÿСʱ)�������������(�������7��)��
+4.1 Snapshots( 快照)
+　　前面操作报表生成时，snap这个关键字已经出现过多次了，想必你对它充满了疑惑，这个东西是哪来的咋来的谁让它来的呢？事实上，Snap是Snapshot的简写，这正是AWR在自动性方面的体现，虽然你没有创建，但是AWR自动帮你创建了(当然也可以手动创建snapshot)，并且是定时(每小时)创建，定期清除(保留最近7天)。
 
-����Snapshots ��һ��ĳ��ʱ���ʱ��ʷ���ݵļ��ϣ���Щ���ݾͿɱ�ADDM(Automatic Database Diagnostic Monitor)���������ܶԱȡ�Ĭ������£�AWR�ܹ��Զ���ÿСʱһ�ε�Ƶ������Snapshots�������ݣ�������7�죬�������Ҫ�Ļ���DBA����ͨ��DBMS_WORKLOAD_REPOSITORY�����ֶ�������ɾ�����޸�snapshots��
+　　Snapshots 是一组某个时间点时历史数据的集合，这些数据就可被ADDM(Automatic Database Diagnostic Monitor)用来做性能对比。默认情况下，AWR能够自动以每小时一次的频率生成Snapshots性能数据，并保留7天，，如果需要的话，DBA可以通过DBMS_WORKLOAD_REPOSITORY过程手动创建、删除或修改snapshots。
 
-��ʾ������DBMS_WORKLOAD_REPOSITORY����Ҫӵ��DBAȨ�ޡ�
-4.1.1  �ֶ�����Snapshots
-�����ֶ�����Snapshots��ͨ��DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT���̣����磺
+提示：调用DBMS_WORKLOAD_REPOSITORY包需要拥有DBA权限。
+4.1.1  手动创建Snapshots
+　　手动创建Snapshots，通过DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT过程，例如：
 
 SQL> exec dbms_workload_repository.create_snapshot();
 
 PL/SQL procedure successfully completed.
-����Ȼ�����ͨ��DBA_HIST_SNAPSHOT ��ͼ�鿴�ոմ�����Snapshots��Ϣ��
+　　然后可以通过DBA_HIST_SNAPSHOT 视图查看刚刚创建的Snapshots信息。
 
-4.1.2  �ֶ�ɾ��Snapshots
-����ɾ��Snapshots��ʹ��DBMS_WORKLOAD_REPOSITORY������һ�����̣�DROP_SNAPSHOT_RANGE���ù�����ִ��ʱ����ͨ��ָ��snap_id�ķ�Χ�ķ�ʽһ��ɾ�����Snapshots�����磺
+4.1.2  手动删除Snapshots
+　　删除Snapshots是使用DBMS_WORKLOAD_REPOSITORY包的另一个过程：DROP_SNAPSHOT_RANGE，该过程在执行时可以通过指定snap_id的范围的方式一次删除多个Snapshots，例如：
 
 SQL> select count(0) from dba_hist_snapshot where snap_id between 7509 and 7518;
 
@@ -13995,15 +13995,15 @@ SQL> select count(0) from dba_hist_snapshot where snap_id between 7509 and 7518;
 ----------
 
          0
-����ע�⵱snapshots��ɾ���Ļ������������ASH��¼Ҳ�ἶ��ɾ����
+　　注意当snapshots被删除的话，与其关联的ASH记录也会级联删除。
 
-4.1.3  �޸�Snapshots����
-����ͨ��MODIFY_SNAPSHOT_SETTINGS���̣�DBA���Ե������������ռ�Ƶ�ʡ����ձ���ʱ�䡢�Լ������SQL����������������á��ֱ��ӦMODIFY_SNAPSHOT_SETTINGS������������
+4.1.3  修改Snapshots设置
+　　通过MODIFY_SNAPSHOT_SETTINGS过程，DBA可以调整包括快照收集频率、快照保存时间、以及捕获的SQL数量三个方面的设置。分别对应MODIFY_SNAPSHOT_SETTINGS的三个参数：
 
- Retention �����ÿ��ձ����ʱ�䣬��λ�Ƿ��ӡ������õ�ֵ��СΪ1�죬���Ϊ100�ꡣ���øò���ֵΪ0�Ļ����ͱ�ʾ���ñ����ռ��Ŀ�����Ϣ��
- Interval �����ÿ����ռ���Ƶ�ʣ��Է���Ϊ��λ�������õ�ֵ��СΪ10���ӣ����Ϊ1�ꡣ������øò���ֵΪ0���ͱ�ʾ����AWR���ԡ�
- Topnsql ��ָ���ռ��ıȽ�ռ����Դ��SQL�����������õ�ֵ��СΪ30����󲻳���100000000��
-�����鿴��ǰ�����ռ���������ã�����ͨ��DBA_HIST_WR_CONTROL��ͼ�鿴�����磺
+ Retention ：设置快照保存的时间，单位是分钟。可设置的值最小为1天，最大为100年。设置该参数值为0的话，就表示永久保留收集的快照信息。
+ Interval ：设置快照收集的频率，以分钟为单位。可设置的值最小为10分钟，最大为1年。如果设置该参数值为0，就表示禁用AWR特性。
+ Topnsql ：指定收集的比较占用资源的SQL数量，可设置的值最小为30，最大不超过100000000。
+　　查看当前快照收集的相关设置，可以通过DBA_HIST_WR_CONTROL视图查看，例如：
 
 SQL> select * from dba_hist_wr_control;
 
@@ -14014,7 +14014,7 @@ SQL> select * from dba_hist_wr_control;
 ---------- ------------------------ -------------------- ----------
 
 3812548755 +00000 01:00:00.0        +00007 00:00:00.0    DEFAULT
-�����ֱ���ͨ��MODIFY_SNAPSHOT_SETTTINGS�����޸�snap_intrval�����ã�
+　　又比如通过MODIFY_SNAPSHOT_SETTTINGS过程修改snap_intrval的设置：
 
 SQL> exec dbms_workload_repository.modify_snapshot_settings(interval=>120);
 
@@ -14029,15 +14029,15 @@ SQL> select * from dba_hist_wr_control;
 ---------- ------------------------ -------------------- ----------
 
 3812548755 +00000 02:00:00.0        +00007 00:00:00.0    DEFAULT
-4.2 Baselines( ����)
-����Baseline ��ֱ��Ļ��������ߣ�����˼��ķ�ʽ���⣬�������ڱȽϵĻ����ߡ���ΪBaseline�а���ָ��ʱ���ʱ���������ݣ���˾Ϳ�������������ʱ���ʱ��״̬�������Աȣ��Է����������⡣
+4.2 Baselines( 基线)
+　　Baseline ，直译的话叫做基线，顾名思义的方式理解，就是用于比较的基本线。因为Baseline中包含指定时间点时的性能数据，因此就可以用来与其它时间点时的状态数据做对比，以分析性能问题。
 
-��������Baselineʱ��Snapshots����Ϊ���е�һ����ɲ��ִ��ڣ����һ����˵��AWR�Զ�ά������ʱ����������baseline����baseline��صĿ��ղ��ᱻɾ������ʹ�ǹ��ڵĿ��գ��������൱���ֶ�������һ��ͳ�����ݵ���ʷ��Ϣ��DBA�������ʵ���ʱ�佫�������еĿ��ս��жԱȣ���������ص�ͳ�Ʊ�����
+　　创建Baseline时，Snapshots是做为其中的一个组成部分存在，因此一般来说当AWR自动维护快照时，如果定义过baseline，与baseline相关的快照不会被删除，即使是过期的快照，这样就相当于手动保留了一份统计数据的历史信息，DBA可以在适当的时间将其与现有的快照进行对比，以生成相关的统计报表。
 
-�����û�����ͨ��DBMS_WORKLOAD_REPOSITORY���е���ع��̣��ֶ��Ĵ�����ɾ��Baseline��
+　　用户可以通过DBMS_WORKLOAD_REPOSITORY包中的相关过程，手动的创建或删除Baseline。
 
-4.2.1  ����Baseline
-��������Baselineʹ��CREATE_BASELINE���̣�ִ�иù���ʱ�ֱ�ָ����ʼ�ͽ����snap_id��Ȼ��Ϊ��baseline����һ�����Ƽ��ɣ����磺
+4.2.1  创建Baseline
+　　创建Baseline使用CREATE_BASELINE过程，执行该过程时分别指定开始和结果的snap_id，然后为该baseline定义一个名称即可，例如：
 
 SQL> BEGIN
 
@@ -14045,7 +14045,7 @@ SQL> BEGIN
 
   3                                             end_snap_id   => 7660,
 
-  4                                             baseline_name => ��am_baseline��);
+  4                                             baseline_name => ¨am_baseline¨);
 
   5  END;
 
@@ -14060,12 +14060,12 @@ SQL> select dbid,baseline_name,start_snap_id,end_snap_id from dba_hist_baseline;
 ---------- -------------------- ------------- -----------
 
 3812548755 am_baseline                   7550        7660
-4.2.2  ɾ��Baseline
-����ɾ��Baselineʹ��DROP_BASELINE���̣�ɾ��ʱ����ͨ��cascade����ѡ���Ƿ��������Snapshots�������ɾ�������磺
+4.2.2  删除Baseline
+　　删除Baseline使用DROP_BASELINE过程，删除时可以通过cascade参数选择是否将其关联的Snapshots级别进行删除，例如：
 
 SQL> BEGIN
 
-  2    DBMS_WORKLOAD_REPOSITORY.DROP_BASELINE(baseline_name => ��am_baseline��,
+  2    DBMS_WORKLOAD_REPOSITORY.DROP_BASELINE(baseline_name => ¨am_baseline¨,
 
   3                                           cascade       => true);
 
@@ -14082,13 +14082,13 @@ no rows selected
 SQL> select * from dba_hist_snapshot where snap_id between 7550 and 7660;
 
 no rows selected
-��������������ʾ��ɾ��ʱָ����cascade����ֵΪtrue����Ӧ��snapҲ������ɾ���ˡ�
+　　如上例中所示，删除时指定了cascade参数值为true，对应的snap也被级联删除了。
 
 
 
-������EMҲ�ã�����ǰ����ʾ��ʹ�õ�awr*.sql�ű�Ҳ�ã�ʵ�ʶ��Ƿ���ORACLE�еĲ��������ͼ������ͳ�����ݣ�������DBA���Լ��������������㹻�����ţ�Ҳ����ֱ�Ӳ�ѯ��̬������ͼ(����������ֵ�)�ķ�ʽ����ȡ�Լ���Ҫ���ǲ����������ݡ�ORACLE���ⲿ������ͳ�����ݱ�����DBA_HIST��ͷ�������ֵ��У�Ҫ��ѯ��ǰʵ�������ܹ����ʵ�DBA_HIST�ֵ䣬����ͨ��������䣺
+不管是EM也好，或是前面演示中使用的awr*.sql脚本也好，实质都是访问ORACLE中的部分相关视图来生成统计数据，因此如果DBA对自己的理解能力有足够的自信，也可以直接查询动态性能视图(或相关数据字典)的方式来获取自己想要的那部分性能数据。ORACLE将这部分性能统计数据保存在DBA_HIST开头的数据字典中，要查询当前实例所有能够访问的DBA_HIST字典，可以通过下列语句：
 
-SQL> select * from dict where table_name like ��DBA_HIST%��;
+SQL> select * from dict where table_name like ¨DBA_HIST%¨;
 
 TABLE_NAME COMMENTS
 
@@ -14121,10 +14121,10 @@ DBA_HIST_SQLTEXT SQL Text
 ......................
 
 ........................
-����ORACLE ���ݿ�����DBA_HIST��������ͼ�ǳ��࣬����򵥽��ܼ���������˵��
+　　ORACLE 数据库中以DBA_HIST命名的视图非常多，下面简单介绍几个，比如说：
 
  V$ACTIVE_SESSION_HISTORY
-��������ͼ��ASH�Զ�ά������ÿ��һ�ε�Ƶ���ռ���ǰϵͳ�лsession����Ϣ����Ȼ˵�Ǽ�¼SESSION����ʷ��¼����������ͼ��V$SESSION�����в���ġ�
+　　该视图由ASH自动维护，以每秒一次的频率收集当前系统中活动session的信息。虽然说是记录SESSION的历史记录，不过该视图与V$SESSION还是有差异的。
 
 SQL> desc v$active_session_history;
 
@@ -14219,18 +14219,18 @@ MODULE VARCHAR2(48) Y
 ACTION VARCHAR2(32) Y
 
 CLIENT_ID VARCHAR2(64) Y
-����v$session ���������ص��о����ռ�������֮�⻹�����˲����У�����Ϊ�˷���DBA��ѯV$ACTIVE_SESSION_HISTORYʱ�ܹ����ٻ�ȡ���Լ���Ҫ�����ݡ�
+　　v$session 中与操作相关的列均被收集，除此之外还冗余了部分列，这是为了方便DBA查询V$ACTIVE_SESSION_HISTORY时能够快速获取到自己需要的数据。
 
  DBA_HIST_ACTIVE_SESS_HISTORY
-��������ͼ��V$ACTIVE_SESSION_HISTORY�Ľṹ�ҳ��ҳ��ҳ������񣬹���Ҳ�ҳ��ҳ��ҳ������ƣ����Ǽ�¼�session�Ĳ�����¼������ͬ�����ڣ�V$ACTIVE_SESSION_HISTORY��ORACLE�Զ����ڴ���ά���ģ�������������ڴ������ƣ��������м�¼���ܱ��棬��DBA_HIST_ACTIVE_SESS_HISTORY��ͼ����ά���������еġ�������Ļ�������˵ͨ������£�DBA_HIST_ACTIVE_SESS_HISTORY��ͼ��������Ҫ��V$ACTIVE_SESSION_HISTORY�Ķࡣ
+　　该视图与V$ACTIVE_SESSION_HISTORY的结构灰常灰常灰常的想像，功能也灰常灰常灰常的类似，都是记录活动session的操作记录，所不同点在于，V$ACTIVE_SESSION_HISTORY是ORACLE自动在内存中维护的，受制于其可用内存区限制，并非所有记录都能保存，而DBA_HIST_ACTIVE_SESS_HISTORY视图则是维护到磁盘中的。简单理解的话，就是说通常情况下，DBA_HIST_ACTIVE_SESS_HISTORY视图的数据量要比V$ACTIVE_SESSION_HISTORY的多。
 
-��ʾ�������ṹ�������ԣ���ΪĬ�������DBA_HIST_ACTIVE_SESS_HISTORY�ֵ������ÿ10���ռ�һ�Σ���V$ACTIVE_SESSION_HISTORY������ÿ��һ�Σ����Ҳ�п���V$ACTIVE_SESSION_HISTORY�м�¼�����󡣲��������˵��DBA_HIST�ֵ��б�������ݸ����á�
+提示：上述结构并不绝对，因为默认情况下DBA_HIST_ACTIVE_SESS_HISTORY字典的数据每10秒收集一次，而V$ACTIVE_SESSION_HISTORY中则是每秒一次，因此也有可能V$ACTIVE_SESSION_HISTORY中记录量更大。不过相对来说，DBA_HIST字典中保存的数据更长久。
  DBA_HIST_DATABASE_INSTANCE
-��������ͼ������ʾ���ݿ��ʵ������Ϣ������DBID��ʵ���������ݿ�汾�ȵ���Ϣ�����ɱ����е�һ�б��񣬾����ɸ���ͼ���ɵġ���ͼ��
+　　该视图用来显示数据库和实例的信息，比如DBID，实例名，数据库版本等等信息，生成报表中第一行表格，就是由该视图生成的。如图：
 
 
 
-���������ȥ����awrrpt.sql�ű��Ļ����ᷢ�����������½ű���������������ʾ��������Ϣ���������������нű���
+　　如果你去分析awrrpt.sql脚本的话，会发现其中有如下脚本，上述表格中显示的内容信息，正是来自于下列脚本：
 
 select distinct
 
@@ -14242,9 +14242,9 @@ ci.instance_number = wr.instance_number and
 
 ci.instance_name = wr.instance_name
 
-then ��* ��
+then ¨* ¨
 
-else �� ��
+else ¨ ¨
 
 end) || wr.dbid dbbid
 
@@ -14258,9 +14258,9 @@ end) || wr.dbid dbbid
 
 from dba_hist_database_instance wr, v$database cd, v$instance ci;
  DBA_HIST_SNAPSHOT
-��������ͼ������¼��ǰ���ݿ��ռ����Ŀ�����Ϣ����������Ӧ�û��ǵ�֮ǰʹ�ýű����ɱ���ʱ������������������ʾ��һ���б���û����������DBA_HIST_SNAPSHOT��¼�����ݣ��öι��ܶ�Ӧ�Ĵ������£�
+　　该视图用来记录当前数据库收集到的快照信息。相信朋友应该还记得之前使用脚本生成报表时，输入完快照区间后显示的一堆列表，没错，那正是DBA_HIST_SNAPSHOT记录的内容，该段功能对应的代码如下：
 
-select to_char(s.startup_time,��dd Mon "at" HH24:mi:ss��) instart_fmt
+select to_char(s.startup_time,¨dd Mon "at" HH24:mi:ss¨) instart_fmt
 
 , di.instance_name inst_name
 
@@ -14268,7 +14268,7 @@ select to_char(s.startup_time,��dd Mon "at" HH24:mi:ss��) instart_fmt
 
 , s.snap_id snap_id
 
-, to_char(s.end_interval_time,��dd Mon YYYY HH24:mi��) snapdat
+, to_char(s.end_interval_time,¨dd Mon YYYY HH24:mi¨) snapdat
 
 , s.snap_level lvl
 
@@ -14292,11 +14292,11 @@ and di.startup_time = s.startup_time
 
 and s.end_interval_time >= decode( &num_days
 
-, 0 , to_date(��31-JAN-9999��,��DD-MON-YYYY��)
+, 0 , to_date(¨31-JAN-9999¨,¨DD-MON-YYYY¨)
 
 , 3.14, s.end_interval_time
 
-, to_date(:max_snap_time,��dd/mm/yyyy��) - (&num_days-1))
+, to_date(:max_snap_time,¨dd/mm/yyyy¨) - (&num_days-1))
 
 order by db_name, instance_name, snap_id;
 
@@ -14305,12 +14305,12 @@ order by db_name, instance_name, snap_id;
 
 
 
- LRM-112 LRM-113 EXP-19 When Performing Export With WHERE Clause and PARFILE (�ĵ� ID 116258.1) ת���ײ�
+ LRM-112 LRM-113 EXP-19 When Performing Export With WHERE Clause and PARFILE (文档 ID 116258.1) 转到底部
 
 
 --------------------------------------------------------------------------------
 
-�޸�ʱ��:2013-7-31����:PROBLEM
+修改时间:2013-7-31类型:PROBLEM
 
 
 ***Checked for relevance on 31-Jul-2013***
@@ -14334,7 +14334,7 @@ exp scott/tiger tables=emp query=\"where job=\'SALESMAN\' and sal\<1600\"
 
 or:
 
-exp scott/tiger tables=emp query=\"where ename like \��SMI%\��\"
+exp scott/tiger tables=emp query=\"where ename like \’SMI%\’\"
 
 But if you issue:
 
@@ -14346,7 +14346,7 @@ tables=emp query=\"where job=\'SALESMAN\' and sal\<1600\"
 
 or:
 
-tables=emp query=\"where ename like \��SMI%\��\"
+tables=emp query=\"where ename like \’SMI%\’\"
 
 or:
 
@@ -14364,7 +14364,7 @@ tables=emp query="where JOB = 'SALESMAN' and salary < 1600"
 
 or:
 
-tables=emp query="where ename like ��SMI%�� "
+tables=emp query="where ename like ’SMI%’ "
 
 or:
 
@@ -14378,7 +14378,7 @@ tables=emp query=\"where job=\'SALESMAN\' and sal\<1600\"
 
 or:
 
-tables=emp query=\"where ename like \��SMI%\��\"
+tables=emp query=\"where ename like \’SMI%\’\"
 
 or:
 
@@ -14411,7 +14411,7 @@ To install the appropriate export views, have a DBA run the following script. wh
 
 
 
-'�ػ��ű�
+'关机脚本
 On Error Resume Next
 Dim objShell,intReturn,mbFinished,moWindow
 Set objShell = CreateObject("Wscript.Shell")
@@ -14425,27 +14425,27 @@ Dim MachineType
 MachineType = TestMachineType()
 
 If MachineType = "Laptop" Then
-	'�ʼǱ���ִ�иò���
+	'笔记本不执行该策略
 	WScript.Quit
 
 End If
 
 OSCaption=GetOSCaption()
 If (InStr(OSCaption, "Windows XP") Or InStr(OSCaption, "Windows 2000 Professional") Or InStr(OSCaption,"Windows 7")) Then
-	Call Main() '����ϵͳ�汾ΪXP����ִ��
+	Call Main() '操作系统版本为XP，才执行
 Else
-	intReturn = objShell.Popup("������ϵͳ�������Թػ���5����Զ��˳��ػ�����",5, "������ϵͳ������ػ�״̬......")
+	intReturn = objShell.Popup("服务器系统，不尝试关机，5秒后自动退出关机程序",5, "服务器系统不进入关机状态......")
 	WScript.Quit
-	'WScript.Echo "����Windows XPϵͳ�����޸ĵ�Դ��������"
+	'WScript.Echo "不是Windows XP系统！不修改电源管理方案"
 End If
 
-'==================================���������=============================================
+'==================================主程序结束=============================================
 
 Sub Main()
 Do
 	time1=time
 
-	intReturn = objShell.Popup("ϵͳ������30���Ӻ����ػ�״̬���������ʹ�õ��ԣ�������ȷ����",1805, "ϵͳ����30���Ӻ����ػ�״̬......")
+	intReturn = objShell.Popup("系统即将在30分钟后进入关机状态，如需继续使用电脑，请点击【确定】",1805, "系统将在30分钟后进入关机状态......")
 
 	time2=time
 	time3=DateDiff("s",time1,time2)
@@ -14461,19 +14461,19 @@ Do
 Loop
 End Sub
 
-'================���������================
+'================主程序完成================
 
 Sub Go_Sleep()
 
 Const Shutdown_Mod = 5 'Forced Shutdown (1 + 4)
 Set objNet = WScript.CreateObject( "WScript.Network" )
 Set objWMIService = GetObject("winmgmts:{impersonationLevel=impersonate," & _
- "(Shutdown)}!\\" & objNet.ComputerName & "\root\cimv2") '��ö���
+ "(Shutdown)}!\\" & objNet.ComputerName & "\root\cimv2") '获得对象
 Set colOSes = objWMIService.ExecQuery("SELECT * FROM Win32_OperatingSystem")
-For Each objOS In colOSes 'ֻ������һ�� objOS ��colOSes������
+For Each objOS In colOSes '只可能有一个 objOS 在colOSes集合中
   intReturn = objOS.Win32Shutdown(Shutdown_Mod)
   If intReturn <> 0 Then
-    msgbox "�����ĵ�δ���棬�ػ�����ʧ��"
+    msgbox "您有文档未保存，关机操作失败"
   End If
 Next
 
@@ -14495,15 +14495,15 @@ Sub Wait_Sleep()
 	'Const wshQuestionMark = 32
 
 
-	'intReturn = objShell.Popup("10���Ӻ����ػ�״̬�����Ƿ���Ҫȡ������Ĺػ����񣿵����Yes����ȡ���ػ�", _
-    	'600, "ȡ���ػ�", wshYesNoDialog + wshQuestionMark)
+	'intReturn = objShell.Popup("10分钟后进入关机状态，您是否需要取消今天的关机任务？点击【Yes】将取消关机", _
+    	'600, "取消关机", wshYesNoDialog + wshQuestionMark)
 
 
 
 	moWindow.Navigate "about:blank"
 	With moWindow.Document.ParentWindow.Document
-		.Write "<body scroll=no style='background-color:#d4d0c8;font-size:9pt'>10���Ӻ����ػ�״̬�����Ƿ���Ҫȡ������Ĺػ�����<br>������Ӱ��У����첻�ػ��ˡ���ȡ���ػ�����ʣ��<font id='str'>600</font>�����ػ�״̬<br><br><div align='center'><input type='submit' value='�Ӱ��У����첻�ػ���' Width='10px' id='btnOK'/>&nbsp;&nbsp;&nbsp;&nbsp;<input type='button' value='1Сʱ���پ���' class='cancel' id='btnCancel'/></div></body>"
-        	.Title ="ȡ���ػ�"
+		.Write "<body scroll=no style='background-color:#d4d0c8;font-size:9pt'>10分钟后进入关机状态，您是否需要取消今天的关机任务？<br>点击【加班中，今天不关机了】将取消关机。还剩余<font id='str'>600</font>秒进入关机状态<br><br><div align='center'><input type='submit' value='加班中，今天不关机了' Width='10px' id='btnOK'/>&nbsp;&nbsp;&nbsp;&nbsp;<input type='button' value='1小时后再决定' class='cancel' id='btnCancel'/></div></body>"
+        	.Title ="取消关机"
 	End With
 	moWindow.Document.Close
 
@@ -14541,7 +14541,7 @@ Sub Wait_Sleep()
     		'Wscript.Echo "You clicked the Yes button."
 	'    	WScript.Quit
 	'ElseIf intReturn = wshNo Then
-    		'Wscript.Echo "You clicked the No button."�ȴ�30���Ӻ������ʾ
+    		'Wscript.Echo "You clicked the No button."等待30分钟后继续提示
     	'	WScript.Sleep(1800000)
 	'Else
     		'WScript.Echo "The popup timed out."
@@ -14571,21 +14571,21 @@ End Sub
 
 Function GetOSCaption()
 
-	'���ؼ��������ϵͳ��ϢXP/Win2000/Win2003/Server��
+	'返回计算机操作系统信息XP/Win2000/Win2003/Server等
 	strComputer = "."
 	Set objWMIService = GetObject("winmgmts:" _
  		& "{impersonationLevel=impersonate}!\\" & strComputer & "\root\cimv2")
 
 	Set colOSes = objWMIService.ExecQuery("Select * from Win32_OperatingSystem")
 	For Each objOS in colOSes
-  		GetOSCaption=objOS.Caption '���ز���ϵͳ�İ汾��Ϣ
+  		GetOSCaption=objOS.Caption '返回操作系统的版本信息
 	Next
 
 End function
 
 Function TestMachineType()
 
-	'��ѯ��������ͣ�̨ʽ�����ʼǱ���.....
+	'查询计算机类型：台式机，笔记本等.....
 	Dim DevType
 	strComputer = "."
 	Set objWMIService = GetObject("winmgmts:" _
@@ -14630,23 +14630,23 @@ End Function
 
 
 
-SPM��ʾ
-һ�����SQL Plan Management��SQLִ�мƻ�����
-�洢��SMB,SYSAUX(default:10%/Manual),�Զ�����
+SPM演示
+一、概念：SQL Plan Management，SQL执行计划管理
+存储：SMB,SYSAUX(default:10%/Manual),自动清理
 
-Step1������CBO�������ִ�мƻ�
-Step2����baseline��ƥ���ִ�мƻ� Best(fixed)>Best(Accepted)>Best(Others)
-Step3������ҵ�����ʹ�ã����򽫸���ִ�мƻ�����ƻ���ʷ�У�ֱ���ݻ�����������߻򲻽���ʱ��תΪaccepted��
-ע����һ��ִ�л���CBO�������ִ�мƻ����ڶ���ִ��ʱ����baseline
+Step1：基于CBO产生最佳执行计划
+Step2：在baseline中匹配该执行计划 Best(fixed)>Best(Accepted)>Best(Others)
+Step3：如果找到，则使用；否则将该新执行计划放入计划历史中，直到演化测试性能提高或不降低时则转为accepted；
+注：第一次执行基于CBO产生最佳执行计划，第二次执行时生成baseline
 
-��������
+二、参数
 SQL> show parameter baseline
-NAME                                 TYPE        VALUE        ��ע
+NAME                                 TYPE        VALUE        备注
 ------------------------------------ ----------- -------- ----------------------
-optimizer_capture_sql_plan_baselines boolean     TRUE      �Զ����񲢼�¼�ƻ�
-optimizer_use_sql_plan_baselines     boolean     TRUE      ����baseline����
+optimizer_capture_sql_plan_baselines boolean     TRUE      自动捕获并记录计划
+optimizer_use_sql_plan_baselines     boolean     TRUE      激活baseline特性
 
-��������
+三、属性
 EANBLE:
 --enable
 DECLARE
@@ -14684,14 +14684,14 @@ BEGIN
 END;
 /
 
-�ġ�����
+四、案例
 > Load from cache
 > Load from AWR
 > Load from Other DB
 > Migrate from outline
 
 
-1������baseline���ڴ��л�ȡ��ʹ���Ż����sql��
+1、创建baseline：内存中获取（使用优化后的sql）
 (1) Original
 SQL1: 21nhqyt19wvjq
 plan_hash:930246749
@@ -14756,7 +14756,7 @@ begin
 end;
 /
 
-2������baseline��AWR�����кõ�ִ�мƻ�
+2、创建baseline：AWR报告中好的执行计划
 
 --Capture plan baseline from AWR
 EXEC DBMS_SQLTUNE.CREATE_SQLSET(sqlset_name => 'plan_baseline_wangsj',sqlset_owner => 'DBMGR');
@@ -14779,7 +14779,7 @@ DBMS_OUTPUT.PUT_line(my_integer);
 end;
 /
 
-3������baseline���������⵼��
+3、创建baseline：从其他库导入
 (1) Create baseline for better SQL in DB1
 declare
   l_pls number;
@@ -14879,7 +14879,7 @@ BEGIN
 END;
 /
 
-4��Migrate from outline
+4、Migrate from outline
 (1) Source DB
 SQL_hashvalue: 3534787754
 SELECT /*wangsj0815_spm*/ count(*)  from dbmgr.info t
@@ -14943,19 +14943,19 @@ exec :report:=DBMS_SPM.MIGRATE_STORED_OUTLINE( attribute_name=>'CATEGORY',attrib
 
 
 
-SQL> set echo on---------------------------------------------------���������������Ƿ���ʾ���
-SQL> set feedback on----------------------------------------------������ʾ����ѡ��XX�С�
-SQL> set colsep | ---------------------------------------------------����������֮��ķָ����
-SQL> set pagesize 10-----------------------------------------------����ÿһҳ������
-SQL> SET SERVEROUTPUT ON-------------------------------����������ʾ�������dbms_output
-SQL> set heading on------------------------------------------------������ʾ����
-SQL> set timing on--------------------------------------------------������ʾ������ʱ�䣺XXXX��
-SQL> set time on-----------------------------------------------------������ʾ��ǰʱ��
-SQL> set autotrace on-----------------------------------------------����������ִ�е�sql���з���
+SQL> set echo on---------------------------------------------------设置运行命令是是否显示语句
+SQL> set feedback on----------------------------------------------设置显示“已选择XX行”
+SQL> set colsep | ---------------------------------------------------设置列与列之间的分割符号
+SQL> set pagesize 10-----------------------------------------------设置每一页的行数
+SQL> SET SERVEROUTPUT ON-------------------------------设置允许显示输出类似dbms_output
+SQL> set heading on------------------------------------------------设置显示列名
+SQL> set timing on--------------------------------------------------设置显示“已用时间：XXXX”
+SQL> set time on-----------------------------------------------------设置显示当前时间
+SQL> set autotrace on-----------------------------------------------设置允许对执行的sql进行分析
 
 
 
-ƴ��statssqltext
+拼接statssqltext
   declare
   cursor cur is select distinct hash_value as hash_value from stats$sqltext where sql_text like '%CIT_JOURNAL_INTERFACE%';
   temp_sql clob;
@@ -14974,9 +14974,9 @@ SQL> set autotrace on-----------------------------------------------����������ִ
   end;
 
 
-��Щʱ����Ϊ���Ի�����Ҫ,������Ҫʹ��������ı��ݼ�������һ̨�µĻ��������ָ�(ǰ�����»������Ȱ�װOracle����,�汾��ԭ��һ��),�����ǻָ�����.
+有些时候因为测试环境需要,我们需要使用生产库的备份集在另外一台新的机器上做恢复(前提是新机器事先安装Oracle软件,版本跟原库一致),下面是恢复过程.
 
-1.��ԭ������ȫ��(��ԭ���ϲ���)
+1.在原库上做全备(在原库上操作)
 run{
 allocate channel c1 device type disk;
 allocate channel c2 device type disk;
@@ -14986,26 +14986,26 @@ backup format '/u02/rman_backup/full_backup/arc_backup_%T_%s' archivelog all;
 release channel c1;
 release channel c2;
 }
-2.�鿴ԭ���DBID(��ԭ���ϲ���)
-��Ϊ�����ָ��Ĺ�������Ҫ�趨DBID,������Ҫ�ҵ�ԭ���DBID
+2.查看原库的DBID(在原库上操作)
+因为在做恢复的过程中需要设定DBID,这里需要找到原库的DBID
 SQL> select dbid from v$database;
       DBID
 ----------
 1820932955
 
------���µĲ���û������˵��,ȫ����Ŀ�Ŀ��ϲ���-----
-3.ʹ��ftp��ԭ���ϵı��ݼ�������Ŀ�Ŀ��Ŀ¼/u02/ftp/(�������ʡ��)
+-----以下的操作没有特殊说明,全部在目的库上操作-----
+3.使用ftp将原库上的备份集拷贝到目的库的目录/u02/ftp/(具体操作省略)
 
-4.���»����ϴ�������Ŀ¼
+4.在新机器上创建如下目录
 mkdir /u02/mydb
 mkdir -p /u02/mydb/oracl/{adump,bdump,cdump,dpdump,udump,pfile}
 mkdir -p /u02/mydb/oradata/oracl
 mkdir -p /u02/mydb/flash_recovery_area
 
-5.���������ļ�
+5.创建密码文件
 orapwd file=/u01/app/oracle/product/10.2.0/db_1/dbs/orapworacl.ora password=oracle
 
-6.�ָ������ļ�
+6.恢复参数文件
 [oracle@hxlbak ~]$ rman target /
 
 Recovery Manager: Release 10.2.0.1.0 - Production on Fri Jun 29 06:51:54 2012
@@ -15014,7 +15014,7 @@ Copyright (c) 1982, 2005, Oracle.  All rights reserved.
 
 connected to target database (not started)
 
-RMAN>set dbid 1820932955 -- �����dbid��Ҫ��ԭ�Ᵽ��һ��
+RMAN>set dbid 1820932955 -- 这里的dbid需要跟原库保持一致
 
 RMAN> startup nomount
 
@@ -15043,7 +15043,7 @@ channel ORA_DISK_1: SPFILE restore from autobackup complete
 Finished restore at 29-JUN-12
 
 
-���ݼ�full_backup_20120628_3��7�����˲����ļ�,�����ڱ������ݵ�ʱ���Ĭ�ϱ��ݲ����ļ�,������ԭ��ʹ��list backup�鿴,list backup���������������:
+备份集full_backup_20120628_3里7包含了参数文件,我们在备份数据的时候会默认备份参数文件,可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -15052,7 +15052,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_37
   SPFILE Included: Modification time: 28-JUN-12
 
-�ָ��˲����ļ�initoracl.ora��,��Ϊԭ���Ŀ�Ŀ���ļ������·����һ��,���ʱ����Ҫ�޸Ĳ����ļ�,�޸ĵĵط�����,���ļ�·��ָ����Ŀ¼:
+恢复了参数文件initoracl.ora后,因为原库和目的库各文件保存的路径不一致,这个时候需要修改参数文件,修改的地方如下,各文件路径指向新目录:
 
 *.audit_file_dest='/u02/mydb/oracl/adump'
 *.background_dump_dest='/u02/mydb/oracl/bdump'
@@ -15061,7 +15061,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 *.db_recovery_file_dest='/u02/mydb/flash_recovery_area'
 *.user_dump_dest='/u02/mydb/oracl/udump'
 
-7.ʹ�ñ༭�õĲ����ļ��������ݿ⵽nomount״̬���ָ������ļ�
+7.使用编辑好的参数文件启动数据库到nomount状态并恢复控制文件
 
 SQL> startup nomount pfile=/u01/app/oracle/product/10.2.0/db_1/dbs/initoracl.ora
 ORACLE instance started.
@@ -15073,7 +15073,7 @@ Database Buffers          734003200 bytes
 Redo Buffers                2969600 bytes
 SQL>
 
-�ָ������ļ�
+恢复控制文件
 RMAN> restore controlfile from '/u02/ftp/full_backup_20120628_36';
 
 Starting restore at 29-JUN-12
@@ -15088,7 +15088,7 @@ output filename=/u02/mydb/oradata/oracl/control02.ctl
 output filename=/u02/mydb/oradata/oracl/control03.ctl
 Finished restore at 29-JUN-12
 
-�������ļ�һ��,�ڱ������ݵ�ʱ���Ĭ�ϱ����˿����ļ�,���ݼ�full_backup_20120628_36�а����˿����ļ�,ͬ��������ԭ��ʹ��list backup�鿴,list backup���������������:
+跟参数文件一样,在备份数据的时候会默认备份了控制文件,备份集full_backup_20120628_36中包含了控制文件,同样可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -15097,13 +15097,13 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_36
   Control File Included: Ckp SCN: 1545845      Ckp time: 28-JUN-12
 
-8.�������ݿ⵽mount״̬��ע�ᱸ�ݼ�
+8.启动数据库到mount状态并注册备份集
 RMAN> alter database mount;
 
 database mounted
 released channel: ORA_DISK_1
 
-ע�ᱸ�ݼ�,��Ϊ�����ļ��еı����ı�����Ϣ��ԭ���,����������Ҫ����ע���¿�·���µı��ݼ�
+注册备份集,因为控制文件中的保留的备份信息是原库的,我们这里需要重新注册新库路径下的备份集
 RMAN> catalog start with '/u02/ftp/';
 
 Starting implicit crosscheck backup at 29-JUN-12
@@ -15154,7 +15154,7 @@ File Name: /u02/ftp/arc_backup_20120628_39
 File Name: /u02/ftp/full_backup_20120628_32
 File Name: /u02/ftp/full_backup_20120628_30
 
-9.�г���ǰ�����������ļ�
+9.列出当前的所有数据文件
 
 SQL> column name format a60;
 SQL> select file# as "file/grp#", name from v$datafile;
@@ -15177,9 +15177,9 @@ SQL> select file# as "file/grp#", name from v$datafile;
         13 /u02/app/oracle/oradata/oracl/hxl09.dbf';
         14 /u02/app/oracle/oradata/oracl/hxl10.dbf';
 
-���Կ���,��ǰ�����ļ��м�¼�������ļ���·����ԭ����·��,���������ָ���ʱ����Ҫָ���µ�·��.
+可以看到,当前控制文件中记录的数据文件的路径是原来的路径,我们在做恢复的时候需要指向新的路径.
 
-10.�ָ����ݿ�
+10.恢复数据库
 RMAN> run{
 set newname for datafile  1 to '/u02/mydb/oradata/oracl/system01.dbf';
 set newname for datafile  2 to '/u02/mydb/oradata/oracl/undotbs01.dbf';
@@ -15200,23 +15200,23 @@ switch datafile all;
 recover database;
 }
 
-11.�����ݿ�
+11.打开数据库
 alter database open resetlogs;
 
 -- The End --
 
 
-���ݱ�������SQL���
+根据表名搜索SQL语句
 STATS$SQLTEXT
 
 
-�����ͼ���Һ��Ի�,stats$sqltextһ��hash_value��ֻ��Ӧһ��sql����� 
+这个视图让我很迷惑,stats$sqltext一个hash_value是只对应一个sql语句吗 
 
-1�� stats$sqltext ��������
+1。 stats$sqltext 里有数据
 
-2����Ҫдһ��function ���õ�����SQL_TEXT
+2。需要写一个function 来得到完整SQL_TEXT
 PHP code:--------------------------------------------------------------------------------
-��һ����ȡSQLtext from stats$sqltext,ֻ�ܴ������� < 4000 �ġ�
+第一个获取SQLtext from stats$sqltext,只能处理长度 < 4000 的。
 CREATE OR REPLACE FUNCTION get_sql_old (
    hash_in   IN   INTEGER
 )
@@ -15245,7 +15245,7 @@ EXCEPTION
 END;
 /
 
-�ڶ������Ը����ȴ��� 4000��sqltext
+第二个，对付长度大于 4000的sqltext
 CREATE OR REPLACE procedure get_sql_proc_2 (
 hash_in  IN  INTEGER,
 sqltext  out varchar2,
@@ -15293,9 +15293,9 @@ BEGIN
 END;
 /
 
-rollingpig д������ű���ô����ͬһ��hash_value���кܶ� sqltext�Ƶ�,˭�ܰ��ҽ��ͽ����� 
+rollingpig 写的这个脚本怎么好象同一个hash_value会有很多 sqltext似的,谁能帮我解释解释吗 
 
-�����Ҫ�ָ��������ļ�
+检查需要恢复的数据文件
 --check
 select to_char(controlfile_change#),controlfile_time from v$database;
 select to_char(checkpoint_change#),checkpoint_time,last_change#,last_time from v$datafile;
@@ -15310,12 +15310,12 @@ declare v_sql varchar2(100);
 end;
 /
 
-shell �������Ŀ¼
+shell 创建多个目录
 mkdir -p $OBASE/admin/${NEWSID}/{adump,bdump,cdump,udump,dpdump}
 echo "inventory_loc=${OBASE}/oraInventory" > ${OBASE}/oraInst.loc
 echo "inst_group=dba" >> ${OBASE}/oraInst.loc
 
---������ͳ�ƴ�С
+--按序列统计大小
  select a.FIRST_TIME,
         a.sequence#,
         a.blocks * a.block_size / 1024 / 1024 log_size_mb
@@ -15324,7 +15324,7 @@ echo "inst_group=dba" >> ${OBASE}/oraInst.loc
     and a.dest_id=1
   order by a.FIRST_TIME desc
 
---��Сʱ��ѯ��־��С
+--按小时查询日志大小
 select a.time, trunc(sum(a.log_size_mb), 0) log_size_mb
   from (select to_char(FIRST_TIME, 'yyyy-mm-dd hh24') time,
                aa.blocks * aa.block_size / 1024 / 1024 log_size_mb
@@ -15335,7 +15335,7 @@ select a.time, trunc(sum(a.log_size_mb), 0) log_size_mb
  group by TIME
  order by time desc
 
---��Сʱ��ѯ�鵵����
+--按小时查询归档次数
 select a.time, count(a.sequence#) count
   from (select to_char(FIRST_TIME, 'yyyy-mm-dd hh24') time, sequence#
           from v$archived_log
@@ -15346,7 +15346,7 @@ select a.time, count(a.sequence#) count
  order by time desc
 
 
---������ͳ����־��
+--按天数统计日志量
  select a.time,sum(a.bytes) / 1024 / 1024/1024
    from (select to_char(FIRST_TIME, 'yyyy-mm-dd') time,
                 blocks * block_size bytes
@@ -15354,7 +15354,7 @@ select a.time, count(a.sequence#) count
  group by a.time
  order by a.time desc
 
---��ѯREDO����10MB��session
+--查询REDO大于10MB的session
 col machine format a20
 col osuser format a20
 set lines 150
@@ -15384,8 +15384,8 @@ from v$archived_log)
 group by trunc(completion_time)  having trunc(completion_time)> trunc(sysdate)-5 ;
 
 
-oracle��β�ѯÿ��鵵��־�Ĵ�С  2007-05-20 18:33:23
-���ࣺ Oracle
+oracle如何查询每天归档日志的大小  2007-05-20 18:33:23
+分类： Oracle
 SELECT trunc(first_time) "Date",
 to_char(first_time, 'Dy') "Day",
 count(1) "Total",
@@ -15420,7 +15420,7 @@ SELECT SUM(BLOCKS *BLOCK_SIZE )/1024/1024 AS "Size(M)",TRUNC(completion_time) FR
 GROUP BY TRUNC(completion_time)
 
 
-ͨ��v$mystat��ѯ ��ǰ session ��ͳ����Ϣ��ͬʱҲ���Բ��session ��Redo ���������
+通过v$mystat查询 当前 session 的统计信息，同时也可以查得session 的Redo 生成情况：
 
 col name format a30
 
@@ -15440,7 +15440,7 @@ redo size                           20112
 
 
 
-ͨ��v$sysstat ���ȫ��Redo ��������
+通过v$sysstat 查得全局Redo 的生成量
 
 col value for 9999999999999999
 
@@ -15458,9 +15458,9 @@ redo size                      3139476724
 
 
 
-��v$sysstat ��������ݿ�ʵ�����������ۻ���־�����������Ը���ʵ������ʱ����
+从v$sysstat 查得自数据库实例启动以来累积日志生成量，可以根据实例启动时间来
 
-���¹���ÿ�����ݿ���־��������
+大致估算每天数据库日志生成量：
 
 alter session set nls_date_format='yyyy-mm-dd HH24:mi:ss';
 
@@ -15484,7 +15484,7 @@ REDO_GD_PER_DAY
 
 
 
-�鵵��־��������v$archived_log ����һ��ʱ��Ĺ鵵��־�����й��㣺
+归档日志生成量，v$archived_log 根据一段时间的归档日志量进行估算：
 
 
 
@@ -15503,7 +15503,7 @@ NAME                                          COMPLETION_TIME             MB
 
 
 
-ĳ��ȫ����־���ɲ�ѯ���㣺
+某日全天日志生成查询计算：
 
 
 
@@ -15525,7 +15525,7 @@ TRUNC(COMPLETION_TI     DAY_GB
 
 
 
-������ڵ���־����ͳ�ƣ�
+最近日期的日志生成统计：
 
 _selecttrunc(completion_time),sum(mb)/1024 day_gb
 
@@ -15550,11 +15550,11 @@ TRUNC(COMPLETION_TI     DAY_GB
 
 
 
-����������ÿ�չ鵵����������Ҳ���Է���������ÿ�յ����ݿ��Լ������ԣ��������ռ�������⣨����ժ¼2011/9/16
+综述：根据每日归档的生成量，也可以反过来估计每日的数据库活动性及周期性，并决定空间分配问题（网络摘录2011/9/16
 
 
 
-�����Ա�SQL����ڲ�ִͬ�мƻ��е�ִ�����
+分析对比SQL语句在不同执行计划中的执行情况
 
 SELECT st2.SQL_ID,
    st2.PLAN_HASH_VALUE,
@@ -15612,7 +15612,7 @@ ORDER BY l_CPU_MINS DESC,
    st_long.CPU_MINS DESC,
    st2.PLAN_HASH_VALUE;
 
--- ������ݿ��ȿ�
+-- 检查数据库热块
 SET LINESIZE 200
 SET VERIFY OFF
 
@@ -15683,10 +15683,10 @@ WHERE  rownum < 11;
 
 
 
----- ִ�мƻ�����Ϣ
+---- 执行计划的信息
 set pagesize 1000
 
--- ��ѯ����library cache�е���ʵ��ִ�мƻ������dbms_xplan.display������ʾ��plan_table�еģ�����ʵ
+-- 查询的是library cache中的真实的执行计划，如果dbms_xplan.display则是显示的plan_table中的，不真实
 select * from table(dbms_xplan.display_cursor('&sid_id',null,'Typical'));
 
 select parent_id,
@@ -15707,9 +15707,9 @@ select parent_id,
 
 _controlfile_enqueue_timeout
 
-��Щʱ����Ϊ���Ի�����Ҫ,������Ҫʹ��������ı��ݼ�������һ̨�µĻ��������ָ�(ǰ�����»������Ȱ�װOracle����,�汾��ԭ��һ��),�����ǻָ�����.
+有些时候因为测试环境需要,我们需要使用生产库的备份集在另外一台新的机器上做恢复(前提是新机器事先安装Oracle软件,版本跟原库一致),下面是恢复过程.
 
-1.��ԭ������ȫ��(��ԭ���ϲ���)
+1.在原库上做全备(在原库上操作)
 run{
 allocate channel c1 device type disk;
 allocate channel c2 device type disk;
@@ -15719,26 +15719,26 @@ backup format '/u02/rman_backup/full_backup/arc_backup_%T_%s' archivelog all;
 release channel c1;
 release channel c2;
 }
-2.�鿴ԭ���DBID(��ԭ���ϲ���)
-��Ϊ�����ָ��Ĺ�������Ҫ�趨DBID,������Ҫ�ҵ�ԭ���DBID
+2.查看原库的DBID(在原库上操作)
+因为在做恢复的过程中需要设定DBID,这里需要找到原库的DBID
 SQL> select dbid from v$database;
       DBID
 ----------
 1820932955
 
------���µĲ���û������˵��,ȫ����Ŀ�Ŀ��ϲ���-----
-3.ʹ��ftp��ԭ���ϵı��ݼ�������Ŀ�Ŀ��Ŀ¼/u02/ftp/(�������ʡ��)
+-----以下的操作没有特殊说明,全部在目的库上操作-----
+3.使用ftp将原库上的备份集拷贝到目的库的目录/u02/ftp/(具体操作省略)
 
-4.���»����ϴ�������Ŀ¼
+4.在新机器上创建如下目录
 mkdir /u02/mydb
 mkdir -p /u02/mydb/oracl/{adump,bdump,cdump,dpdump,udump,pfile}
 mkdir -p /u02/mydb/oradata/oracl
 mkdir -p /u02/mydb/flash_recovery_area
 
-5.���������ļ�
+5.创建密码文件
 orapwd file=/u01/app/oracle/product/10.2.0/db_1/dbs/orapworacl.ora password=oracle
 
-6.�ָ������ļ�
+6.恢复参数文件
 [oracle@hxlbak ~]$ rman target /
 
 Recovery Manager: Release 10.2.0.1.0 - Production on Fri Jun 29 06:51:54 2012
@@ -15747,7 +15747,7 @@ Copyright (c) 1982, 2005, Oracle.  All rights reserved.
 
 connected to target database (not started)
 
-RMAN>set dbid 1820932955 -- �����dbid��Ҫ��ԭ�Ᵽ��һ��
+RMAN>set dbid 1820932955 -- 这里的dbid需要跟原库保持一致
 
 RMAN> startup nomount
 
@@ -15776,7 +15776,7 @@ channel ORA_DISK_1: SPFILE restore from autobackup complete
 Finished restore at 29-JUN-12
 
 
-���ݼ�full_backup_20120628_3��7�����˲����ļ�,�����ڱ������ݵ�ʱ���Ĭ�ϱ��ݲ����ļ�,������ԭ��ʹ��list backup�鿴,list backup���������������:
+备份集full_backup_20120628_3里7包含了参数文件,我们在备份数据的时候会默认备份参数文件,可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -15785,7 +15785,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_37
   SPFILE Included: Modification time: 28-JUN-12
 
-�ָ��˲����ļ�initoracl.ora��,��Ϊԭ���Ŀ�Ŀ���ļ������·����һ��,���ʱ����Ҫ�޸Ĳ����ļ�,�޸ĵĵط�����,���ļ�·��ָ����Ŀ¼:
+恢复了参数文件initoracl.ora后,因为原库和目的库各文件保存的路径不一致,这个时候需要修改参数文件,修改的地方如下,各文件路径指向新目录:
 
 *.audit_file_dest='/u02/mydb/oracl/adump'
 *.background_dump_dest='/u02/mydb/oracl/bdump'
@@ -15794,7 +15794,7 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 *.db_recovery_file_dest='/u02/mydb/flash_recovery_area'
 *.user_dump_dest='/u02/mydb/oracl/udump'
 
-7.ʹ�ñ༭�õĲ����ļ��������ݿ⵽nomount״̬���ָ������ļ�
+7.使用编辑好的参数文件启动数据库到nomount状态并恢复控制文件
 
 SQL> startup nomount pfile=/u01/app/oracle/product/10.2.0/db_1/dbs/initoracl.ora
 ORACLE instance started.
@@ -15806,7 +15806,7 @@ Database Buffers          734003200 bytes
 Redo Buffers                2969600 bytes
 SQL>
 
-�ָ������ļ�
+恢复控制文件
 RMAN> restore controlfile from '/u02/ftp/full_backup_20120628_36';
 
 Starting restore at 29-JUN-12
@@ -15821,7 +15821,7 @@ output filename=/u02/mydb/oradata/oracl/control02.ctl
 output filename=/u02/mydb/oradata/oracl/control03.ctl
 Finished restore at 29-JUN-12
 
-�������ļ�һ��,�ڱ������ݵ�ʱ���Ĭ�ϱ����˿����ļ�,���ݼ�full_backup_20120628_36�а����˿����ļ�,ͬ��������ԭ��ʹ��list backup�鿴,list backup���������������:
+跟参数文件一样,在备份数据的时候会默认备份了控制文件,备份集full_backup_20120628_36中包含了控制文件,同样可以在原库使用list backup查看,list backup输出部分内容如下:
 
 BS Key  Type LV Size       Device Type Elapsed Time Completion Time
 ------- ---- -- ---------- ----------- ------------ ---------------
@@ -15830,13 +15830,13 @@ BS Key  Type LV Size       Device Type Elapsed Time Completion Time
         Piece Name: /u02/rman_backup/full_backup/full_backup_20120628_36
   Control File Included: Ckp SCN: 1545845      Ckp time: 28-JUN-12
 
-8.�������ݿ⵽mount״̬��ע�ᱸ�ݼ�
+8.启动数据库到mount状态并注册备份集
 RMAN> alter database mount;
 
 database mounted
 released channel: ORA_DISK_1
 
-ע�ᱸ�ݼ�,��Ϊ�����ļ��еı����ı�����Ϣ��ԭ���,����������Ҫ����ע���¿�·���µı��ݼ�
+注册备份集,因为控制文件中的保留的备份信息是原库的,我们这里需要重新注册新库路径下的备份集
 RMAN> catalog start with '/u02/ftp/';
 
 Starting implicit crosscheck backup at 29-JUN-12
@@ -15887,7 +15887,7 @@ File Name: /u02/ftp/arc_backup_20120628_39
 File Name: /u02/ftp/full_backup_20120628_32
 File Name: /u02/ftp/full_backup_20120628_30
 
-9.�г���ǰ�����������ļ�
+9.列出当前的所有数据文件
 
 SQL> column name format a60;
 SQL> select file# as "file/grp#", name from v$datafile;
@@ -15910,9 +15910,9 @@ SQL> select file# as "file/grp#", name from v$datafile;
         13 /u02/app/oracle/oradata/oracl/hxl09.dbf';
         14 /u02/app/oracle/oradata/oracl/hxl10.dbf';
 
-���Կ���,��ǰ�����ļ��м�¼�������ļ���·����ԭ����·��,���������ָ���ʱ����Ҫָ���µ�·��.
+可以看到,当前控制文件中记录的数据文件的路径是原来的路径,我们在做恢复的时候需要指向新的路径.
 
-10.�ָ����ݿ�
+10.恢复数据库
 RMAN> run{
 set newname for datafile  1 to '/u02/mydb/oradata/oracl/system01.dbf';
 set newname for datafile  2 to '/u02/mydb/oradata/oracl/undotbs01.dbf';
@@ -15933,27 +15933,27 @@ switch datafile all;
 recover database;
 }
 
-11.�����ݿ�
+11.打开数据库
 alter database open resetlogs;
 
 -- The End --
 
 
- --�鿴���ݿ��Ƿ�����ƣ����value��ΪDB���������ݿ⼶��ƣ�ֻ�����ݿ⿪����Ʋſ��Խ������
+ --查看数据库是否开启审计，如果value列为DB则开启了数据库级审计，只有数据库开启审计才可以进行审计
 1.select name,value from v$parameter2 where name like '%audit_trail%';
 
---���Ŀ����û���Ŀ������е�dml����
+--审计目标库用户对目标表进行的dml操作
 2.audit update,delete,insert  on ggmgr.t_test_conn_for_gg by session;
 
---�鿴Ŀ��˵�ͬ�����Ƿ��ѿ�����ƣ���������Щ���(delete insert update ...)
+--查看目标端的同步表是否已开启审计，开启了哪些审计(delete insert update ...)
 3.select * from dba_obj_audit_opts where object_name=upper('t_test_conn_for_gg');
 
---����ʱ��鿴�������Ƽ�¼
+--根据时间查看对象的审计记录
 4.select * from dba_audit_object where timestamp>=sysdate-30;
 
-  ��ȫ����������һ�����ݱ�������SQL���Ĺ���. ��Statspack����һ������������ݿ���ִ�й���SQL, ��Ȼ����ȫ��, ��Ҳ�в��99.9%��. ֻ���������Ƿ��д�����, ����ֱ������ͨ��SQL���(like)������, �����п��ܱ��۷ִ����������. ����ķ���������, һ��д����, �����еĴ���һ��. ������ȫ�������е����Ӵ�����ʽ, ����ȫ����������ѯ. ��ѡ�����ȫ�������ķ�ʽ.
+  用全文索引做了一个根据表名查找SQL语句的功能. 在Statspack中有一个表存放了数据库中执行过的SQL, 虽然不是全部, 但也有差不多99.9%了. 只是由于它是分行存贮的, 不能直接用普通的SQL语句(like)来查找, 表名有可能被折分存放在两行中. 解决的方法有两种, 一是写过程, 将多行的串在一起. 二是用全文索引中的主从存贮方式, 建立全文索引来查询. 我选择的是全文索引的方式.
 
-    �Ƚ�����������ݿ�����, �ֳ�������, �����ʹӱ�.
+    先将这里面的数据拷出来, 分成两个表, 主表和从表.
 
 CREATE TABLE SQLS AS
   SELECT DISTINCT HASH_VALUE,'X' BODY FROM STATS$SQLTEXT;
@@ -15962,7 +15962,7 @@ CREATE TABLE SQL_DETAILS AS
   SELECT HASH_VALUE,PIECE,SQL_TEXT FROM STATS$SQLTEXT;
 ALTER TABLE SQL_DETAILS ADD PRIMARY KEY (HASH_VALUE, PIECE);
 
-    ����ȫ�������Ĵ�����ʽ��Lexer����.
+    创建全文索引的存贮方式及Lexer属性.
 
 begin
 ctx_ddl.create_preference('sqltext_pref', 'DETAIL_DATASTORE');
@@ -15987,30 +15987,30 @@ end;
 
 
 
-���������
-�����������ҵ������µ����֣�
-����������ִ�д�������Ȩ�ޣ���Ϊ�û�����ִ�д�������Adaptive Server Anywhere ������������Ӧ�����ݿ�ִ�еĲ�����������������ȷʵ����������ִ�еĲ���������Ȩ�ޣ����Ҷ�����Ȩ����ִ��ĳЩ������
-������ʹ�ö�������ЩȨ�޵ı��������ߵ�Ȩ�ޣ������ǵ��´������������û���Ȩ�ޣ����Ҳ��Ǵ����ô��������û���Ȩ�ޣ�ִ�С�
-�ڴ��������ñ�ʱ����ʹ�ñ������ߵ����Ա�ʸ��ҵ�û��ָ������ʽ���������Ƶı������磬��� user_1.Table_A �ϵĴ��������� Table_B������û��ָ�� Table_B �������ߣ���ô��Table_B �ͱ����Ѿ��� user_1 ���������ߣ�user_1 ���루ֱ�ӻ��ӵأ�����Ϊ Table_B �������ߵ�ĳ����ĳ�Ա��������������������߱����ô���������ʱ��������Ϣ [û���ҵ���]��
-���⣬user_1 �������ִ�иô�������ָ���Ĳ�����Ȩ�ޡ�
-����������Ҫb�û���a�û���table_B�����Ĳ���Ȩ��.(�����a�û��ġ�table_A�����ϵĴ��������ж�b�û���table_B������������ɾ���ĵĲ���,��ô����Ҫb�û���a�û���table_B����������ɾ���Ĳ���Ȩ��).
-Ȩ��: SELECT���x���� INSERT��׷�ӣ��� UPDATE��������DELETE
+解决方法：
+昨天在网上找到了以下的文字：
+您不能授予执行触发器的权限，因为用户不能执行触发器：Adaptive Server Anywhere 触发它们以响应对数据库执行的操作。不过，触发器确实具有与它所执行的操作关联的权限，并且定义其权限以执行某些操作。
+触发器使用定义了这些权限的表的所有者的权限（而不是导致触发器触发的用户的权限，并且不是创建该触发器的用户的权限）执行。
+在触发器引用表时，它使用表创建者的组成员资格找到没有指定的显式所有者名称的表。例如，如果 user_1.Table_A 上的触发器引用 Table_B，并且没有指定 Table_B 的所有者，那么，Table_B 就必须已经由 user_1 创建，或者，user_1 必须（直接或间接地）是作为 Table_B 的所有者的某个组的成员。如果这两个条件都不具备，该触发器触发时将出现消息 [没有找到表]。
+此外，user_1 必须具有执行该触发器中指定的操作的权限。
+所以我们需要b用户给a用户‘table_B’表的操作权限.(如果在a用户的‘table_A’表上的触发器中有对b用户‘table_B’表进行增、删、改的操作,那么就需要b用户给a用户‘table_B’表的增、删、改操作权限).
+权限: SELECT（讀）， INSERT（追加）， UPDATE（寫），DELETE
 
-GRANT Ȩ�� ON ���� TO �û���;
+GRANT 权限 ON 表名 TO 用户名;
 
-ע��:�����������û������Ǳ���������.
+注意:用这条语句的用户必须是表的所有者.
 
 
 
-������(Symptom)   ��
-����������ʱ������Ȩ�޲��㣬����������¡�
-Step01��system�����ݵ�½���ݿ�
+〖现象(Symptom)   〗
+创建触发器时，报告权限不足，具体过程如下。
+Step01：system的身份登陆数据库
 SQL> connect system@wm
 Enter password:
 Connected.
 
 
-Step02������������trigger_autoadd
+Step02：创建触发器trigger_autoadd
 SQL> CREATE OR REPLACE TRIGGER trigger_autoadd
  2    before insert
  3      on test.autoadd
@@ -16028,20 +16028,20 @@ LINE/COL ERROR
 -------- ------------------------------------------
 2/16    PL/SQL: ORA-01031: insufficient privileges
 2/4     PL/SQL: SQL Statement ignored
-�ڱ�autoadd�ϴ���������trigger_autoadd��
+在表autoadd上创建触发器trigger_autoadd。
 
 
-�û�system�н�ɫ��role��DBAȨ��,��DBA�Ѿ�����CREATE ANY TRIGGER
-��Ȩ��,��ˣ�system����create any trigger��Ȩ�ޡ�
+用户system有角色（role）DBA权限,而DBA已经就有CREATE ANY TRIGGER
+的权限,因此，system就有create any trigger的权限。
 
 
-Step03��system�û�Ҳ������autoadd��Ҳ�ܲ������ݿ⡣
+Step03：system用户也能往表autoadd中也能插入数据库。
 SQL> insert into test.autoadd
  2 values(4,'sdfds','sdfsdf');
 1 row inserted
 
 
-Step04������Ҳ�����������ʡ�
+Step04：序列也可以正常访问。
 SQL> select test.SEQ_id.nextval from dual;
 
 
@@ -16050,29 +16050,29 @@ SQL> select test.SEQ_id.nextval from dual;
       205
 
 
-��ͷǳ���֣��û�system��CREATE ANY TRIGGER��Ȩ�ޣ�system�з��ʴ������������õĶ��󣨱����ϵ�Ȩ�ޣ�Ϊʲô�����桰Ȩ�޲��㡱�أ�
+这就非常奇怪，用户system有CREATE ANY TRIGGER的权限，system有访问触发器中所引用的对象（表）上的权限，为什么还报告“权限不足”呢？
 
 
-��ԭ����Cause��   ��
-Ҫ�봴��������������Ҫ��CREATE TRIGGER��CREATE ANY TRIGGER��Ȩ�ޡ��磺
-Ҫ��ʹ�û�tt�д�����������Ȩ�ޣ���ִ�����
+〖原理（Cause）   〗
+要想创建触发器，必须要有CREATE TRIGGER，CREATE ANY TRIGGER的权限。如：
+要想使用户tt有创建触发器的权限，则执行命令：
 Grant CREATE TRIGGER to tt;
 
 
-Ҫ��ʹ�û�tt��������ģʽ(any schema)������������Ȩ�ޣ���ִ�����
+要想使用户tt有在其他模式(any schema)创建触发器的权限，则执行命令：
 Grant CREATE ANY TRIGGER to tt;
 
 
-�����У��û�system�Ѿ�����CREATE ANY TRIGGER�ͷ����κζ����Ȩ�ޡ���ô���û�System��ȻҲ�з������У�sequence��seq_id��Ȩ�ޣ��������Ȩ���Ǵӽ�ɫ��role��DBA�̳ж�����Ȩ�ޡ�������������trigger��ʱ��ORACLE��һ�����ƣ���������trigger����ӵ���߱��뱻��ʾ��explicitly��������ʴ�������trigger�����漰���Ķ����Ȩ��(Ҳ����˵��ЩȨ�޲����ɽ�ɫ�̳ж���)��
+本例中，用户system已经有了CREATE ANY TRIGGER和访问任何对象的权限。那么，用户System自然也有访问序列（sequence）seq_id的权限，但是这个权限是从角色（role）DBA继承而来的权限。创建触发器（trigger）时，ORACLE有一个限制，触发器（trigger）的拥有者必须被显示（explicitly）授予访问触发器（trigger）中涉及到的对象的权限(也就是说这些权限不能由角色继承而来)。
 
 
-��������Action��   ��
-Step01����ʾ��explicitly�����败������ӵ����(system)�������У�sequence��seq_id��Ȩ�ޡ�
+〖方法（Action）   〗
+Step01：显示（explicitly）授予触发器的拥有者(system)访问序列（sequence）seq_id的权限。
 SQL> grant select on test.seq_id to system;
 Grant succeeded.
 
 
-Step02���ٴ�ִ�д���������trigger_autoadd3�Ľű���
+Step02：再次执行创建触发器trigger_autoadd3的脚本。
 SQL> CREATE OR REPLACE TRIGGER trigger_autoadd3
  2  before insert
  3       on test.autoadd
@@ -16084,73 +16084,73 @@ SQL> CREATE OR REPLACE TRIGGER trigger_autoadd3
 
 
 Trigger created
-�����������ɹ���
+触发器创建成功。
 
 sed 's/^M//g' dos.txt | cat -v
 
 
 
-ժ Ҫ �ַ��������ò�����Ӱ��ORACLE���ݿ⺺����ʾ�Ĺؼ����⡣���Ĵ�ʵ�����������������ORACLE�����ַ����ķ��ࡢ���ɼ��趨������������ORACLE���ݿ⺺����ʾ����ĳ�������ԭ�򣬲���Ը�������ԭ���������֮��Ч�Ľ���취��
-   �ؼ��� ORACLE �ַ��� ������
+摘 要 字符集的设置不当是影响ORACLE数据库汉字显示的关键问题。本文从实践经验出发，介绍了ORACLE关于字符集的分类、构成及设定方法，分析了ORACLE数据库汉字显示乱码的常见现象及原因，并针对各种现象及原因提出了行之有效的解决办法。
+   关键字 ORACLE 字符集 乱码解决
 
 
-1 ����
-    ORACLE���ݿ���Ϊҵ�����ȵ����ݿ��Ʒ���������ڹ��ڴ�������ҵ�еõ��˹㷺��Ӧ�á���ȻORACLE���ݿ��Ʒ�����ڱ��ػ������������൱���죬�������в����û���Ӧ������ʾ��������⡣���ͬһ���ݿⲻͬ���û���ͬһ���е�username��ѯȴ�ó��˲�ͬ�Ľ���� ��ORACLE      ���͡�ORACLE�й����޹�˾������Ȼ����н������ַ���ʾΪ���룬��ôΪʲô�أ��ַ��������ò�����Ӱ��ORACLE���ݿ⺺����ʾ�Ĺؼ����⡣
-2 �����ַ���
-    �ַ�����ORACLEΪ��Ӧ��ͬ����������ʾ���趨�ġ����ں�����ʾ���ַ�����Ҫ��ZHS16CGB231280��ZHS16GBK��US7ASCII��UTF��8�ȡ��ַ���ͬʱ�����ڷ������˺Ϳͻ��ˡ����������ַ������ڰ�װORACLEʱָ���ģ��ַ����Ǽ���Ϣ�洢��ORACLE���ݿ��ֵ��V$NLS_PARAMETERS���У����ͻ����ַ�������ϵͳע�����WINDOWSϵͳ�������û��Ļ���������UNIXϵͳ�����趨�ġ�
-3 �ַ����Ĺ������趨
-    �ַ����Ĺ������趨��ʽ��Ϊ�ͻ���������������֣�
-    (1)�ͻ����ַ����Ĺ������趨���ͻ��˵��ַ������ɵ�ǰ�û��Ļ�������NLS_LANG�趨�ġ���������NLS_LANG�Ĺ��ɣ�
+1 引言
+    ORACLE数据库作为业界领先的数据库产品，近年来在国内大中型企业中得到了广泛的应用。虽然ORACLE数据库产品本身在本地化方面已做得相当成熟，但还是有不少用户反应汉字显示乱码的问题。如对同一数据库不同的用户对同一表中的username查询却得出了不同的结果： “ORACLE      ”和“ORACLE中国有限公司”，显然结果中将中文字符显示为乱码，那么为什么呢？字符集的设置不当是影响ORACLE数据库汉字显示的关键问题。
+2 关于字符集
+    字符集是ORACLE为适应不同语言文字显示而设定的。用于汉字显示的字符集主要有ZHS16CGB231280、ZHS16GBK、US7ASCII和UTF－8等。字符集同时存在于服务器端和客户端。服务器端字符集是在安装ORACLE时指定的，字符集登记信息存储在ORACLE数据库字典的V$NLS_PARAMETERS表中；而客户端字符集是在系统注册表（WINDOWS系统）或在用户的环境变量（UNIX系统）中设定的。
+3 字符集的构成与设定
+    字符集的构成与设定方式分为客户端与服务器端两种：
+    (1)客户端字符集的构成与设定。客户端的字符集是由当前用户的环境变量NLS_LANG设定的。环境变量NLS_LANG的构成：
 NLS_LANG=language_territory.charset
-���У�
-language ָ����������Ϣ������
-territory   ָ�������������ں����ָ�ʽ
-charset    ָ���ַ���
-�����ɷֿ���������ϣ����磺
+其中，
+language 指定服务器消息的语言
+territory   指定服务器的日期和数字格式
+charset    指定字符集
+三个成分可以任意组合，例如：
 AMERICAN_AMERICA.US7SCII
 SIMPLIFIED CHINESE_CHINA.ZHS16GBK
 AMERICAN_AMERICA. ZHS16GBK
-    �ͻ����ַ������趨������Բ�ͬ����ϵͳ�趨�������в�ͬ��WINDOWSϵͳ����ע����HKEY_LOCAL_MACHINE\SOFTWARE\ORACLE\HOME0\NLS_LANG���趨��UNIXϵͳ���ڵ�ǰ�û��Ļ����������趨�����ڵ�ǰ�û���profile�ļ�������һ�����´��룺
-NLS_LANG=SIMPLIFIED Chinese_CHINA.ZHS16GBK��export NLS_LANG
-    (2)������ַ����Ĺ������趨��������ַ����Ĺ��������������ֵ��V$NLS_PARAMETERS��NLS_LANGUAGE��NLS_TERRITORY��NLS_CHARACTERSET����ȡֵ�ϣ�����NLS_CHARACTERSET��ȡֵ���Ǿ�������ݿ��ַ����������ò�ѯ���SQL>SELECT * FROM V$NLS_PARAMETERS;
-�ɵõ����½����
+    客户端字符集的设定方法针对不同操作系统设定方法稍有不同：WINDOWS系统是在注册表项：HKEY_LOCAL_MACHINE\SOFTWARE\ORACLE\HOME0\NLS_LANG中设定；UNIX系统是在当前用户的环境变量中设定，如在当前用户的profile文件中增加一行如下代码：
+NLS_LANG=SIMPLIFIED Chinese_CHINA.ZHS16GBK；export NLS_LANG
+    (2)服务端字符集的构成与设定。服务端字符集的构成体现在数据字典表V$NLS_PARAMETERS的NLS_LANGUAGE、NLS_TERRITORY、NLS_CHARACTERSET三项取值上，其中NLS_CHARACTERSET的取值就是具体的数据库字符集。如利用查询语句SQL>SELECT * FROM V$NLS_PARAMETERS;
+可得到如下结果：
 PARAMETER                   VALUE
 ------------------------------------------------------------
 NLS_LANGUAGE           SIMPLIFIED CHINESE
 NLS_TERRITORY               CHINA
-����
+……
 NLS_CHARACTERSET           ZHS16GBK
-����
-    ����ǰ���ݿ�ʹ�õ��ַ�����ZHS16GBK��
-    ���ݿ����˵��ַ������ڴ�������ʱ�趨�ġ�����ͨ�����·��������趨���ַ��������޸ģ�
-    ����һ���ؽ����ݿ⡣�������ݿ�ʱ�����ݿ���ַ����趨Ϊ�����ַ�����
-    ���������޸�SYS.PROPS$��������SYS�û���½ORACLE��������������޸���Ӧ���ַ������ύ��
-SQL>UPDATE PROPS$ SET VALUE$=��ZHS16GBK��
-WHERE NAME=��NLS_CHARACTERSET��;
+……
+    即当前数据库使用的字符集是ZHS16GBK。
+    数据库服务端的字符集是在创建数据时设定的。但可通过如下方法对已设定的字符集进行修改：
+    方法一：重建数据库。建立数据库时将数据库的字符集设定为所需字符集。
+    方法二：修改SYS.PROPS$表。即用SYS用户登陆ORACLE后，利用下面语句修改相应的字符集并提交：
+SQL>UPDATE PROPS$ SET VALUE$=’ZHS16GBK‘
+WHERE NAME=’NLS_CHARACTERSET’;
 SQL>COMMIT;
-    ͨ�����ַ������������ݿ��ַ�����ֻ�Ը��ĺ��������Ч�������ݿ���ԭ������������ԭ�ַ������洢��
-    ���⣬�еĻ�����CREATE DATABASE CHARACTER SET ZHS16GBK������ʱ���޸��ַ��������������ݿ�����ݿ��ַ������ָ�ԭ�����ַ�����
-4 �����ĺ����������⼰�������
-    Ҫ�ڿͻ�����ȷ��ʾORACLE���ݿ��еĺ�����Ϣ�����ȱ���ʹ�ͻ��˵��ַ�����������˵��ַ���һ�£�����Ǽ��ص�ORACLE���ݿ�������ַ���������������ַ���һ�¡��ݴˣ�������ʾ�����������¿��Է�Ϊ���¼��������
-    (1)�ͻ����ַ�������������ַ�����ͬ�����������ַ�������������ַ���һ�¡��������������ģ�ֻҪ�ѿͻ��˵��ַ���������ȷ���ɡ�������������
-     ��һ������ѯV$NLS_PARAMETERS�õ�����˵��ַ�����
+    通过此种方法来更改数据库字符集，只对更改后的数据有效，即数据库中原来的数据仍以原字符集被存储。
+    另外，有的还利用CREATE DATABASE CHARACTER SET ZHS16GBK命令暂时的修改字符集，当重启数据库后，数据库字符集将恢复原来的字符集。
+4 常见的汉字乱码问题及解决方案
+    要在客户端正确显示ORACLE数据库中的汉字信息，首先必须使客户端的字符集与服务器端的字符集一致；其次是加载到ORACLE数据库的数据字符集必须与服务器字符集一致。据此，汉字显示乱码的问题大致可以分为以下几种情况：
+    (1)客户端字符集与服务器端字符集不同，服务器端字符集与加载数据字符集一致。这种情况是最常见的，只要把客户端的字符集设置正确即可。具体解决方案：
+     第一步：查询V$NLS_PARAMETERS得到服务端的字符集：
 SQL>SELECT * FROM V$NLS_PARAMETERS;
 PARAMETER                       VALUE
 -----------------------------------------------------
 NLS_LANGUAGE      SIMPLIFIED CHINESE
 NLS_TERRITORY                  CHINA
-                                        ����������������
+                                        ……………………
 NLS_CHARACTERSET          ZHS16GBK
-                                         ����������������
-    �ڶ��������ݷ���˵��ַ����趨�ͻ��˵��ַ������趨�����μ��ͻ��˵��ַ������趨��ʽ����UNIXϵͳΪ�������ڵ�ǰ�û���profile�ļ��������������У�
+                                         ……………………
+    第二步：根据服务端的字符集设定客户端的字符集，设定方法参见客户端的字符集的设定方式。以UNIX系统为例，可在当前用户的profile文件中增加如下两行：
     NLS_LANG=SIMPLIFIED Chinese_CHINA.ZHS16GBK
     export NLS_LANG
-    (2)�ͻ����ַ�������������ַ�����ͬ�����������ַ�������������ַ�����һ�¡��������һ�㷢����ORACLE�汾���������°�װ���ݿ�ʱѡ������ԭ�����ݿⲻͬ���ַ��������ָ����صı����������ǰ�ԭ�ַ���ж���ĳ��ϡ���һ������Ǽ��ش�����ʹ�ò�ͬ�ַ�����ORACLE���ݿ�ж�������ݡ�������������У����ܿͻ����ַ�������������ַ����Ƿ�һ�¶��޷���ȷ��ʾ���֡�������������
-    ����һ����������ַ������޸ķ����޸ķ�����ַ�������������ַ���һ�£�Ȼ�������ݡ�
-    ���������������ݸ�ʽת�����ܿ��ַ������������⡣���Ƚ��������ݵ��뵽�����ַ���һ�µ����ݿ��У�Ȼ���ٽ�����Ҫô���ı���ʽ��������������С������£���Ҫôͨ�����������ߣ���POWER BUILDER��ACCESS��FOXPRO�ȣ��������ݣ���󽫵��������ݵ��뵽Ŀ�����ݿ��С�
-    (3)�ͻ����ַ�������������ַ�����ͬ��������ַ��������������ַ�����ͬ������������ڿͻ����ַ�������������ַ�����һ��ʱ���ӿͻ��������˺�����Ϣ���������Щ��Ϣ�����ǰѿͻ����ַ���������ȷ��Ҳ�޷���ʾ���֡�����������޸Ŀͻ����ַ����������ַ���һ�º������������ݡ�
-5 ������
-    ����ORACLE�ٷ��ĵ���˵����һ�����ݿⴴ�������ݿ���ַ����ǲ��ܸı�ġ���ˣ���ǰ�����Լ������ݿ⽫ѡ����һ���ַ�����ʮ����Ҫ�ġ����ݿ��ַ���ѡ���һ������ǽ����ݿ��ַ����趨Ϊ����ϵͳ�����ַ�����һ��������ͬʱ���ݿ��ַ���ҲӦ�������пͻ��ַ����ĳ�������ͬ�������Ļ�������ѡ��ZHS16CGB231280����ZHS16GBKʱ�����Ǹ���������ѡ��ZHS16GBK����Ϊ��������ZHS16CGB231280�ַ�����
+    (2)客户端字符集与服务器端字符集相同，服务器端字符集与加载数据字符集不一致。这种情况一般发生在ORACLE版本升级或重新安装数据库时选择了与原来数据库不同的字符集，而恢复加载的备份数据仍是按原字符集卸出的场合。另一种情况是加载从其它使用不同字符集的ORACLE数据库卸出的数据。在这两种情况中，不管客户端字符集与服务器端字符集是否一致都无法正确显示汉字。具体解决方案：
+    方案一：按服务端字符集的修改方法修改服务端字符集与加载数据字符集一致，然后导入数据。
+    方案二：利用数据格式转储，避开字符集带来的问题。即先将加载数据倒入到与其字符集一致的数据库中，然后再将数据要么按文本格式导出（数据量较小的情况下），要么通过第三方工具（如POWER BUILDER，ACCESS，FOXPRO等）倒出数据，最后将倒出的数据导入到目标数据库中。
+    (3)客户端字符集与服务器端字符集不同，服务端字符集与输入数据字符集不同。这种情况是在客户端字符集与服务器端字符集不一致时，从客户端输入了汉字信息。输入的这些信息即便是把客户端字符集更改正确，也无法显示汉字。解决方案：修改客户端字符集与服务端字符集一致后，重新输入数据。
+5 结束语
+    根据ORACLE官方文档的说明，一旦数据库创建后，数据库的字符集是不能改变的。因此，提前考虑自己的数据库将选用哪一种字符集是十分重要的。数据库字符集选择的一般规则是将数据库字符集设定为操作系统本地字符集的一个超集，同时数据库字符集也应该是所有客户字符集的超集。如同样是中文环境，在选择ZHS16CGB231280还是ZHS16GBK时，我们更多的情况是选择ZHS16GBK，因为它包含了ZHS16CGB231280字符集。
 
 
 
@@ -16161,71 +16161,71 @@ NLS_CHARACTERSET          ZHS16GBK
 
 
 
-    ����������ȫ������.
+    接下来创建全文索引.
 
 CREATE INDEX SQL_CTX on SQLS(body) indextype is ctxsys.context
 parameters('datastore sqltext_pref LEXER sqltext_lex');
-    �������Ϳ��Բ�ѯ��.
+    接下来就可以查询了.
 
 SELECT HASH_VALUE FROM SQLS WHERE CONTAINS(BODY,'tablename and ...') > 0
-    ������Ҫ�ú��������������.
+    接下来要好好用用这个功能了.
 
-oracle����ϵ
-oracle����ϵ���Ӵ�Ҫѧϰ��������Ҫ�˽�oracle�Ŀ�ܡ��������Ҫ�Ľ�һ��oracle�ļܹ����ó�ѧ�߶�oracle��һ���������ʶ��
+oracle的体系
+oracle的体系很庞大，要学习它，首先要了解oracle的框架。在这里，简要的讲一下oracle的架构，让初学者对oracle有一个整体的认识。
 
-1�������ṹ���ɿ����ļ��������ļ���������־�ļ��������ļ����鵵�ļ��������ļ���ɣ�
-�����ļ�������ά������֤���ݿ������Եı�Ҫ��Ϣ�����磬�����ļ�����ʶ�������ļ���������־�ļ���һ�����ݿ�������Ҫһ�������ļ�
-�����ļ����洢���ݵ��ļ�
-������־�ļ����������ݿ������ĸ��ļ�¼��������һ���ֹ��Ͽ����������ݻָ���һ�����ݿ�������Ҫ����������־�ļ�
-�����ļ�������Oracle ���̵����ԣ���������������SGA ��һЩ�ڴ�ṹ��С�Ĳ���
-�鵵�ļ�����������־�ļ����ѻ���������Щ�������ܶ��ڴӽ���ʧ���н��лָ��ܱ�Ҫ��
-�����ļ�����֤��Щ�û���Ȩ�������͹ر�Oracle����
+1、物理结构（由控制文件、数据文件、重做日志文件、参数文件、归档文件、密码文件组成）
+控制文件：包含维护和验证数据库完整性的必要信息、例如，控制文件用于识别数据文件和重做日志文件，一个数据库至少需要一个控制文件
+数据文件：存储数据的文件
+重做日志文件：含对数据库所做的更改记录，这样万一出现故障可以启用数据恢复。一个数据库至少需要两个重做日志文件
+参数文件：定义Oracle 例程的特性，例如它包含调整SGA 中一些内存结构大小的参数
+归档文件：是重做日志文件的脱机副本，这些副本可能对于从介质失败中进行恢复很必要。
+密码文件：认证哪些用户有权限启动和关闭Oracle例程
 
-2���߼��ṹ�����ռ䡢�Ρ������飩
-���ռ䣺�����ݿ��еĻ����߼��ṹ��һϵ�������ļ��ļ��ϡ�
-�Σ��Ƕ��������ݿ���ռ�õĿռ�
-������Ϊ����һ����Ԥ����һ���ϴ�Ĵ洢�ռ�
-�飺ORACLE������Ĵ洢��λ���ڽ������ݿ��ʱ��ָ��
+2、逻辑结构（表空间、段、区、块）
+表空间：是数据库中的基本逻辑结构，一系列数据文件的集合。
+段：是对象在数据库中占用的空间
+区：是为数据一次性预留的一个较大的存储空间
+块：ORACLE最基本的存储单位，在建立数据库的时候指定
 
-3���ڴ���䣨SGA��PGA��
-SGA�������ڴ洢���ݿ���Ϣ���ڴ���������ϢΪ���ݿ������������������Oracle �����������ݺͿ�����Ϣ, ������Oracle ��������פ���ļ������ʵ���ڴ��е��Է��䣬���ʵ���ڴ治�����������ڴ���д��
-PGA�������������������̻򵥸���̨���̵����ݺͿ�����Ϣ���뼸�����̹�����SGA ���෴PGA ��ֻ��һ������ʹ�õ�����PGA �ڴ�������ʱ��������ֹ����ʱ����
+3、内存分配（SGA和PGA）
+SGA：是用于存储数据库信息的内存区，该信息为数据库进程所共享。它包含Oracle 服务器的数据和控制信息, 它是在Oracle 服务器所驻留的计算机的实际内存中得以分配，如果实际内存不够再往虚拟内存中写。
+PGA：包含单个服务器进程或单个后台进程的数据和控制信息，与几个进程共享的SGA 正相反PGA 是只被一个进程使用的区域，PGA 在创建进程时分配在终止进程时回收
 
-4����̨���̣�����д���̡���־д���̡�ϵͳ��ء����̼�ء�������̡��鵵���̡�������̡��û����̣�
-����д���̣����𽫸��ĵ����ݴ����ݿ⻺�������ٻ���д�������ļ�
-��־д���̣���������־�������еĸ���д������������־�ļ�
-ϵͳ��أ�������ݿ��һ�������б�Ҫ���������ݿ��ʱ�������ݿ�Ļָ�
-���̼�أ�������һ��Oracle ����ʧ��ʱ������Դ
-������̣�������ÿ�����������ٻ����еĸ������õؼ�¼�����ݿ���ʱ,���¿����ļ��������ļ��е����ݿ�״̬��Ϣ��
-�鵵���̣���ÿ����־�л�ʱ����������־����б��ݻ�鵵
-������̣��û����̷���
-�û����̣��ڿͻ��ˣ������û���SQL ��䴫�ݸ�������̣����ӷ��������ûز�ѯ���ݡ�
+4、后台进程（数据写进程、日志写进程、系统监控、进程监控、检查点进程、归档进程、服务进程、用户进程）
+数据写进程：负责将更改的数据从数据库缓冲区高速缓存写入数据文件
+日志写进程：将重做日志缓冲区中的更改写入在线重做日志文件
+系统监控：检查数据库的一致性如有必要还会在数据库打开时启动数据库的恢复
+进程监控：负责在一个Oracle 进程失败时清理资源
+检查点进程：负责在每当缓冲区高速缓存中的更改永久地记录在数据库中时,更新控制文件和数据文件中的数据库状态信息。
+归档进程：在每次日志切换时把已满的日志组进行备份或归档
+服务进程：用户进程服务。
+用户进程：在客户端，负责将用户的SQL 语句传递给服务进程，并从服务器段拿回查询数据。
 
-5��oracle���̣�Oracle ������SGA �ڴ�ṹ�����ڹ������ݿ�ĺ�̨������ɡ�����һ��ֻ�ܴ򿪺�ʹ��һ�����ݿ⡣
+5、oracle例程：Oracle 例程由SGA 内存结构和用于管理数据库的后台进程组成。例程一次只能打开和使用一个数据库。
 
-6��SCN(System Change Number)��ϵͳ�ı�ţ�һ����ϵͳ�ڲ�ά�������кš���ϵͳ��Ҫ���µ�ʱ���Զ����ӣ�����ϵͳ��ά�����ݵ�һ���Ժ�˳��ָ�����Ҫ��־��
+6、SCN(System Change Number)：系统改变号，一个由系统内部维护的序列号。当系统需要更新的时候自动增加，他是系统中维持数据的一致性和顺序恢复的重要标志。
 
-����ѧϰ
-���������Կ�OCP֤�飬��oracle����һ��ϵͳ��ѧϰ��Ȼ��Oracle Concepts��oracle online document,��oracle��ԭ�����и�������˽⣬ͬʱ���Կ�ʼ����һЩר����о��磺RMAN��RAS��STATSPACT��DATAGUARD��TUNING��BACKUP&RECOVER�ȵȡ�
+深入学习
+管理：可以考OCP证书，对oracle先有一个系统的学习，然后看Oracle Concepts、oracle online document,对oracle的原理会有更深入的了解，同时可以开始进行一些专题的研究如：RMAN、RAS、STATSPACT、DATAGUARD、TUNING、BACKUP&RECOVER等等。
 
-��������������Oracle�����ģ����˽���Oracle��������ϵ�ṹ֮�󣬿����ص��עPL/SQL��Oracle�Ŀ���������һ���֡� PL/SQL��Ҫ�ǰ�����ôдSQL��䣬��ôʹ��Oracle�����ĺ�������ôд�洢���̡��洢�������������ȡ� Oracle�Ŀ���������Ҫ����Oracle�Լ���Developer Suite��Oracle Forms Developer and Reports Developer��Щ����ѧ���������ʹ����Щ���ߡ�
-���ܼ���oracle���ŵĺ���
+开发：对于想做Oracle开发的，在了解完Oracle基本的体系结构之后，可以重点关注PL/SQL及Oracle的开发工具这一部分。 PL/SQL主要是包括怎么写SQL语句，怎么使用Oracle本身的函数，怎么写存储过程、存储函数、触发器等。 Oracle的开发工具主要就是Oracle自己的Developer Suite（Oracle Forms Developer and Reports Developer这些），学会如何熟练使用这些工具。
+介绍几本oracle入门的好书
 
-oracle�ٷ��ĵ�����concept�����潲��oracle����ϵ�͸�����ʺϳ�ѧ�߿���
+oracle官方文档：《concept》上面讲了oracle的体系和概念，很适合初学者看。
 
-OCP�Ľ�ѧ���飬Ҳ����STUDY GUIDE(SG)��
-Oracle8i ���ݻָ��ֲ�
-Oracle8�߼��������Ż�
-Oracle8i PLSQL�������
-Oracle8���ݿ����Ա�ֲ�
-�����鱾���ǻ�е��ҵ��������档
+OCP的教学用书，也就是STUDY GUIDE(SG)。
+Oracle8i 备份恢复手册
+Oracle8高级管理与优化
+Oracle8i PLSQL程序设计
+Oracle8数据库管理员手册
+以上书本都是机械工业出版社出版。
 
-���ܼ�����վ
-http://tahiti.oracle.com oracle�Ĺٷ��ĵ�
-����http://www.oracle.com.cn/onlinedoc/index.htmҲ�йٷ��ĵ����ٶ����
-http://metalink.oracle.com/ oracle�ļ���֧����վ����Ҫ����Oracle���������һ���ʺţ����ܵ�½���д�����Knowledge Base���������������顣
-http://www.oracle.com oracle�Ĺٷ���վ������������down oracle���������ٷ��ĵ��ͻ�����µ���Ϣ
-http://www.dbazine.com/ Oracle����־
+介绍几个网站
+http://tahiti.oracle.com oracle的官方文档
+现在http://www.oracle.com.cn/onlinedoc/index.htm也有官方文档，速度奇快
+http://metalink.oracle.com/ oracle的技术支持网站。需要购买Oracle服务才能有一个帐号，才能登陆，有大量的Knowledge Base，大量问题解决经验。
+http://www.oracle.com oracle的官方网站，可以在这里down oracle的软件、官方文档和获得最新的消息
+http://www.dbazine.com/ Oracle的杂志
 http://asktom.oracle.com
 http://www.orafaq.net/
 http://www.ixora.com.au/
@@ -16234,30 +16234,30 @@ http://www.dba-oracle.com/oracle_links.htm
 
 
 
-oracle10g��sysaux�ռ䱩����ռ����
+oracle10g的sysaux空间暴增与空间回收
 
 
 
-��Oracle10�б��ռ�SYSAUX���룬oracle��ͳ����Ϣ�洢�������Ҳ��Ϊ�˸��õ��Ż�system���ռ䣬���ǿ�������ͼV$SYSAUX_OCCUPANTS �鿴��oracle����Щ���ݴ�����SYSAUX�С�
+在Oracle10中表空间SYSAUX引入，oracle把统计信息存储在这里，这也是为了更好的优化system表空间，我们可以用视图V$SYSAUX_OCCUPANTS 查看，oracle有哪些数据存贮在SYSAUX中。
 
 SELECT occupant_name, space_usage_kbytes FROM V$SYSAUX_OCCUPANTS;
 
 
 
-oracle��SM/AWR, SM/ADVISOR, SM/OPTSTAT and SM/OTHER��ͳ����Ϣ���洢��SYSAUX�У������ص����SM/OPTSTAT��
+oracle的SM/AWR, SM/ADVISOR, SM/OPTSTAT and SM/OTHER的统计信息都存储在SYSAUX中，这里重点介绍SM/OPTSTAT。
 
-SM/OPTSTAT�����ڴ洢�ϰ汾���Ż�ͳ����Ϣ����oracle10g�У��������ֶ����Զ�����ͳ����Ϣʹoracleѡ���˴����ִ�мƻ���oracle10g�ǿ��Իָ��ɰ汾��ͳ����Ϣ�����ͳ����ϢĬ�ϱ���31��
+SM/OPTSTAT：用于存储老版本的优化统计信息，在oracle10g中，在我们手动或自动更新统计信息使oracle选择了错误的执行计划。oracle10g是可以恢复旧版本的统计信息，这个统计信息默认保存31天
 
 
 
-��ѯ��ǰSM/OPTSTAT��ͳ����Ϣ�ı���ʱ��
+查询当前SM/OPTSTAT的统计信息的保存时间
 SQL> select dbms_stats.get_stats_history_retention from dual;
 
 GET_STATS_HISTORY_RETENTION
 ---------------------------
                          31
 
-�޸�SM/OPTSTAT��ͳ����Ϣ�ı���ʱ��Ϊ10��
+修改SM/OPTSTAT的统计信息的保存时间为10天
 SQL> exec dbms_stats.alter_stats_history_retention(10);
 
 PL/SQL procedure successfully completed
@@ -16270,7 +16270,7 @@ GET_STATS_HISTORY_RETENTION
 
 SQL>
 
-ɾ��16��ǰ��ͳ������
+删除16天前的统计数据
 SQL> exec dbms_stats.purge_stats(sysdate-16);
 
 PL/SQL procedure successfully completed
@@ -16279,32 +16279,32 @@ SQL>
 
 
 
-�鿴��ǰ��Ч��ͳ�������ǵ�ʲôʱ���
+查看当前有效的统计数据是到什么时间的
 SQL> select DBMS_STATS.GET_STATS_HISTORY_AVAILABILITY from dual;
 
 GET_STATS_HISTORY_AVAILABILITY
 --------------------------------------------------------------------------------
-12-2�� -12 07.15.49.000000000 ���� +08:00
+12-2月 -12 07.15.49.000000000 下午 +08:00
 
-��ɾ��7��ǰ��ͳ������
+再删除7天前的统计数据
 SQL> exec dbms_stats.purge_stats(sysdate-7);
 
 PL/SQL procedure successfully completed
 
-���ʱ������Ч��ͳ����Ϣʱ���Ѿ�����
+这个时候发现有效的统计信息时间已经变了
 SQL> select DBMS_STATS.GET_STATS_HISTORY_AVAILABILITY from dual;
 
 GET_STATS_HISTORY_AVAILABILITY
 --------------------------------------------------------------------------------
-14-2�� -12 07.15.57.000000000 ���� +08:00
+14-2月 -12 07.15.57.000000000 下午 +08:00
 
 SQL>
 
-���ʱ����Ȼɾ�������ݣ����ռ仹û�л��գ���λ��տռ��أ�
+这个时候虽然删除了数据，但空间还没有回收，如何回收空间呢？
 
 
 
-û���ͷſռ�����Ϊ��purge_stats����delete�ķ�ʽɾ�����ݣ���Ȼ����û�ˣ�����HWM��û���������鿴OPTSTATʹ����Щ����Ȼ�󽵵����ˮλ���ɡ�
+没有释放空间是因为“purge_stats”用delete的方式删除数据，虽然数据没了，但是HWM还没降下来，查看OPTSTAT使用哪些表，然后降低其高水位即可。
 SQL> SELECT s.object_name from dba_objects s where s.object_name like '%OPTSTAT%' and s.object_type='TABLE'
   2  ;
 
@@ -16324,7 +16324,7 @@ SQL>
 
 
 
-�ٽ������sql�ж��ĸ�����Ȼ���move�ĸ���
+再结合如下sql判断哪个表大，然后就move哪个表
 SQL> select a.table_name,a.num_rows from dba_tables a where  a.tablespace_name='SYSAUX' and a.table_name like '%OPTSTAT%'
   2  ;
 
@@ -16341,7 +16341,7 @@ WRI$_OPTSTAT_TAB_HISTORY             1323
 
 SQL>
 
-���������������ر�����������Ϊmove����������ʧЧ����Ҫ�ؽ�����
+再用如下语句查出相关表的索引，因为move表，索引会失效，需要重建索引
 SQL> select i.index_name,i.table_name,i.status,i.table_owner
   2   from dba_indexes i,dba_objects s where i.table_name=s.object_name and  s.object_name like '%OPTSTAT%' and s.object_type='TABLE'
   3  ;
@@ -16364,7 +16364,7 @@ I_WRI$_OPTSTAT_OPR_STIME       WRI$_OPTSTAT_OPR               VALID    SYS
 SQL>
 
 
-����HWM
+降低HWM
 sql> alter table WRI$_OPTSTAT_TAB_HISTORY move;
 sql> alter table WRI$_OPTSTAT_OPR move;
 sql> alter table WRI$_OPTSTAT_IND_HISTORY move;
@@ -16375,7 +16375,7 @@ sql> alter table OPTSTAT_HIST_CONTROL$ move;
 
 
 
-�ؽ�����
+重建索引
 alter index I_WRI$_OPTSTAT_TAB_OBJ#_ST  rebuild online;
 alter index I_WRI$_OPTSTAT_TAB_ST rebuild online;
 alter index I_WRI$_OPTSTAT_IND_OBJ#_ST rebuild online;
@@ -16389,25 +16389,25 @@ alter index I_WRI$_OPTSTAT_OPR_STIME rebuild online;
 
 
 
-����������벻�ɹ�����Ҫcreate indexe
+如果索引编译不成功，就要create indexe
 
-�������������DDL���
+用如下语句生成DDL语句
 SQL> set long 4000
 SQL> select dbms_metadata.get_ddl('INDEX','I_WRI$_OPTSTAT_IND_OBJ#_ST','SYS') from dual;
 SQL> select dbms_metadata.get_ddl('INDEX','I_WRI$_OPTSTAT_TAB_ST','SYS') from dual;
 
 
 
-��λָ�ͳ����Ϣ
+如何恢复统计信息
 
 
 
-���������鵽ͳ����Ϣ��ʱ���
-select TABLE_NAME, STATS_UPDATE_TIME from dba_tab_stats_history��
+用如下语句查到统计信息的时间点
+select TABLE_NAME, STATS_UPDATE_TIME from dba_tab_stats_history；
 
 
 
-���԰���Ҫ����ʱ���ָ�ͳ����Ϣ
+可以按需要根据时间点恢复统计信息
 execute DBMS_STATS.RESTORE_TABLE_STATS ('owner','table',date)
 execute DBMS_STATS.RESTORE_DATABASE_STATS(date)
 execute DBMS_STATS.RESTORE_DICTIONARY_STATS(date)
@@ -16417,7 +16417,7 @@ execute DBMS_STATS.RESTORE_SYSTEM_STATS(date)
 
 
 
-���磺
+例如：
 SQL> execute dbms_stats.restore_table_stats ('SKATE','BK_ADMIN',sysdate -1);
 
 PL/SQL procedure successfully completed
@@ -16426,36 +16426,36 @@ SQL>
 
 
 
-�ο��ĵ���[ID 329984.1], [ID 452011.1],[ID 454678.1]
+参考文档：[ID 329984.1], [ID 452011.1],[ID 454678.1]
 
 
 
-escape��like������bug�޸�ORA-01424
-1.	Cursor_share �ĳɡ�exact���� ����취֤ʵ���У���Ϊ�Ҳ鿴�˲������Ѿ���exact��
-2.	ʹ��to_char�����������
- LIKE '%μ��\_201012\_N1-N5\_OB-ITS-TB\_P\_A-B-C\_20100909-2\_����\_2009-2009\_����%' ESCAPE '\'   �ĳ�
-LIKE to_char('%μ��\_201012\_N1-N5\_OB-ITS-TB\_P\_A-B-C\_20100909-2\_����\_2009-2009\_����%') ESCAPE '\'
-�÷�������������ͬ־���ԣ�bug���ٳ��֡�
+escape与like引发的bug修改ORA-01424
+1.	Cursor_share 改成“exact”， 这个办法证实不行，因为我查看了参数，已经是exact了
+2.	使用to_char函数，具体把
+ LIKE '%渭南\_201012\_N1-N5\_OB-ITS-TB\_P\_A-B-C\_20100909-2\_主力\_2009-2009\_座机%' ESCAPE '\'   改成
+LIKE to_char('%渭南\_201012\_N1-N5\_OB-ITS-TB\_P\_A-B-C\_20100909-2\_主力\_2009-2009\_座机%') ESCAPE '\'
+该方法经过凌永辉同志测试，bug不再出现。
 
-3.	DBA����ִ���������
+3.	DBA身份执行如下命令：
  alter system set "_fix_control"='6163564:off';
-����취��û����֤����Ϊ��ϵͳ���Ĳ�����ִ���� ��select * from v$system_fix_control where bugno='6163564';  ���鵽value =1���Ʋ�÷���Ӧ�ÿ��С�
+这个办法我没有验证，因为是系统级的参数，执行了 “select * from v$system_fix_control where bugno='6163564';  ”查到value =1，推测该方法应该可行。
 
 
-  ���췸��һ���ǳ�����+ɵȱ�Ĵ���д������޲��Լ���
+  今天犯了一个非常弱智+傻缺的错误，写在这里，鞭策自己：
 
 $ ./runInstaller
 ./runInstaller: /data/oinstall/database/install/runInstaller: Execute permission denied.
-    ���˰���Ȩ�ޣ�û�����⣬��������˵���ҿ��������ǲ��Ǵ��ˣ����ǵ�OSȫ����hp ux ia64�ģ�Ӧ�ò�������������˰��컹�ǲ������У�������һȷ�ϣ��Ų�ԭ��ԭ���ҵİ�װ����������ش��ˡ�
+    查了半天权限，没有问题，后来朋友说让我看看介质是不是错了，我们的OS全都是hp ux ia64的，应该不会错，后来查了半天还是不能运行，于是逐一确认，排查原因，原来我的安装介质真的下载错了。
 
-   ��β鿴OS��version
+   如何查看OS的version
 
    1. uname
   e.g.
    $ uname -m
    ia64
 
-   2.�鿴java�İ汾
+   2.查看java的版本
       $ cd /opt/java1.4/bin
       $ ./java -version
          java version "1.4.2.14"
@@ -16464,169 +16464,169 @@ $ ./runInstaller
 
 
 
-oracle exp/imp ���
+oracle exp/imp 详解
 
-����/������ORACLE�Ҵ������ϵ����������й��ߣ���ʵ�Ҵ�������ΪExp/Imp��һ�ֺõı��ݷ�ʽ����ȷ��˵����Exp/Impֻ����һ���õ�ת�����ߣ��ر�����С�����ݿ��ת�������ռ��Ǩ�ƣ����ĳ�ȡ������߼���������ͻ�����в�С�Ĺ��͡���Ȼ������Ҳ���԰�����ΪС�����ݿ���������ݺ��һ���߼��������ݣ�Ҳ�ǲ����Ľ��顣����Խ��Խ������ݿ⣬�ر���TB�����ݿ��Խ��Խ�����ݲֿ�ĳ��֣�EXP/IMPԽ��Խ���������ˣ����ʱ�����ݿ�ı��ݶ�ת����RMAN�͵��������ߡ�����˵��һ��EXP/IMP��ʹ�á�
-���ʹexp�İ����Բ�ͬ���ַ�����ʾ��set nls_lang=simplified chinese_china.zhs16gbk��ͨ�����û���������������exp�İ�����������ʾ�����set nls_lang=American_america.�ַ�������ô��������Ӣ�ĵ���
+导入/导出是ORACLE幸存的最古老的两个命令行工具，其实我从来不认为Exp/Imp是一种好的备份方式，正确的说法是Exp/Imp只能是一个好的转储工具，特别是在小型数据库的转储，表空间的迁移，表的抽取，检测逻辑和物理冲突等中有不小的功劳。当然，我们也可以把它作为小型数据库的物理备份后的一个逻辑辅助备份，也是不错的建议。对于越来越大的数据库，特别是TB级数据库和越来越多数据仓库的出现，EXP/IMP越来越力不从心了，这个时候，数据库的备份都转向了RMAN和第三方工具。下面说明一下EXP/IMP的使用。
+如何使exp的帮助以不同的字符集显示：set nls_lang=simplified chinese_china.zhs16gbk，通过设置环境变量，可以让exp的帮助以中文显示，如果set nls_lang=American_america.字符集，那么帮助就是英文的了
 
-EXP�����в�����������Ϊ������Ĭ��ֵ����
-USERID                  �û���/����      �磺 USERID=duanl/duanl
-FULL                    �����������ݿ� (N)
-BUFFER                  ���ݻ������Ĵ�С
-OWNER                   �������û����б�,��ϣ�������ĸ��û��Ķ��󣬾���owner=username
-FILE                    ����ļ� (EXPDAT.DMP)
-TABLES                  �����б� ,ָ��������table���ƣ��磺TABLES=table1,table2
+EXP的所有参数（括号中为参数的默认值）：
+USERID                  用户名/口令      如： USERID=duanl/duanl
+FULL                    导出整个数据库 (N)
+BUFFER                  数据缓冲区的大小
+OWNER                   所有者用户名列表,你希望导出哪个用户的对象，就用owner=username
+FILE                    输出文件 (EXPDAT.DMP)
+TABLES                  表名列表 ,指定导出的table名称，如：TABLES=table1,table2
 
-RECORDLENGTH            IO ��¼�ĳ���
-GRANTS                  ����Ȩ�� (Y)
-INCTYPE                 ������������
-INDEXES                 �������� (Y)
-RECORD                  ������������ (Y)
-ROWS                    ���������� (Y)
-PARFILE                 �����ļ���,�����exp�Ĳ����ܶ࣬���Դ�ɲ����ļ�.
-CONSTRAINTS             ����Լ�� (Y)
-CONSISTENT              �����һ����
-LOG                     ��Ļ�������־�ļ�
-STATISTICS              �������� (ESTIMATE)
-DIRECT                  ֱ��·�� (N)
-TRIGGERS                ���������� (Y)
-FEEDBACK                ��ʾÿ x �� (0) �Ľ���
-FILESIZE                ��ת���ļ������ߴ�
-QUERY                   ѡ���������Ӽ����Ӿ�
+RECORDLENGTH            IO 记录的长度
+GRANTS                  导出权限 (Y)
+INCTYPE                 增量导出类型
+INDEXES                 导出索引 (Y)
+RECORD                  跟踪增量导出 (Y)
+ROWS                    导出数据行 (Y)
+PARFILE                 参数文件名,如果你exp的参数很多，可以存成参数文件.
+CONSTRAINTS             导出约束 (Y)
+CONSISTENT              交叉表一致性
+LOG                     屏幕输出的日志文件
+STATISTICS              分析对象 (ESTIMATE)
+DIRECT                  直接路径 (N)
+TRIGGERS                导出触发器 (Y)
+FEEDBACK                显示每 x 行 (0) 的进度
+FILESIZE                各转储文件的最大尺寸
+QUERY                   选定导出表子集的子句
 
-���йؼ��ֽ����ڿɴ���ı��ռ�
-TRANSPORT_TABLESPACE    �����ɴ���ı��ռ�Ԫ���� (N)
-TABLESPACES             ������ı��ռ��б�
-    IMP�����в�����������Ϊ������Ĭ��ֵ����
-USERID                  �û���/����
-FULL                    ���������ļ� (N)
-BUFFER                  ���ݻ�������С
-FROMUSER      				  �������û����б�
-FILE      						  �����ļ� (EXPDAT.DMP)
-TOUSER        				  �û����б�
-SHOW      						  ֻ�г��ļ����� (N)
-TABLES       					  �����б�
-IGNORE    						  ���Դ������� (N)
-RECORDLENGTH   				  IO ��¼�ĳ���
-GRANTS   							  ����Ȩ�� (Y)
-INCTYPE       				  ������������
-INDEXES 							  �������� (Y)
-COMMIT        				  �ύ������� (N)
-ROWS     							  ���������� (Y)
-PARFILE       				  �����ļ���
-LOG       						  ��Ļ�������־�ļ�
-CONSTRAINTS   				  �������� (Y)
-DESTROY   						  ���Ǳ��ռ������ļ� (N)
-INDEXFILE 						  ����/������Ϣд��ָ�����ļ�
-SKIP_UNUSABLE_INDEXES   ����������������ά�� (N)
-ANALYZE   						  ִ��ת���ļ��е� ANALYZE ��� (Y)
-FEEDBACK 							  ��ʾÿ x �� (0) �Ľ���
-TOID_NOVALIDATE   		  ����ָ������ id ��У��
-FILESIZE 							  ��ת���ļ������ߴ�
-RECALCULATE_STATISTICS  ���¼���ͳ��ֵ (N)
+下列关键字仅用于可传输的表空间
+TRANSPORT_TABLESPACE    导出可传输的表空间元数据 (N)
+TABLESPACES             将传输的表空间列表
+    IMP的所有参数（括号中为参数的默认值）：
+USERID                  用户名/口令
+FULL                    导入整个文件 (N)
+BUFFER                  数据缓冲区大小
+FROMUSER      				  所有人用户名列表
+FILE      						  输入文件 (EXPDAT.DMP)
+TOUSER        				  用户名列表
+SHOW      						  只列出文件内容 (N)
+TABLES       					  表名列表
+IGNORE    						  忽略创建错误 (N)
+RECORDLENGTH   				  IO 记录的长度
+GRANTS   							  导入权限 (Y)
+INCTYPE       				  增量导入类型
+INDEXES 							  导入索引 (Y)
+COMMIT        				  提交数组插入 (N)
+ROWS     							  导入数据行 (Y)
+PARFILE       				  参数文件名
+LOG       						  屏幕输出的日志文件
+CONSTRAINTS   				  导入限制 (Y)
+DESTROY   						  覆盖表空间数据文件 (N)
+INDEXFILE 						  将表/索引信息写入指定的文件
+SKIP_UNUSABLE_INDEXES   跳过不可用索引的维护 (N)
+ANALYZE   						  执行转储文件中的 ANALYZE 语句 (Y)
+FEEDBACK 							  显示每 x 行 (0) 的进度
+TOID_NOVALIDATE   		  跳过指定类型 id 的校验
+FILESIZE 							  各转储文件的最大尺寸
+RECALCULATE_STATISTICS  重新计算统计值 (N)
 
-���йؼ��ֽ����ڿɴ���ı��ռ�
-TRANSPORT_TABLESPACE   ����ɴ���ı��ռ�Ԫ���� (N)
-TABLESPACES 					 ��Ҫ���䵽���ݿ�ı��ռ�
-DATAFILES 						 ��Ҫ���䵽���ݿ�������ļ�
-TTS_OWNERS             ӵ�пɴ�����ռ伯�����ݵ��û�
+下列关键字仅用于可传输的表空间
+TRANSPORT_TABLESPACE   导入可传输的表空间元数据 (N)
+TABLESPACES 					 将要传输到数据库的表空间
+DATAFILES 						 将要传输到数据库的数据文件
+TTS_OWNERS             拥有可传输表空间集中数据的用户
 
-��������������˵����exp/imp���������������������ϵ�������������ò�Ҫʹ�á�
+关于增量参数的说明：exp/imp的增量并不是真正意义上的增量，所以最好不要使用。
 
 
-EXP����ѡ��
-1.FULL��������ڵ����������ݿ⣬��ROWS=Nһ��ʹ��ʱ�����Ե����������ݿ�Ľṹ�����磺
+EXP常用选项
+1.FULL，这个用于导出整个数据库，在ROWS=N一起使用时，可以导出整个数据库的结构。例如：
 exp userid=test/test file=./db_str.dmp log=./db_str.log full=y rows=n compress=y direct=y
 
-2.OWNER��TABLE��������ѡ�����ڶ���EXP�Ķ���OWNER���嵼��ָ���û��Ķ���TABLEָ��EXP��table���ƣ����磺
+2.OWNER和TABLE，这两个选项用于定义EXP的对象。OWNER定义导出指定用户的对象；TABLE指定EXP的table名称，例如：
 exp userid=test/test file=./db_str.dmp log=./db_str.log owner=duanl
 exp userid=test/test file=./db_str.dmp log=./db_str.log table=nc_data,fi_arap
 
-3.BUFFER��FEEDBACK���ڵ����Ƚ϶������ʱ���һῼ���������������������磺
+3.BUFFER和FEEDBACK，在导出比较多的数据时，我会考虑设置这两个参数。例如：
 exp userid=test/test file=yw97_2003.dmp log=yw97_2003_3.log feedback=10000 buffer=100000000 tables=WO4,OK_YT
-feedback;ÿһ������ʾһ�ν��ȡ�
+feedback;每一万行显示一次进度。
 
-4.FILE��LOG�������������ֱ�ָ�����ݵ�DMP���ƺ�LOG���ƣ������ļ�����Ŀ¼�����Ӽ����档
+4.FILE和LOG，这两个参数分别指定备份的DMP名称和LOG名称，包括文件名和目录，例子见上面。
 
-5.COMPRESS������ѹ���������ݵ����ݡ��������Ƶ��������storage�����β�����Ĭ��ֵΪY��ʹ��Ĭ��ֵ������Ĵ洢����init extent���ڵ�ǰ���������extent���ܺ͡��Ƽ�ʹ��COMPRESS��N��
+5.COMPRESS参数不压缩导出数据的内容。用来控制导出对象的storage语句如何产生。默认值为Y，使用默认值，对象的存储语句的init extent等于当前导出对象的extent的总和。推荐使用COMPRESS＝N。
 
-6.FILESIZE��ѡ����8i�п��á����������dmp�ļ�����ʱ�����ʹ��FILESIZE�����������ļ���С��Ҫ����2G���磺
+6.FILESIZE该选项在8i中可用。如果导出的dmp文件过大时，最好使用FILESIZE参数，限制文件大小不要超过2G。如：
 exp userid=duanl/duanl file=f1,f2,f3,f4,f5 filesize=2G owner=scott
-����������f1.dmp, f2.dmp��һϵ���ļ���ÿ����С��Ϊ2G���������������С��10G,EXP���ش���f5.bmp.
+这样将创建f1.dmp, f2.dmp等一系列文件，每个大小都为2G，如果导出的总量小于10G,EXP不必创建f5.bmp.
 
 
-IMP����ѡ��
-1��FROMUSER��TOUSER,ʹ������ʵ�ֽ����ݴ�һ��SCHEMA�е��뵽����һ��SCHEMA�С����磺����������expʱ������Ϊtest�Ķ���,����������Ѷ������û���
+IMP常用选项
+1、FROMUSER和TOUSER,使用它们实现将数据从一个SCHEMA中导入到另外一个SCHEMA中。例如：假设我们做exp时导出的为test的对象,现在我们想把对象导入用户：
 imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1
 
-2��IGNORE��GRANTS��INDEXES������IGNORE���������Ա��Ĵ��ڣ��������룬���������Ҫ�������Ĵ洢����ʱ�����ã����ǿ����ȸ���ʵ������ú����Ĵ洢�������ñ���Ȼ��ֱ�ӵ������ݡ���GRANTS��INDEXES���ʾ�Ƿ�����Ȩ�������������ʹ���µĴ洢�����ؽ�����������Ϊ�˼ӿ쵽���ٶȣ����ǿ��Կ��ǽ�INDEXES��ΪN����GRANTSһ�㶼��Y�����磺imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1 indexes=N
+2、IGNORE、GRANTS和INDEXES，其中IGNORE参数将忽略表的存在，继续导入，这个对于需要调整表的存储参数时很有用，我们可以先根据实际情况用合理的存储参数建好表，然后直接导入数据。而GRANTS和INDEXES则表示是否导入授权和索引，如果想使用新的存储参数重建索引，或者为了加快到入速度，我们可以考虑将INDEXES设为N，而GRANTS一般都是Y。例如：imp userid=test1/test1 file=expdat.dmp fromuser=test1 touser=test1 indexes=N
 
 
-���ռ䴫��
-���ռ䴫����8i�����ӵ�һ�ֿ��������ݿ���ƶ����ݵ�һ�ְ취���ǰ�һ�����ݿ��ϵĸ�ʽ�����ļ����ӵ�����һ�����ݿ��У������ǰ����ݵ�����Dmp�ļ���������Щʱ���Ƿǳ����õģ���Ϊ������ռ��ƶ����ݾ������ļ�һ���졣
+表空间传输
+表空间传输是8i新增加的一种快速在数据库间移动数据的一种办法，是把一个数据库上的格式数据文件附加到另外一个数据库中，而不是把数据导出成Dmp文件，这在有些时候是非常管用的，因为传输表空间移动数据就象复制文件一样快。
 
-���ڴ�����ռ���һЩ���򣬼���
-1.Դ���ݿ��Ŀ�����ݿ������������ͬ��Ӳ��ƽ̨�ϡ�
-2.Դ���ݿ���Ŀ�����ݿ����ʹ����ͬ���ַ�����
-3.Դ���ݿ���Ŀ�����ݿ�һ��Ҫ����ͬ��С�����ݿ�
-4.Ŀ�����ݿⲻ������Ǩ�Ʊ��ռ�ͬ���ı��ռ�
-5.SYS�Ķ�����Ǩ��
-6.���봫���԰����Ķ���
-7.��һЩ�������ﻯ��ͼ�����ں����������Ȳ��ܱ�����
+关于传输表空间有一些规则，即：
+1.源数据库和目标数据库必须运行在相同的硬件平台上。
+2.源数据库与目标数据库必须使用相同的字符集。
+3.源数据库与目标数据库一定要有相同大小的数据块
+4.目标数据库不能有与迁移表空间同名的表空间
+5.SYS的对象不能迁移
+6.必须传输自包含的对象集
+7.有一些对象，如物化视图，基于函数的索引等不能被传输
 
-���������µķ��������һ�����ռ��һ�ױ��ռ��Ƿ���ϴ����׼��
+可以用以下的方法来检测一个表空间或一套表空间是否符合传输标准：
 exec sys.dbms_tts.transport_set_check('tablespace_name',true);
 select * from sys.transport_set_violation;
-���û����ѡ�񣬱�ʾ�ñ��ռ�ֻ���������ݣ��������԰����ġ�������Щ���԰����ı��ռ䣬�����ݱ��ռ���������ռ䣬����һ���䡣
+如果没有行选择，表示该表空间只包含表数据，并且是自包含的。对于有些非自包含的表空间，如数据表空间和索引表空间，可以一起传输。
 
-����Ϊ��Ҫʹ�ò��裬�����ο���ϸʹ�÷�����Ҳ���Բο�ORACLE����������
-1.���ñ��ռ�Ϊֻ�����ٶ����ռ�����ΪAPP_Data ��APP_Index��
+以下为简要使用步骤，如果想参考详细使用方法，也可以参考ORACLE联机帮助。
+1.设置表空间为只读（假定表空间名字为APP_Data 和APP_Index）
 alter tablespace app_data read only;
 alter tablespace app_index read only;
-2.����EXP����
-SQL>host exp userid=������sys/password as sysdba������ transport_tablespace=y tablespace=(app_data, app_index)
-������Ҫע�����
-a.Ϊ����SQL��ִ��EXP��USERID�������������ţ���UNIX��Ҳ����ע����⡰/����ʹ��
-b.��816���Ժ󣬱���ʹ��sysdba���ܲ���
-c.���������SQL�б��������һ��
+2.发出EXP命令
+SQL>host exp userid=”””sys/password as sysdba””” transport_tablespace=y tablespace=(app_data, app_index)
+以上需要注意的是
+a.为了在SQL中执行EXP，USERID必须用三个引号，在UNIX中也必须注意避免“/”的使用
+b.在816和以后，必须使用sysdba才能操作
+c.这个命令在SQL中必须放置在一行
 
-3.���������ļ�����һ���ص㣬��Ŀ�����ݿ�,������cp(unix)��copy(windows)��ͨ��ftp�����ļ���һ��Ҫ��bin��ʽ��
-4.�ѱ��صı��ռ�����Ϊ��д
-5.��Ŀ�����ݿ⸽�Ӹ������ļ�
-imp file=expdat.dmp userid=������sys/password as sysdba������ transport_tablespace=y ��datafile=(c:\temp\app_data,c:\temp\app_index)��
-6.����Ŀ�����ݿ���ռ�Ϊ��д
+3.拷贝数据文件到另一个地点，即目标数据库,可以是cp(unix)或copy(windows)或通过ftp传输文件（一定要在bin方式）
+4.把本地的表空间设置为读写
+5.在目标数据库附加该数据文件
+imp file=expdat.dmp userid=”””sys/password as sysdba””” transport_tablespace=y “datafile=(c:\temp\app_data,c:\temp\app_index)”
+6.设置目标数据库表空间为读写
 alter tablespace app_data read write;
 alter tablespace app_index read write;
 
 
-�Ż�EXP/IMP�ķ�����
-     ����Ҫexp/imp���������Ƚϴ�ʱ�����������Ҫ��ʱ���ǱȽϳ��ģ����ǿ�����һЩ�������Ż�exp/imp�Ĳ�����
+优化EXP/IMP的方法：
+     当需要exp/imp的数据量比较大时，这个过程需要的时间是比较长的，我们可以用一些方法来优化exp/imp的操作。
 
-exp:ʹ��ֱ��·�� direct=y
-    oracle��ܿ�sql��䴦������,ֱ�Ӵ����ݿ��ļ��ж�ȡ����,Ȼ��д�뵼���ļ�.
-    �����ڵ�����־�й۲쵽: exp-00067: table xxx will be exported in conventional path
-    ���û��ʹ��ֱ��·��,���뱣֤buffer������ֵ�㹻��.
-    ��һЩ������direct=y������,�޷���ֱ��·���������ƶ���tablespace,������query�����������ݿ��Ӽ�.
-    �����뵼�������ݿ������ڲ�ͬ��os��ʱ,���뱣֤recordlength������ֵһ��(RECORDLENGTH:I/O��¼�ĳ���).
+exp:使用直接路径 direct=y
+    oracle会避开sql语句处理引擎,直接从数据库文件中读取数据,然后写入导出文件.
+    可以在导出日志中观察到: exp-00067: table xxx will be exported in conventional path
+    如果没有使用直接路径,必须保证buffer参数的值足够大.
+    有一些参数于direct=y不兼容,无法用直接路径导出可移动的tablespace,或者用query参数导出数据库子集.
+    当导入导出的数据库运行在不同的os下时,必须保证recordlength参数的值一致(RECORDLENGTH:I/O记录的长度).
 
-imp:ͨ�����¼���;���Ż�
-  1.�����������
-		��sort_area_size����Ϊһ���ϴ��ֵ,����100M
-	2.������־�л��ȴ�
-		����������־�������,������־�ļ���С.
-	3.�Ż���־������
-		���罫log_buffer��������10��(���Ҫ����5M)
-	4.ʹ�����в������ύ
+imp:通过以下几个途径优化
+  1.避免磁盘排序
+		将sort_area_size设置为一个较大的值,比如100M
+	2.避免日志切换等待
+		增加重做日志组的数量,增大日志文件大小.
+	3.优化日志缓冲区
+		比如将log_buffer容量扩大10倍(最大不要超过5M)
+	4.使用阵列插入与提交
 		commit = y
-		ע��:���з�ʽ���ܴ�������LOB��LONG���͵ı�,����������table,���ʹ��commit = y,ÿ����һ��,�ͻ�ִ��һ���ύ.
-	5.ʹ��NOLOGGING��ʽ��С������־��С
-		�ڵ���ʱָ������indexes=n,ֻ�������ݶ�����index,�ڵ������ݺ���ͨ���ű�����index,ָ�� NOLOGGINGѡ��
+		注意:阵列方式不能处理包含LOB和LONG类型的表,对于这样的table,如果使用commit = y,每插入一行,就会执行一次提交.
+	5.使用NOLOGGING方式减小重做日志大小
+		在导入时指定参数indexes=n,只导入数据而忽略index,在导完数据后在通过脚本创建index,指定 NOLOGGING选项
 
 
-����/�������ַ���
-    �������ݵĵ��뵼��ʱ������Ҫע������ַ��������⡣��EXP/IMP������������Ҫע���ĸ��ַ����Ĳ����������˵Ŀͻ����ַ��������������ݿ��ַ���������˵Ŀͻ����ַ�������������ݿ��ַ�����
-����������Ҫ�鿴���ĸ��ַ���������
-�鿴���ݿ���ַ�������Ϣ��
+导出/导入与字符集
+    进行数据的导入导出时，我们要注意关于字符集的问题。在EXP/IMP过程中我们需要注意四个字符集的参数：导出端的客户端字符集，导出端数据库字符集，导入端的客户端字符集，导入端数据库字符集。
+我们首先需要查看这四个字符集参数。
+查看数据库的字符集的信息：
 SQL> select * from nls_database_parameters;
 PARAMETER                       VALUE
 ------------------------------ ------------------------------------------
@@ -16649,41 +16649,41 @@ NLS_COMP                        BINARY
 NLS_NCHAR_CHARACTERSET          ZHS16GBK
 NLS_RDBMS_VERSION               8.1.7.4.1
 
-NLS_CHARACTERSET��ZHS16GBK�ǵ�ǰ���ݿ���ַ�����
+NLS_CHARACTERSET：ZHS16GBK是当前数据库的字符集。
 
-���������鿴�ͻ��˵��ַ�����Ϣ��
-�ͻ����ַ����Ĳ���NLS_LANG=_< territory >.
-language��ָ��oracle��Ϣʹ�õ�����,�������պ��µ���ʾ��
-Territory��ָ�����Һ����ֵĸ�ʽ�������ͼ������ڼ����ڵ�ϰ�ߡ�
-Characterset�����ƿͻ���Ӧ�ó���ʹ�õ��ַ�����ͨ�����û���ڿͻ��˵Ĵ���ҳ�����߶���unicodeӦ����ΪUTF8��
-��windows�У���ѯ���޸�NLS_LANG����ע����н��У�
+我们再来查看客户端的字符集信息：
+客户端字符集的参数NLS_LANG=_< territory >.
+language：指定oracle消息使用的语言,日期中日和月的显示。
+Territory：指定货币和数字的格式，地区和计算星期及日期的习惯。
+Characterset：控制客户端应用程序使用的字符集。通常设置或等于客户端的代码页。或者对于unicode应用设为UTF8。
+在windows中，查询和修改NLS_LANG可在注册表中进行：
 HKEY_LOCAL_MACHINE\SOFTWARE\Oracle\HOMExx\
-xxָ���ڶ��Oracle_HOMEʱ��ϵͳ��š�
-��unix�У�
+xx指存在多个Oracle_HOME时的系统编号。
+在unix中：
 $ env|grep NLS_LANG
 NLS_LANG=simplified chinese_china.ZHS16GBK
-�޸Ŀ��ã�
+修改可用：
 $ export NLS_LANG=AMERICAN_AMERICA.UTF8
 
-ͨ���ڵ���ʱ��ðѿͻ����ַ������õú����ݿ����ͬ�����������ݵ���ʱ����Ҫ���������������
-		1.Դ���ݿ��Ŀ�����ݿ������ͬ���ַ������á�
-			��ʱ,ֻ�����õ����͵���˵Ŀͻ���NLS_LANG�������ݿ��ַ������ɡ�
-		2.Դ���ݿ��Ŀ�����ݿ��ַ�����ͬ��
-      �Ƚ������˿ͻ��˵�NLS_LANG���óɺ͵����˵����ݿ��ַ���һ�£��������ݣ�Ȼ�󽫵���˿ͻ��˵�NLS_LANG���óɺ͵�����һ�£��������ݣ�����ת��ֻ���������ݿ�ˣ�����ֻ����һ�Ρ�
-      ��������£�ֻ�е���������ݿ��ַ���Ϊ���������ݿ��ַ������ϸ񳬼�ʱ�����ݲ�����ȫ���ɹ������򣬿��ܻ������ݲ�һ�»�������֡�
+通常在导出时最好把客户端字符集设置得和数据库端相同。当进行数据导入时，主要有以下两种情况：
+		1.源数据库和目标数据库具有相同的字符集设置。
+			这时,只需设置导出和导入端的客户端NLS_LANG等于数据库字符集即可。
+		2.源数据库和目标数据库字符集不同。
+      先将导出端客户端的NLS_LANG设置成和导出端的数据库字符集一致，导出数据，然后将导入端客户端的NLS_LANG设置成和导出端一致，导入数据，这样转换只发生在数据库端，而且只发生一次。
+      这种情况下，只有当导入端数据库字符集为导出端数据库字符集的严格超集时，数据才能完全导成功，否则，可能会有数据不一致或乱码出现。
 
-��ͬ�汾��EXP/IMP����
-   	һ����˵���ӵͰ汾���뵽�߰汾���ⲻ���鷳���ǽ��߰汾�����ݵ��뵽�Ͱ汾�У���Oracle9i֮ǰ����ͬ�汾Oracle֮���EXP/IMP����ͨ������ķ����������
-		1���ڸ߰汾���ݿ������еװ汾��catexp.sql��
-		2��ʹ�õͰ汾��EXP�������߰汾�����ݣ�
-		3��ʹ�õͰ汾��IMP�����ݿ⵼�뵽�Ͱ汾���ݿ��У�
-		4���ڸ߰汾���ݿ����������и߰汾��catexp.sql�ű���
+不同版本的EXP/IMP问题
+   	一般来说，从低版本导入到高版本问题不大，麻烦的是将高版本的数据导入到低版本中，在Oracle9i之前，不同版本Oracle之间的EXP/IMP可以通过下面的方法来解决：
+		1、在高版本数据库上运行底版本的catexp.sql；
+		2、使用低版本的EXP来导出高版本的数据；
+		3、使用低版本的IMP将数据库导入到低版本数据库中；
+		4、在高版本数据库上重新运行高版本的catexp.sql脚本。
 
-����9i�У�����ķ��������ܽ�����⡣���ֱ��ʹ�õͰ汾EXP/IMP��������´���
+但在9i中，上面的方法并不能解决问题。如果直接使用低版本EXP/IMP会出现如下错误：
 EXP-00008: orACLE error %lu encountered
 orA-00904: invalid column name
-���Ѿ���һ��������BUG����Ҫ�ȵ�Oracle10.0���ܽ����BUG��Ϊ2261722������Ե�METALINK��ȥ�鿴�йش�BUG����ϸ��Ϣ��
-BUG��BUG�����ǵĹ�������Ҫ������û��Oracle��֧��֮ǰ�����Ǿ��Լ��������Oracle9i��ִ�������SQL�ؽ�exu81rls��ͼ���ɡ�
+这已经是一个公布的BUG，需要等到Oracle10.0才能解决，BUG号为2261722，你可以到METALINK上去查看有关此BUG的详细信息。
+BUG归BUG，我们的工作还是要做，在没有Oracle的支持之前，我们就自己解决。在Oracle9i中执行下面的SQL重建exu81rls视图即可。
 
 Create or REPLACE view exu81rls
 (objown,objnam,policy,polown,polsch,polfun,stmts,chkopt,enabled,spolicy)
@@ -16705,13 +16705,13 @@ exists ( select * from session_roles where role='Select_CATALOG_ROLE')
 grant select on sys.exu81rls to public;
 /
 
-���Կ�汾��ʹ��EXP/IMP����������ȷ��ʹ��EXP��IMP�İ汾��
-1������ʹ��IMP�İ汾ƥ�����ݿ�İ汾���磺Ҫ���뵽817�У�ʹ��817��IMP���ߡ�
-2������ʹ��EXP�İ汾ƥ���������ݿ�����͵İ汾���磺��9201��817�е��룬��ʹ��817�汾��EXP���ߡ�
+可以跨版本的使用EXP/IMP，但必须正确地使用EXP和IMP的版本：
+1、总是使用IMP的版本匹配数据库的版本，如：要导入到817中，使用817的IMP工具。
+2、总是使用EXP的版本匹配两个数据库中最低的版本，如：从9201往817中导入，则使用817版本的EXP工具。
 
-ʾ����
+示例：
 
-1.exp����������
+1.exp的条件导出
 
 userid='/ as sysdba '
 file=(exp01.dmp,exp02.dmp,exp03.dmp,exp04.dmp,exp05.dmp,exp06.dmp,exp07.dmp,exp08.dmp,exp09.dmp,
@@ -16730,7 +16730,7 @@ RESUMABLE_NAME=exp_byrnes
 RESUMABLE_TIMEOUT=99999
 QUERY="where GL_DATE in('20100930','20101031','20101130')"
 
-2.imp����
+2.imp导入
 
 userid='/ as sysdba '
 file=exp01.dmp
@@ -16748,7 +16748,7 @@ RESUMABLE_NAME=imp_byrnes
 RESUMABLE_TIMEOUT=99999
 commit=y
 
-3.expdp����
+3.expdp导出
 
 create directory dtpump_egis as '..................';
 
@@ -16772,7 +16772,7 @@ REMAP_TABLESPACE=EGISDATA:ludata
 TABLE_EXISTS_ACTION=REPLACE
 EXCLUDE=constraint, ref_constraint, grant,index,trigger
 
-4.impd����
+4.impd导入
 
 create directory dtpump_egis as '.............';
 
@@ -16795,7 +16795,7 @@ REMAP_TABLESPACE=EGISDATA:luidx,EGISIDX:luidx
 TABLE_EXISTS_ACTION=REPLACE
 INCLUDE=index
 
-5.expdpֻ�����ṹ
+5.expdp只导表结构
 
 userid='/ as sysdba'
 DIRECTORY=rik_expimpdp_dest
@@ -16807,7 +16807,7 @@ content=METADATA_ONLY
 LOGFILE=expdp_csb.log
 JOB_NAME=expdp_rik_job1
 
-6.expdp��������
+6.expdp条件导出
 
 userid='/ as sysdba'
 DIRECTORY=rik_imp_1
@@ -16824,7 +16824,7 @@ JOB_NAME=expdp_rik_job1
 QUERY="where GL_DATE in('20100930','20101031','20101130')"
 
 
-7.11g��IMPDP�����������
+7.11g中IMPDP重命名导入表
 
 userid='/ as sysdba '
 directory=dtpump
@@ -16837,7 +16837,7 @@ JOB_NAME=riky_imp
 REMAP_SCHEMA=ECDATA:ECDATA
 TABLE_EXISTS_ACTION=REPLACE
 
-.ʹ��TRANSFORMȥ�����ռ�ʹ洢�Ӿ�
+.使用TRANSFORM去掉表空间和存储子句
 secooler@secDB /expdp$ impdp sec/sec directory=expdp_dir dumpfile=sec_expdp.dmp sqlfile=sec_expdp.sql TRANSFORM=segment_attributes:n
 TRANSFORM=segment_attributes:n
 
@@ -16856,9 +16856,9 @@ gzip -d < exp04.dmp.gz > exp04.dmp &
 set NLS_LANG=SIMPLIFIED CHINESE_CHINA.ZHS16GBK
 imp  dcppdata/dcpp123  file=exp01.dmp,exp02.dmp,exp03.dmp,exp04.dmp log=0919.log  buffer=40960000 feedback=10000 ignore=y  tables=TFLOW_OBJECT,TFLOW_TASK,TGUARANTY_CONTRACT,TGUARANTY_INFO,TGUARANTY_RELATIVE,TIND_INFO,TCLASSIFY_RECORD,TBUSINESS_TYPE,TBUSINESS_HISTORY,TBUSINESS_DUEBILL
 
-����linux 64 �� linux32 �����ݿ�Ǩ��ʱ�����ݿ�����������������ִ��һϵ�в���ʱ�ᱨ�쳣��
+当从linux 64 向 linux32 做数据库迁移时，数据库能正常启动，但是执行一系列操作时会报异常：
 ORA-06553: PLS-801: internal error [56319]
-ͬʱ�ڸ����ļ������棺
+同时在跟踪文件还伴随：
 *** SESSION ID:(26.44) 2010-12-02 13:36:17.147
 Error in executing triggers on connect internal
 
@@ -16887,27 +16887,27 @@ ORA-00604: error occurred at recursive SQL level 1
 ORA-25153: Temporary Tablespace is Empty
 ORA-06512: at "DBMGR.PRC_DDL_RESTRICTION", line 10
 ORA-06512: at line 2
-����쳣����������ͬƽ̨��ͬbit����ģ�������Ҫ���±���������������������Ӱ��
-�����Ǽ򵥲��裺
-1���޸ĳ�ʼ���ļ�,���� _SYSTEM_TRIG_ENABLED = false����
-2��Stratup nomount
-3����Դ�ⱸ��һ�������ļ�����Ŀ��������´��������ļ���
-4��Shutdown immediate
-5�� Startup upgrade
-6��@$ORACLE_HOME/rdbms/admin/utlirp.sql;
-7��Shutdown immediate
-8��Startup
-9��@$ORACLE_HOME/rdbms/admin/utlrp.sql;
-10��Shutdown immediate
-11���ٴ��޸ĳ�ʼ�������ļ�,ɾ������ _SYSTEM_TRIG_ENABLED = false
-12��Startup
+这个异常可能是由于同平台不同bit引起的，我们需要重新编译对象来消除这个不兼容影响
+以下是简单步骤：
+1、修改初始化文件,增加 _SYSTEM_TRIG_ENABLED = false参数
+2、Stratup nomount
+3、从源库备份一个控制文件，在目标库上重新创建控制文件。
+4、Shutdown immediate
+5、 Startup upgrade
+6、@$ORACLE_HOME/rdbms/admin/utlirp.sql;
+7、Shutdown immediate
+8、Startup
+9、@$ORACLE_HOME/rdbms/admin/utlrp.sql;
+10、Shutdown immediate
+11、再次修改初始化参数文件,删除参数 _SYSTEM_TRIG_ENABLED = false
+12、Startup
 
-ת�����(��ʱ��������һ���ĵ����ģ�������ϸ����1��2��3��4��11��Щ����ò�ƶ�����Ҫ�ģ�������Ҫ�ľ���ʹ��utlirp�����������ȫ����32λƽ̨�±���һ��)��
+转换完成(当时是照网上一个文档做的，现在仔细看来1、2、3、4、11这些步骤貌似都不需要的，最最主要的就是使用utlirp来把相关内容全部在32位平台下编译一遍)，
 
 
 
-Long Session���
-select a.sid,a.serial#,a.machine,a.osuser,a.username �û���,trunc(a.last_call_et/60) ��ִ��ʱ��_����, to_char(a.LOGON_TIME,'yyyymmdd hh24:mi:ss') ��¼ʱ��,trunc((sysdate-a.logon_time)*24*60) ��¼����ʱ��_����,
+Long Session监控
+select a.sid,a.serial#,a.machine,a.osuser,a.username 用户名,trunc(a.last_call_et/60) 已执行时间_分钟, to_char(a.LOGON_TIME,'yyyymmdd hh24:mi:ss') 登录时间,trunc((sysdate-a.logon_time)*24*60) 登录持续时间_分钟,
         b.sql_text SQL
 from v$session a,v$sqltext b
 where a.status='ACTIVE' and username not in('SYS')
@@ -16917,10 +16917,10 @@ where a.status='ACTIVE' and username not in('SYS')
 	order by a.username,a.last_call_et desc,a.sid, b.address,b.piece;
 
 
-�ع��ε�ʹ�������������Ϊѭ��ʹ�õġ������ڵ�ǰextentд�����Ҫ����Ŀռ�ʱ���ع��ε�next extent �д����л������ʵ������ͼ��չ�ع��Ρ�����ع������г�ʱ�� idle �����񣬾�����ռ�õĻع��ε�����С�����ǣ�������һֱ���ͷţ������»ع���һֱ������ֱ���������ͷ�ռ�õĻع��λ��ǻع��α��ռ�����
-��ͨ����� v$rollstat ����ûع��ε�ʹ�������Ӧ���extents ֵԶ���� optimal �Ļع��Σ��Է����������쳣�ĻỰ�����»ع�����������
+回滚段的使用在正常情况下为循环使用的。但若在当前extent写完后，需要更多的空间时，回滚段的next extent 中存在有活动事务，则实例会试图扩展回滚段。如果回滚段中有长时间 idle 的事务，尽管其占用的回滚段的量很小，但是，由于其一直不释放，将导致回滚段一直增长，直至该事务释放占用的回滚段或是回滚段表空间满。
+可通过检查 v$rollstat 来获得回滚段的使用情况，应监控extents 值远大于 optimal 的回滚段，以防其由于有异常的会话而导致回滚段增长过大。
 
-��ʹ�����²�ѯ����ȡ���ݿ����쳣ʹ�õ�RBS��
+可使用以下查询来获取数据库中异常使用的RBS：
 COLUMN   start_uext FORMAT   999
 COLUMN   xidusn FORMAT   99
 COLUMN   sid FORMAT   9999
@@ -16932,10 +16932,10 @@ SELECT s.sid, s.serial#, t.start_time, t.xidusn,s.username, t.start_uext, r.cure
  AND ((r.curext=t.start_uext-1) OR
 ((r.curext=r.extents-1) AND t.start_uext=0));
 
-���SQL�����þ��ǲ�����ݿ���RBS�ĵ�ǰextent��next extent��ռ�õĽ��̡��������Ϣ��
+这个SQL的作用就是查出数据库中RBS的当前extent的next extent被占用的进程、事务的信息。
 
 
-��ȡsession�����Ͱٷֱȵ�sql�ű����������£�
+获取session数量和百分比的sql脚本，内容如下：
 set feedback off
 set echo off
 set trims on
@@ -16949,7 +16949,7 @@ spool off
 
 
 
-�鿴DML LOCK����������Ķ��������
+查看DML LOCK情况和锁定的对象情况：
 select a.sid,
    decode(a.type,
    'MR', 'Media Recovery',
@@ -17004,15 +17004,15 @@ from v$lock a,dba_objects c
      and a.id1=c.object_id(+)
 
 
-2.2.2	�鿴ʵʱ�����ȴ����
-1���ж��Ƿ�������ȴ���ͬʱ���BLOCKER��WAITER��
-SELECT * FROM V$LOCK WHERE BLOCK > 0;    --�������BLOCKER�ļ������
-SELECT * FROM V$LOCK WHERE REQUEST > 0;  --�������WAITER�ĵ������
---Ҳ���Դӵȴ��¼����֣�
+2.2.2	查看实时的锁等待情况
+1、判断是否存在锁等待，同时查出BLOCKER和WAITER：
+SELECT * FROM V$LOCK WHERE BLOCK > 0;    --查出的是BLOCKER的加锁情况
+SELECT * FROM V$LOCK WHERE REQUEST > 0;  --查出的是WAITER的等锁情况
+--也可以从等待事件入手：
     SELECT * FROM V$SESSION_WAIT WHERE EVENT ='enqueue';
 
 
-���ڶ��BLOCKERʱ�����Դͷ��BLOCKER��
+存在多个BLOCKER时，查出源头的BLOCKER：
 SELECT *
   FROM V$LOCK
  WHERE SID IN (SELECT SID SESSION_ID
@@ -17022,10 +17022,10 @@ SELECT *
                SELECT W.SID SESSION_ID
                  FROM V$SESSION_WAIT W
                 WHERE W.EVENT = 'enqueue');
-        ��Ϊ�ȴ�'enqueue'�Ķ���WAITER����V$LOCK��������ЩWAITER��ʣ�µ�Ӧ�ö���������BLOCKER��
+        因为等待'enqueue'的都是WAITER，在V$LOCK过滤了这些WAITER后，剩下的应该都是真正的BLOCKER。
 
 
-�鿴BLOCKER��Ӧ��SESSION��״̬�͵ȴ��¼���
+查看BLOCKER对应的SESSION的状态和等待事件：
 SELECT S.SID,
        S.USERNAME,
        S.STATUS,
@@ -17042,8 +17042,8 @@ SELECT S.SID,
     AND L.BLOCK > 0;
 
 
-���WAITER�ȴ��ļ�¼�У�
- --���Ȳ��WAITER�ȴ�����Դ��
+查出WAITER等待的记录行：
+ --首先查出WAITER等待的资源：
  SELECT ROW_WAIT_OBJ# ,
        ROW_WAIT_FILE# ,
        ROW_WAIT_BLOCK# ,
@@ -17051,9 +17051,9 @@ SELECT S.SID,
     FROM V$SESSION
     WHERE SID IN (SELECT DISTINCT SID FROM V$LOCK WHERE REQUEST > 0 )
     AND ROW_WAIT_OBJ# <> -1;
---�ٸ���OBJECT_ID�ó�����Ķ������������ƣ�
+--再根据OBJECT_ID得出具体的对象属主和名称：
 SELECT OWNER,OBJECT_NAME,OBJECT_TYPE FROM DBA_OBJECTS WHERE OBJECT_ID=< ROW_WAIT_OBJ#>
---�������ϵõ���OBJECT_ID,FILE_ID,BLOCK_ID,ROW#���͹��ɱ�׼��ROWID�������¼�У�
+--根据以上得到的OBJECT_ID,FILE_ID,BLOCK_ID,ROW#，就构成标准的ROWID，查出记录行：
    SELECT *
   FROM < OWNER > . < OBJECT_NAME >
  WHERE ROWID = DBMS_ROWID.ROWID_CREATE(1,
@@ -17061,75 +17061,75 @@ SELECT OWNER,OBJECT_NAME,OBJECT_TYPE FROM DBA_OBJECTS WHERE OBJECT_ID=< ROW_WAIT
                                        ROW_WAIT_FILE#,
                                        ROW_WAIT_BLOCK#,
                                        ROW_WAIT_ROW#);
-2.2.3	�鿴�ۻ����������ȴ����
-  --�鿴INSTANCE�����enqueue��Դʹ�������
+2.2.3	查看累积的锁和锁等待情况
+  --查看INSTANCE级别的enqueue资源使用情况：
   SELECT * FROM V$SYSSTAT WHERE NAME  LIKE '%enqueue%';
-  --�鿴INSTANCE����ĵȴ�enqueue�¼��������
+  --查看INSTANCE级别的等待enqueue事件的情况：
   SELECT * FROM V$SYSTEM_EVENT WHERE EVENT='enqueue';
 
 
 
 expdp ddw/ddw@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=procedure,table:\"in('SALES','SALES_TMP')\" job_name=zhou logfile=ddwdump.log
-ֻ����SALES��SALES_TMP���ű�
+只导出SALES和SALES_TMP两张表
 
-table:\"in('SALES','SALES_TMP')\"   ˫����Ҫ��б��ת��
+table:\"in('SALES','SALES_TMP')\"   双引号要用斜杠转义
 
 expdp ddw/ddw@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=procedure,table:\"LIKE('AATEST%')\" job_name=zhou logfile=ddwdump.log
 
-�ղ��Թ����ɹ����� table:\"LIKE('AATEST%')\"��AATEST��ͷ�����ű���OK��
+刚测试过，成功导出 table:\"LIKE('AATEST%')\"，AATEST开头的三张表都OK的
 
-���ӵ�: Oracle Database 10g Enterprise Edition Release 10.2.0.1.0 - Production
+连接到: Oracle Database 10g Enterprise Edition Release 10.2.0.1.0 - Production
 With the Partitioning, OLAP and Data Mining options
-�Զ����� FLASHBACK �Ա������ݿ������ԡ�
-���� "DDW"."ZHOU":  ddw/********@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=procedure,table:"LIKE('AATEST%')" job_name=zhou logfile=ddwdump.log
-����ʹ�� BLOCKS �������й���...
-������������ SCHEMA_EXPORT/TABLE/TABLE_DATA
-ʹ�� BLOCKS �������ܹ���: 192 KB
-������������ SCHEMA_EXPORT/TABLE/TABLE
-������������ SCHEMA_EXPORT/TABLE/INDEX/INDEX
-������������ SCHEMA_EXPORT/TABLE/CONSTRAINT/CONSTRAINT
-������������ SCHEMA_EXPORT/TABLE/INDEX/STATISTICS/INDEX_STATISTICS
-������������ SCHEMA_EXPORT/PROCEDURE/PROCEDURE
-������������ SCHEMA_EXPORT/PROCEDURE/ALTER_PROCEDURE
-������������ SCHEMA_EXPORT/TABLE/STATISTICS/TABLE_STATISTICS
-. . ������ "DDW"."AATEST"                              6.304 KB       4 ��
-. . ������ "DDW"."AATEST_1"                            6.304 KB       4 ��
-. . ������ "DDW"."AATEST_2"                            6.234 KB       1 ��
-�ѳɹ�����/ж�������� "DDW"."ZHOU"
+自动启用 FLASHBACK 以保持数据库完整性。
+启动 "DDW"."ZHOU":  ddw/********@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=procedure,table:"LIKE('AATEST%')" job_name=zhou logfile=ddwdump.log
+正在使用 BLOCKS 方法进行估计...
+处理对象类型 SCHEMA_EXPORT/TABLE/TABLE_DATA
+使用 BLOCKS 方法的总估计: 192 KB
+处理对象类型 SCHEMA_EXPORT/TABLE/TABLE
+处理对象类型 SCHEMA_EXPORT/TABLE/INDEX/INDEX
+处理对象类型 SCHEMA_EXPORT/TABLE/CONSTRAINT/CONSTRAINT
+处理对象类型 SCHEMA_EXPORT/TABLE/INDEX/STATISTICS/INDEX_STATISTICS
+处理对象类型 SCHEMA_EXPORT/PROCEDURE/PROCEDURE
+处理对象类型 SCHEMA_EXPORT/PROCEDURE/ALTER_PROCEDURE
+处理对象类型 SCHEMA_EXPORT/TABLE/STATISTICS/TABLE_STATISTICS
+. . 导出了 "DDW"."AATEST"                              6.304 KB       4 行
+. . 导出了 "DDW"."AATEST_1"                            6.304 KB       4 行
+. . 导出了 "DDW"."AATEST_2"                            6.234 KB       1 行
+已成功加载/卸载了主表 "DDW"."ZHOU"
 ******************************************************************************
-DDW.ZHOU ��ת���ļ���Ϊ:
+DDW.ZHOU 的转储文件集为:
   D:\DDWDUMP.DMP
-��ҵ "DDW"."ZHOU" ���� 21:42:32 �ɹ����
+作业 "DDW"."ZHOU" 已于 21:42:32 成功完成
 
 
-�ҷ��������ƺ��������������ʽ��
-������ô�㣺
+我发现里面似乎不能用正则表达式。
+可以这么搞：
 expdp ddw/ddw@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=table:\"IN(select object_name from dba_objects where owner='DDW' and object_type='TABLE' and \(object_name like 'AATEST%' or object_name like 'SALES%'\)\)\" job_name=zhou logfile=ddwdump.log
 
-�����
-���ӵ�: Oracle Database 10g Enterprise Edition Release 10.2.0.1.0 - Production
+结果：
+连接到: Oracle Database 10g Enterprise Edition Release 10.2.0.1.0 - Production
 With the Partitioning, OLAP and Data Mining options
-�Զ����� FLASHBACK �Ա������ݿ������ԡ�
-���� "DDW"."ZHOU":  ddw/********@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=table:"IN(select object_name from dba_objects where owner='DDW' and object_type='TABLE' and \(object_name like 'AATEST%' or object_name like 'SALES%'\)\)" job_name=zhou logfile=ddwdump.log
-����ʹ�� BLOCKS �������й���...
-������������ SCHEMA_EXPORT/TABLE/TABLE_DATA
-ʹ�� BLOCKS �������ܹ���: 192 KB
-������������ SCHEMA_EXPORT/TABLE/TABLE
-������������ SCHEMA_EXPORT/TABLE/INDEX/INDEX
-������������ SCHEMA_EXPORT/TABLE/CONSTRAINT/CONSTRAINT
-������������ SCHEMA_EXPORT/TABLE/INDEX/STATISTICS/INDEX_STATISTICS
-������������ SCHEMA_EXPORT/TABLE/STATISTICS/TABLE_STATISTICS
-. . ������ "DDW"."AATEST"                              6.304 KB       4 ��
-. . ������ "DDW"."AATEST_1"                            6.304 KB       4 ��
-. . ������ "DDW"."AATEST_2"                            6.234 KB       1 ��
-. . ������ "DDW"."SALES_IMP"                               0 KB       0 ��
-. . ������ "DDW"."SALES_PAR1"                              0 KB       0 ��
-. . ������ "DDW"."SALES_SMALL"                             0 KB       0 ��
-�ѳɹ�����/ж�������� "DDW"."ZHOU"
+自动启用 FLASHBACK 以保持数据库完整性。
+启动 "DDW"."ZHOU":  ddw/********@jiong directory=EXPDIR dumpfile=ddwdump.dmp schemas=ddw include=table:"IN(select object_name from dba_objects where owner='DDW' and object_type='TABLE' and \(object_name like 'AATEST%' or object_name like 'SALES%'\)\)" job_name=zhou logfile=ddwdump.log
+正在使用 BLOCKS 方法进行估计...
+处理对象类型 SCHEMA_EXPORT/TABLE/TABLE_DATA
+使用 BLOCKS 方法的总估计: 192 KB
+处理对象类型 SCHEMA_EXPORT/TABLE/TABLE
+处理对象类型 SCHEMA_EXPORT/TABLE/INDEX/INDEX
+处理对象类型 SCHEMA_EXPORT/TABLE/CONSTRAINT/CONSTRAINT
+处理对象类型 SCHEMA_EXPORT/TABLE/INDEX/STATISTICS/INDEX_STATISTICS
+处理对象类型 SCHEMA_EXPORT/TABLE/STATISTICS/TABLE_STATISTICS
+. . 导出了 "DDW"."AATEST"                              6.304 KB       4 行
+. . 导出了 "DDW"."AATEST_1"                            6.304 KB       4 行
+. . 导出了 "DDW"."AATEST_2"                            6.234 KB       1 行
+. . 导出了 "DDW"."SALES_IMP"                               0 KB       0 行
+. . 导出了 "DDW"."SALES_PAR1"                              0 KB       0 行
+. . 导出了 "DDW"."SALES_SMALL"                             0 KB       0 行
+已成功加载/卸载了主表 "DDW"."ZHOU"
 ******************************************************************************
-DDW.ZHOU ��ת���ļ���Ϊ:
+DDW.ZHOU 的转储文件集为:
   D:\DDWDUMP.DMP
-��ҵ "DDW"."ZHOU" ���� 00:02:37 �ɹ����
+作业 "DDW"."ZHOU" 已于 00:02:37 成功完成
 
 
 
@@ -17139,16 +17139,16 @@ INCLUDE=TABLE:"LIKE 'AAA%'",INCLUDE=TABLE:"LIKE 'BBB%'",INCLUDE=TABLE:"LIKE 'CCC
 
 
 
-����������ִ�ж�̬��� ,�������ʱ������pl/sql��
+解析并马上执行动态语句 ,或非运行时创建的pl/sql块
 
-1. ���ύdml����,Ҫ��ʽ�ύ;
-execute immediate����ddl,���ύ������ǰ�ı������;
+1. 不提交dml事务,要显式提交;
+execute immediate处理ddl,会提交所以以前改变的数据;
 
-2.��֧�ֶ��в�ѯ,������ʱ�� ����ref cursors
+2.不支持多行查询,可以临时表 或者ref cursors
 
-3.ִ��sql�������,ִ��pl/sql Ҫ�ӷֺ�;
+3.执行sql不需语句,执行pl/sql 要加分号;
 
---0.����
+--0.传入
 declare
     i_aac001 number(6):=111;
 begin
@@ -17161,7 +17161,7 @@ insert into a2(aac001) values(1);
 insert into a2(aac001) values(2);
 
 
---1.����/����
+--1.传入/传出
 declare
     cnt number(6);
 begin
@@ -17170,7 +17170,7 @@ begin
     dbms_output.put_line(cnt);
 end;
 
---2.���ô洢����
+--2.调用存储过程
 declare
     s1 varchar2(10);
     s2 varchar2(10);
@@ -17179,10 +17179,10 @@ begin
     using s1,s2;
 end;
 
---3.��ֵ����¼
+--3.传值到记录
 declare
---����
---����
+--类型
+--声明
     type type_a is record(str varchar2(10));
     v_a type_a;
     v_b a2%rowtype;
@@ -17191,7 +17191,7 @@ begin
     into v_b;
 end;
 
---4.���в�ѯ ����ʱ�� ��ref cursors
+--4.多行查询 用临时表 或ref cursors
 declare
    l_sal    pls_integer := 2000;
 begin
@@ -17205,7 +17205,7 @@ end;
 http://baiyaoming.iteye.com/blog/1255016
 
 
-for in  ������������
+for in  变量声明类型
 -------------------------------
 declare
 cursor cur is select * from a2;
@@ -17232,40 +17232,40 @@ end;
 
 
 
-Oracle �ӻ������������ʵ��ִ�мƻ�
-����autotrace
+Oracle 从缓存里面查找真实的执行计划
+设置autotrace
 
-���
- ����
- ����
+序号
+ 命令
+ 解释
 
 1
  SET AUTOTRACE OFF
- ��ΪĬ��ֵ�����ر�Autotrace
+ 此为默认值，即关闭Autotrace
 
 2
  SET AUTOTRACE ON EXPLAIN
- ֻ��ʾִ�мƻ�
+ 只显示执行计划
 
 3
  SET AUTOTRACE ON STATISTICS
-  ֻ��ʾִ�е�ͳ����Ϣ
+  只显示执行的统计信息
 
 4
  SET AUTOTRACE ON
-  ����2,3��������
+  包含2,3两项内容
 
 5
  SET AUTOTRACE TRACEONLY
-  ��ON���ƣ�������ʾ����ִ�н�
+  与ON相似，但不显示语句的执行结
 
-ʹ��SQL
+使用SQL
 
-SQL>EXPLAIN PLAN FOR sql���;
+SQL>EXPLAIN PLAN FOR sql语句;
 
 SQL>SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE'));
 
-һ.  �鿴��ǰsession ��SID
+一.  查看当前session 的SID
 SYS@anqing1(rac1)> SELECT USERENV('SID') FROM DUAL;
 USERENV('SID')
 --------------
@@ -17275,14 +17275,14 @@ SID
 ----------
 137
 
-��.  �鿴�����е�Explain Plan
-1������SID����v$sql���ҵ���ӦSQL��HASH_VALUE��ADDRESS
+二.  查看缓存中的Explain Plan
+1）根据SID，从v$sql中找到相应SQL的HASH_VALUE和ADDRESS
 /* Formatted on 2011/6/20 17:38:20 (QP5 v5.163.1008.3004) */
 SELECT a.sql_text, a.address, a.hash_value
 FROM v$sql a, v$session b
 WHERE a.hash_value = b.sql_hash_value AND b.sid = &sid;
 
-2������hash_value��address��ֵ����v$sql_plan���ҵ���ʵ��ִ�мƻ�
+2）根据hash_value和address的值，从v$sql_plan中找到真实的执行计划
 /* Formatted on 2011/6/20 17:39:22 (QP5 v5.163.1008.3004) */
 SET LINE 200;
 COL oper FORMAT a100;
@@ -17302,17 +17302,17 @@ CONNECT BY PRIOR id = parent_id;
 
 
 
- ��unzip��ѹ���ѹ���ļ�
+ 用unzip解压多个压缩文件
 
-��һ���÷ֺŸ���(�����ڶ�����ٵ�ʱ��
+法一：用分号隔开(适用于对象较少的时候）
 # ls
 p2848731_11i_SOLARIS.zip  p2848731_11i_zhs.zip      p4262360_11i_GENERIC.zip
 #unzip p2848731_11i_SOLARIS.zip  ;unzip p2848731_11i_zhs.zip   ;unzip p4262360_11i_GENERIC.zip
-������
+法二：
 #find . -name '*.zip' -exec unzip {} \;
-������
+法三：
 #ls *.zip | xargs -n1 unzip
-���ģ�������һ��ѭ����
+法四：（借用一个循环）
 # for i in *
 > do
 > unzip $i
@@ -17321,7 +17321,7 @@ p2848731_11i_SOLARIS.zip  p2848731_11i_zhs.zip      p4262360_11i_GENERIC.zip
 
 
 
-ps��ʾΪuid�������û���������Ϊ�û�������8���ַ������û�������8���ַ�ʱ����ʾʱ�ͻ���uid���档
+ps显示为uid而不是用户名，是因为用户名超过8个字符。当用户名超过8个字符时，显示时就会用uid代替。
 [palog@CNSH041576 procps-3.2.8]$ cat /etc/passwd|grep 2001
 mt2s0ylcc:x:2001:5008::/paic/t2s0ylcc/rdbms/mt2s0ylcc:/bin/bash
 [palog@CNSH041576 procps-3.2.8]$ cat /etc/passwd|grep 2081
@@ -17329,18 +17329,18 @@ mt3s0ylcc:x:2081:5008::/paic/t3s0ylcc/rdbms/mt3s0ylcc:/bin/bash
 
 
 
- ���PL/SQL���ڱ���ʱ��hangס�������Ϊ���������Ķ�����ס�������������֮�⡣����ֱ�ӿ�������ʾ��
+ 最近PL/SQL包在编译时被hang住，起初以为是所依赖的对象被锁住。结果出乎意料之外。下面直接看代码演示。
 
-1����SQL*Plus�±����ʱ��hangס
+1、在SQL*Plus下编译包时被hang住
 SQL> alter package bo_syn_data_pkg compile;
 alter package bo_syn_data_pkg compile
 *
 ERROR at line 1:
 ORA-01013: user requested cancel of current operation
 
-Elapsed: 00:04:52.65                                  -->ǿ���жϣ���ʱ����ʱ���Ѿ�����4����
+Elapsed: 00:04:52.65                                  -->强行中断，此时编译时间已经超过4分钟
 
-SQL> alter package bo_syn_data_pkg compile body;      -->����BodyʱҲ��hangס
+SQL> alter package bo_syn_data_pkg compile body;      -->编译Body时也被hang住
 >alter package bo_syn_data_pkg compile body
 *
 ERROR at line 1:
@@ -17363,30 +17363,30 @@ SQL> select sid,serial#,username from v$session where sid=1056;
 
 Elapsed: 00:00:00.01
 
-2�����Ϸ���
--->��session 2�м�أ�û���κζ�����ס
+2、故障分析
+-->在session 2中监控，没有任何对象被锁住
 SQL> @locks_blocking
 
 no rows selected
 
--->��ر����sessionʱ���ֳ���library cache pin�¼�
+-->监控编译的session时发现出现library cache pin事件
 SQL> select sid,seq#,event,p3text,wait_class from v$session_wait where event like 'library cache pin';
 
        SID       SEQ# EVENT                     P3TEXT                                   WAIT_CLASS
 ---------- ---------- ------------------------- ---------------------------------------- --------------------
       1056         69 library cache pin         100*mode+namespace                       Concurrency
 
--->������library cache pin
+-->来看看library cache pin
 -->The library cache pin wait event is associated with library cache concurrency. It occurs when the
 -->session tries to pin an object in the library cache to modify or examine it. The session must acquire a
 -->pin to make sure that the object is not updated by other sessions at the same time. Oracle posts this
 -->event when sessions are compiling or parsing PL/SQL procedures and views.
--->���������������Ҫ������pin��library cache���Ҵ�ʱ�������û�б�����������»���С������ǵ���������ԣ�����ʱû����������
--->�޸ĸû����������Ķ���û�б���ס������ʱ���ָõȴ��¼���ζ�Ű�������������һ��������session�����С�ǰ��Ĳ�ѯû���ҵ��κ�
--->�������󣬿���һ����������session�����С�
+-->上面的描述即是需要将对象pin到library cache，且此时这个对象没有被其他对象更新或持有。对我们的这个包而言，即此时没有其它对象
+-->修改该或者其依赖的对象没有被锁住。而此时出现该等待事件意味着包或其依赖对象一定被其它session所持有。前面的查询没有找到任何
+-->锁定对象，看来一定包被其它session所持有。
 
--->�鿴��ǰ���ݿ����е�session�����
--->������һ��unknow��session
+-->查看当前数据库所有的session的情况
+-->发现有一个unknow的session
 SQL> @sess_users_active
 
 +----------------------------------------------------+
@@ -17398,8 +17398,8 @@ SQL> @sess_users_active
   1086     59678    ACTIVE     GOEX_ADMIN       oracle   5840   oracle@Dev-DB-04 (J000)      UNKNOWN  Dev-DB-04
   1093     54214    ACTIVE     GOEX_ADMIN       oracle   3847   sqlplus@Dev-DB-04 (TNS V1-      pts/1 Dev-DB-04
 
--->��ѯ��session���е�SQL���
--->����֤�����SQL���������������е�һ����
+-->查询该session运行的SQL语句
+-->经验证下面的SQL语句正是所编译包中的一部分
 SQL> @sess_query_sql
 Enter value for sid: 1086
 old   8:   AND s.sid = &&sid
@@ -17421,9 +17421,9 @@ NONE AS IS_ALL_OR_NONE, GOATOTIMEINFORCE AS TIME_IN_FORCE, GOATOTRADETYPE AS TRA
 DE_TYPE, GOATOTRADEAEID AS AE_ID, 'N' AS IS_INDIRECT_TRADE, SYSDATE AS SYN_TIME,
  NULL AS PROCESS_TIME, NULL AS PROCESS_M
 
--->��һ���۲�Session����ϸ���
--->���ָ�session��MODULEΪDBMS_SCHEDULER����ΪһOracle job����ACTION��STATE��������
--->�ɴ����ۣ������ʱ��HangסӦ�����ɸ�job�����
+-->进一步观察Session的详细情况
+-->发现该session的MODULE为DBMS_SCHEDULER，即为一Oracle job，且ACTION与STATE均有描述
+-->由此推论，编译包时的Hang住应该是由该job引起的
 SQL> SELECT username
   2        ,command
   3        ,status
@@ -17441,7 +17441,7 @@ USERNAME      COMMAND STATUS   OSUSER     TERMINAL        PROGRAM         MODULE
 GOEX_ADMIN          3 ACTIVE   oracle     UNKNOWN         oracle@Dev-DB-0 DBMS_SCHEDULER  STP1_PERFORM_SYNC_DA WAITING
                                                           4 (J000)                        TA
 
--->�鿴job�ж�����������job���õ����˸ð�
+-->查看job中定义的情况，该job正好调用了该包
 SQL> select job_name,job_type,enabled,state,job_action from dba_scheduler_jobs where job_name like 'STP1%';
 
 JOB_NAME                       JOB_TYPE         ENABL STATE
@@ -17464,7 +17464,7 @@ STP1_PERFORM_SYNC_DATA         PLSQL_BLOCK      TRUE  RUNNING
 -->Author: Robinson Cheng
 -->Blog  : http://blog.csdn.net/robinson_0612
 
--->�����Ǹ�job���е���ϸ���
+-->下面是该job运行的详细情况
 SQL> SELECT job_name
   2        ,session_id
   3        ,slave_process_id sl_pid
@@ -17478,11 +17478,11 @@ STP1_PERFORM_SYNC_DATA               1086         20 +009 00:51:17.79           
 RUN_CHAIN$MY_CHAIN2                                  +075 19:55:03.52
 RUN_CHAIN$MY_CHAIN1                                  +075 19:57:45.91
 
--->ELAPSED_TIME�У� Elapsed time since the Scheduler job was started
--->����jobһֱ��������״̬�����°�����ʧ��
+-->ELAPSED_TIME列， Elapsed time since the Scheduler job was started
+-->即该job一直处于运行状态，导致包编译失败
 
-3�����
--->��job��Ӧ��session kill��
+3、解决
+-->将job对应的session kill掉
 SQL> alter system kill session '1086,59678';
 alter system kill session '1086,59678'
 *
@@ -17508,19 +17508,19 @@ USERNAME      COMMAND STATUS   OSUSER     TERMINAL        PROGRAM         MODULE
 GOEX_ADMIN          3 KILLED   oracle     UNKNOWN         oracle@Dev-DB-0 DBMS_SCHEDULER  STP1_PERFORM_SYNC_DA WAITING
                                                           4 (J000)                        TA
 
--->�ٴα���ʱ���Ǳ�hangס��Ӧ����session��û�б�����kill
+-->再次编译时还是被hang住，应该是session还没有被彻底kill
 SQL> alter package bo_syn_data_pkg compile;
 alter package bo_syn_data_pkg compile
 *
 ERROR at line 1:
 ORA-01013: user requested cancel of current operation
 
--->�ٴ�kill session
+-->再次kill session
 SQL> alter system kill session '1086,59678' immediate;
 
 System altered.
 
--->��ʱ������ͨ��
+-->此时包编译通过
 SQL> alter package bo_syn_data_pkg compile;
 
 Package altered.
@@ -17533,18 +17533,18 @@ Package body altered.
 
 Elapsed: 00:00:00.18
 
-4���ܽ�
--->������ʱ��hangס�����ų�����������д�����������£�Ӧ�����Ƿ��ж����������������session������
--->��Σ����ı�����Ҫ����pin��library cache�������library cahce pin�ȴ��¼�
--->���������쳣��session����kill֮���ٱ���
+4、总结
+-->包编译时被hang住，在排除代码自身编写出错的情形下，应考虑是否有对象或依赖对象被其它session所持有
+-->其次，包的编译需要将包pin到library cache，会产生library cahce pin等待事件
+-->对于引起异常的session将其kill之后再编译
 
 
 
-����ʧЧ����
+编译失效对象。
 
-��Ա�Դ10g���Ŀ��11g�⣬ȷ��������ʧЧ����
+请对比源10g库和目标11g库，确保无新增失效对象。
 
-�����������ʧЧ������ʹ��plsql developer�ͻ��˹��߱��룬�ҳ�����ʧЧ��ԭ�򲢽����
+如果有新增的失效对象，请使用plsql developer客户端工具编译，找出对象失效的原因并解决。
 "	"sqlplus '/as sysdba'
 SQL> @ /rdbms/admin/utlrp.sql
 SQL> @ /rdbms/admin/utlrp.sql
@@ -17580,12 +17580,12 @@ SQL> !
 
 
 ORA-01591: lock held by in-doubt distributed transaction
-��վ���³�ע��ת���⣬��Ϊ��վԭ���� ת����love wife & love life ��Roger �ṩoracle����֧�ַ���
+本站文章除注明转载外，均为本站原创： 转载自love wife & love life —Roger 提供oracle技术支持服务
 
-�������ӵ�ַ: ORA-01591: lock held by in-doubt distributed transaction
+本文链接地址: ORA-01591: lock held by in-doubt distributed transaction
 
-����ĳ�ͻ�����һ�������ǹ������׶ηֲ�ʽ����ģ������������
-һ����ʱjobִ��ʧ�ܣ�Ȼ�����´���
+昨天某客户遇到一个问题是关于两阶段分布式事务的，大概是内容是
+一个定时job执行失败，然后报如下错误：
 Sun Oct  9 02:38:12 2011
 Errors in file /ora/app/admin/oraapp/bdump/oraapp1_j000_643178.trc:
 ORA-12012: error on auto execute of job 84
@@ -17594,7 +17594,7 @@ ORA-06512: at "SODB_ADMIN.PKG_SODB_MAINTAIN", line 1064
 ORA-06512: at line 1
 Sun Oct  9 02:59:45 2011
 Thread 1 advanced to log sequence 63561
-��������������Ҫ��ע�� ORA-01591 ����
+这里我们首先需要关注是 ORA-01591 错误，
 Error:  ORA 1591
 Text:   lock held by in-doubt distributed transaction <num >
 -------------------------------------------------------------------------------
@@ -17607,31 +17607,31 @@ Action: Match the transaction number in the message with the GLOBAL_TRAN_ID
         point, if necessary.
         If timely repair is not possible, contact the database administrator
         at the commit point, if known, to resolve the pending transaction.
-������mos���ڸô����һ����������Ȼ������ô����ԭ������кܶ�ܶࡣ
-���ڷֲ�ʽ������ʵ�����������⣬����һ���������������а����Ķ�������ֲ���
-�������ϵ����ݿ��У�ֻ����Щ������ȫ������ˣ������������ɣ���Ȼ�����񶼽�ʧ�ܡ�
+如上是mos关于该错误的一个描述，当然，引起该错误的原因可能有很多很多。
+关于分布式事务，其实可以这样理解，就是一个完整的事务，其中包含的多个操作分布在
+两个以上的数据库中，只有这些操作都全部完成了，该事务才算完成，不然该事务都将失败。
 
-���仰˵�����������ʧ���ˣ������漰��������A����ô������session���ʵ���Aʱ������
-ORA-01591����
+换句话说，如果该事务失败了，其中涉及到操作表A，那么当其他session访问到表A时将出现
+ORA-01591错误。
 
-���ھ���˵Ϊʲô�ֲ�ʽ�����ʧ�ܣ���ô��Ҫ��������ˣ������ǳ������������������
-����ȵȡ�
+至于具体说为什么分布式事务会失败，那么就要具体分析了，可能是程序本身的问题或者网络
+问题等等。
 
-���ǻص��ҿͻ���������������Ȼ�Ƿֲ�������ô���ǾͲ�ѯdba_2pc_pending��ͼ��
-��ѯ������£�
+我们回到我客户的问题上来，既然是分布事务，那么我们就查询dba_2pc_pending视图：
+查询结果如下；
 LOCAL_TRAN_ID          STATE            FAIL_TIME    OS_USER    DB_USER
 ---------------------- ---------------- ------------ ---------- ----------
 56.29.120915           prepared         09-SEP-11    t3smisbw
 19.3.5343485           prepared         01-OCT-11    t3smisbw
 12.15.3794557          prepared         03-OCT-11    t3smisbw
-���Ͽ��Կ�����Ŀǰ�ÿ���3��ʧ�ܵķֲ��������� 19.3.5343485 ��������Ҫ�����ġ�
+从上可以看到，目前该库有3个失败的分布事务，其中 19.3.5343485 是我们需要处理的。
 
-�����ֶ�LOCAL_TRAN_ID�Ľ��ͣ���ҿ���ȥ�鿴dba_2pc_pending��˵��������ֻ�򵥵�
-����һ�£�
+关于字段LOCAL_TRAN_ID的解释，大家可以去查看dba_2pc_pending的说明，这里只简单的
+描述一下；
 
-LOCAL_TRAN_ID ��ʽΪ��xidusn + xidslot + xidsqn
+LOCAL_TRAN_ID 格式为：xidusn + xidslot + xidsqn
 
-���������ѯ��ǰϵͳ�ع������Ƿ������ϼ���ʧ�ܵķֲ�ʽ������Ϣ��
+下面继续查询当前系统回滚段中是否还有如上几个失败的分布式事务信息：
 SQL> SELECT KTUXEUSN,
   2         KTUXESLT,
   3         KTUXESQN, /* Transaction ID */
@@ -17646,21 +17646,21 @@ KTUXEUSN   KTUXESLT   KTUXESQN   STATUS           FLAGS
  12         15        3794557    PREPARED         SCO|COL|REV|EXTDTX
  19          3        5343485    PREPARED         SCO|COL|REV|DEAD|EXTDTX
  56         29         120915    PREPARED         SCO|COL|REV|EXTDTX
-���ǿ��Է��֣���Ȼ���ڣ��⴦���ͼ��ˣ�����֮ǰ�һ���Ҫ˵��һ�µ��ǣ�
+我们可以发现，仍然存在，这处理就简单了，处理之前我还需要说明一下的是：
 
-���ݷֲ������״̬��state����ͬ��������Ҫ��ȡ��ͬ�ķ������д������Ժ����һ��
-�򵥵��ܽᣬ�����Ҽ���������δ��������⡣
+根据分布事务的状态（state）不同，我们需要采取不同的方法进行处理，稍后进行一个
+简单的总结，这里我继续描述如何处理该问题。
 
-ͨ����������С������д�����
+通过如下两个小步骤进行处理：
 
 rollback force '19.3.5343485';
 execute dbms_transaction.purge_lost_db_entry('19.3.5343485');
 
-Ȼ���ٴ�ִ�и�job��������
+然后再次执行该job，正常。
 
-��Ȼ�������һ�������İ취���������յ�Ŀ������֪��Ϊʲô�÷ֲ������ִ��ʧ���أ�
+当然这仅仅是一个处理的办法，我们最终的目的是想知道为什么该分布事务会执行失败呢？
 
-������ѯ��job�Ļ�����Ϣ��
+先来查询该job的基本信息：
 SQL> SELECT job,SCHEMA_USER,LAST_DATE,NEXT_DATE,BROKEN,FAILURES,INSTANCE
   2  FROM dba_jobs;
 
@@ -17682,13 +17682,13 @@ JOB SCHEMA_USER LAST_DATE NEXT_DATE  B FAILURES INTERVAL                        
 ..........
 
 13 ROWS selected.
-��job (job numberΪ84) �Ѿ�ִ��ʧ��12���ˣ�INTERVAL�Ǹ�job��ִ�м��������dba_jobs�е� FAILURES�ֶΣ�
-���ֶ����ֵΪ16��ÿ��ִ��ʧ�ܺ��ֵ����������һ��ִ�гɹ��󽫱���0.
+该job (job number为84) 已经执行失败12次了，INTERVAL是该job的执行间隔。对于dba_jobs中的 FAILURES字段，
+该字段最大值为16，每次执行失败后该值递增，但是一旦执行成功后将被清0.
 
-�ӱ�����Ϣ��������jobִ��ʧ���������PKG_SODB_MAINTAIN��1064�У�ͨ��dbms_metadata��ȡ����󣬷���
-������Ϣ��
+从报错信息来看，该job执行失败问题出在PKG_SODB_MAINTAIN的1064行，通过dbms_metadata获取定义后，发现
+如下信息：
 
-�ù���ִ�е����²���ʱʧ�ܣ�
+该过程执行到如下步骤时失败：
 1
 2
 3
@@ -17728,25 +17728,25 @@ EXCEPTION
                               'DB_ERROR',
                               3,
                               SYSDATE,
-                              '��y Y a2�����¨���3��',
+                              'êy Y a2ù×÷òì3￡',
                               NULL,
                               v_id
                              );
       COMMIT;
       RAISE;
 END refine_msg;
-����: Proc_Expired_Msg_Log �� Proc_Expired_Msg_Tbm Ϊ�洢���̣�
-      Get_Expired_Msg_Days �� Get_Expired_Tbm_Days Ϊ����PKG_SODB�е�2��������
+其中: Proc_Expired_Msg_Log 和 Proc_Expired_Msg_Tbm 为存储过程；
+      Get_Expired_Msg_Days 和 Get_Expired_Tbm_Days 为过程PKG_SODB中的2个函数；
 
-���������ƺ�����ͳ�������һ��ɿ�����ҵ���߼�ʲô�Ŀ��������⣬����
-�� Proc_Expired_Msg_Log(p_date - PKG_SODB.Get_Expired_Msg_Days) �п��ܼ������
-�Ǹ����𣿻���˵ִ�е��ò�ʱ�������rolllback����ʱ������ǰ��������Ƿ񻹴��ڹ�����
+这样来看似乎问题就出在这里，我怀疑可能是业务逻辑什么的可能有问题，比如
+该 Proc_Expired_Msg_Log(p_date - PKG_SODB.Get_Expired_Msg_Days) 有可能计算出来
+是负数吗？或者说执行到该步时，后面的rolllback操作时，其他前面的事务是否还存在关联？
 
-���ǿ�������������������Щ�鷳����Ҫ���⼸�������������̫��Ĵ洢���̺ͺ�����
-��������ͷ�Σ���ý���ͻ��ҿ����̿����⼸������
+不是开发出身，分析起来有些麻烦，主要是这几个包里面包含了太多的存储过程和函数，
+看起来就头晕，最好建议客户找开发商看看这几个包。
 
-���䣺���ڷֲ�ʽ�������ļ��ܽ�
-++++++ ���洦������ ++++++
+补充：关于分布式事务处理的简单总结
+++++++ 常规处理步骤 ++++++
 
 1. Identify the id OF the TRANSACTION:
 
@@ -17767,10 +17767,10 @@ COMMIT;
 SELECT LOCAL_TRAN_ID, GLOBAL_TRAN_ID,to_char(FAIL_TIME,'dd-mon-yyyy HH24:MI:SS'),STATE, MIXED FROM DBA_2PC_PENDING;
 SELECT LOCAL_TRAN_ID, IN_OUT,INTERFACE, DATABASE FROM DBA_2PC_NEIGHBORS;
 
-��������������state��
+其中有如下五种state：
 
  collecting
-   -- execute DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('1.10.255'����
+   -- execute DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('1.10.255'）；
  prepared
    -- rollback force tran_id/commit force tran_id;
    EXECUTE DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('1.10.255');
@@ -17782,12 +17782,12 @@ SELECT LOCAL_TRAN_ID, IN_OUT,INTERFACE, DATABASE FROM DBA_2PC_NEIGHBORS;
    -- execute DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('1.10.255');
 
 
-++++++ �������ORA-30019���󣬿��Բ�ȡ���·�ʽ��++++++
+++++++ 如果遇到ORA-30019错误，可以采取如下方式：++++++
 
 ALTER SESSION SET "_smu_debug_mode" = 4;
 EXECUTE DBMS_TRANSACTION.PURGE_LOST_DB_ENTRY('1.10.255');
 
-====== ���1 ��dba_2pc_pending���л��������¼������ʵ���Ѿ������ڸ�������
+====== 情况1 在dba_2pc_pending表中还有事务记录，但是实际已经不存在该事务了
 
 SELECT LOCAL_TRAN_ID,
        GLOBAL_TRAN_ID,
@@ -17798,7 +17798,7 @@ FROM DBA_2PC_PENDING;
 
 LOCAL_TRAN_ID         1.92.66874             prepared
 
-1 Ϊ�ع��κ�
+1 为回滚段号
 
 SELECT KTUXEUSN,
        KTUXESLT,
@@ -17809,11 +17809,11 @@ FROM x$ktuxe
 WHERE ktuxesta != 'INACTIVE'
 AND ktuxeusn = 1
 
-����Ϊ0
+返回为0
 
-�����״̬Ϊprepared�����������Ҳ�����������Ϣ����ô����ֻ���ֹ�����������
+如果当状态为prepared，且事务表中也不存在相关信息，那么我们只能手工进行清理：
 
-++++++ ʹ�����·�ʽ�����ֹ�������++++++
+++++++ 使用如下方式进行手工处理：++++++
 
 SET TRANSACTION USE ROLLBACK segment SYSTEM;
 DELETE FROM sys.pending_trans$ WHERE local_tran_id = '1.92.66874';
@@ -17821,7 +17821,7 @@ DELETE FROM sys.pending_sessions$ WHERE local_tran_id = '1.92.66874';
 DELETE FROM sys.pending_sub_sessions$ WHERE local_tran_id = '1.92.66874';
 commit;
 
-====== ���2  ��dba_2pc_pending�����޷��鵽�ֲ�ʽ������Ϣ������ʵ����ȴ�Ǵ��ڸ÷ֲ�ʽ�����
+====== 情况2  在dba_2pc_pending表中无法查到分布式事务信息，但是实际上却是存在该分布式事务的
 
 SELECT LOCAL_TRAN_ID,
        GLOBAL_TRAN_ID,
@@ -17830,11 +17830,11 @@ SELECT LOCAL_TRAN_ID,
        MIXED
 FROM DBA_2PC_PENDING;
 
-��ѯ�޼�¼
+查询无记录
 
 SELECT local_tran_id, state
 FROM dba_2pc_pending
-WHERE local_tran_id = ' 1.92.66874 ';  -- Ϊ��
+WHERE local_tran_id = ' 1.92.66874 ';  -- 为空
 
 SELECT KTUXEUSN,
        KTUXESLT,
@@ -17845,11 +17845,11 @@ FROM x$ktuxe
 WHERE ktuxesta != 'INACTIVE'
 AND ktuxeusn = 1;
 
-��ѯ�м�¼
+查询有记录
 
-====== ��������£������޷��ֹ�����ROLLBACK��commit ======
+====== 此种情况下，我们无法手工进行ROLLBACK或commit ======
 
-++++++ ���������µķ�ʽ�ֹ�������++++++
+++++++ 我们用如下的方式手工清理：++++++
 
 ALTER system disable distributed recovery ;
 
@@ -17891,7 +17891,7 @@ commit ;
 
 commit   force ' 1.92.66874 ' ;
 
-++++++ ��ʱ���commit force���ǳ��ֱ�������Ҫ����ִ�У�++++++
+++++++ 此时如果commit force还是出现报错，需要继续执行：++++++
 
 1. DELETE FROM pending_trans $ WHERE local_tran_id = '1.92.66874' ;
 2. DELETE FROM pending_sessions $ WHERE local_tran_id = '1.92.66874' ;
@@ -17900,9 +17900,9 @@ commit   force ' 1.92.66874 ' ;
 5. ALTER SESSION SET " _smu_debug_mode " = 4 ;
 6. EXEC dbms_transaction.purge_lost_db_entry ( '1.92.66874' )
 
-====== �������ǻ�����ͨ������SQL�����񵽵��·ֲ�ʽ����ʧ�ܵ�SQL��======
+====== 另外我们还可以通过如下SQL来捕获到导致分布式事务失败的SQL：======
 
-++++++ ��ȡlocal_tran_id ++++++
+++++++ 获取local_tran_id ++++++
 
 SELECT a.sql_text, s.osuser, s.username
 FROM v$transaction t, v$session s, v$sqlarea a
@@ -17912,21 +17912,21 @@ AND t.xidusn = 1
 AND t.xidslot = 25
 AND t.xidsqn = 589367;
 
-��� v$session �� v$sqlarea �Ѿ��޷��鵽����ô���ǻ����Թ���һЩ dba_hist_* ��ͼ���в�ѯ��
+如果 v$session 和 v$sqlarea 已经无法查到，那么我们还可以关联一些 dba_hist_* 试图进行查询。
 
 
 
-1. [����]�鿴�û�Ȩ��     ���� [1] [2] [ȫ��Ԥ��]
+1. [代码]查看用户权限     跳至 [1] [2] [全屏预览]
 view sourceprint 
-1 show grants for ����û�;
+1 show grants for 你的用户;
 
 2 show grants for root@'localhost';
 3 show grants for webgametest@10.3.18.158;
 
-4 show create database dbname;  ������Կ����������ݿ�ʱ�õ���һЩ������
+4 show create database dbname;  这个可以看到创建数据库时用到的一些参数。
 
-5 show create table tickets;    ���Կ���������ʱ�õ���һЩ����
-2. [����][SQL]����     ���� [1] [2] [ȫ��Ԥ��]
+5 show create table tickets;    可以看到创建表时用到的一些参数
+2. [代码][SQL]代码     跳至 [1] [2] [全屏预览]
 view sourceprint 
 001 GRANT USAGE ON *.* TO 'discuz'@'localhost' IDENTIFIED BY PASSWORD '*C242DDD213BE9C6F8DA28D49245BF69FC79A86EB';
 
@@ -17934,19 +17934,19 @@ view sourceprint
 
 003
 
-004 ���Ȱ��ҵ��������һ�������������˼
+004 我先按我的理解解释一下上面两句的意思
 
-005 ����һ��ֻ�����ڱ��ص�½�� ���ܲ��������û��� discuz ����Ϊ ***** �Ѿ������˵�
+005 建立一个只可以在本地登陆的 不能操作的用用户名 discuz 密码为 ***** 已经加密了的
 
-006 Ȼ��ڶ������˼�� �������discuz�û�����discuz���ݿ������Ȩ��
+006 然后第二句的意思是 ，给这个discuz用户操作discuz数据库的所有权限
 
 007
 
-008 ʹ��GRANT
+008 使用GRANT
 
 009
 
-010 GRANT���������������û���ָ���û���������û�Ȩ�ޡ����ʽ���£�
+010 GRANT命令用来建立新用户，指定用户口令并增加用户权限。其格式如下：
 
 011
 
@@ -17960,79 +17960,79 @@ view sourceprint
 
 016
 
-017 ���������㿴���ģ�������������������������ݡ���������һ�ض����ǽ��н��ܣ������ո���һЩ��������������ǵ�Эͬ������һ���˽⡣
+017 　　正如你看到的，在这个命令中有许多待填的内容。让我们逐一地对它们进行介绍，并最终给出一些例子以让你对它们的协同工作有一个了解。
 
 018
 
-019 ����<privileges>��һ���ö��ŷָ�������Ҫ�����Ȩ�޵��б��������ָ����Ȩ�޿��Է�Ϊ�������ͣ�
+019 　　<privileges>是一个用逗号分隔的你想要赋予的权限的列表。你可以指定的权限可以分为三种类型：
 
 020
 
-021 �������ݿ�/���ݱ�/������Ȩ�ޣ� Alter: �޸��Ѵ��ڵ����ݱ�(��������/ɾ����)��������
+021 　　数据库/数据表/数据列权限： Alter: 修改已存在的数据表(例如增加/删除列)和索引。
 
-022 Create: �����µ����ݿ�����ݱ���
+022 Create: 建立新的数据库或数据表。
 
-023 Delete: ɾ�����ļ�¼��
+023 Delete: 删除表的记录。
 
-024 Drop: ɾ�����ݱ������ݿ⡣
+024 Drop: 删除数据表或数据库。
 
-025 INDEX: ������ɾ��������
+025 INDEX: 建立或删除索引。
 
-026 Insert: ���ӱ��ļ�¼��
+026 Insert: 增加表的记录。
 
-027 Select: ��ʾ/�������ļ�¼��
+027 Select: 显示/搜索表的记录。
 
-028 Update: �޸ı����Ѵ��ڵļ�¼��
+028 Update: 修改表中已存在的记录。
 
 029
 
-030 ����ȫ�ֹ���Ȩ�ޣ�
+030 　　全局管理权限：
 
 031
 
-032 file: ��MySQL�������϶�д�ļ���
+032 file: 在MySQL服务器上读写文件。
 
-033 PROCESS: ��ʾ��ɱ�����������û��ķ����̡߳�
+033 PROCESS: 显示或杀死属于其它用户的服务线程。
 
-034 RELOAD: ���ط��ʿ��Ʊ���ˢ����־�ȡ�
+034 RELOAD: 重载访问控制表，刷新日志等。
 
-035 SHUTDOWN: �ر�MySQL����
+035 SHUTDOWN: 关闭MySQL服务。
 
 036
 
-037 �����ر��Ȩ�ޣ�
+037 　　特别的权限：
 
 038
 
-039 ALL: �������κ���(��rootһ��)��
+039 ALL: 允许做任何事(和root一样)。
 
-040 USAGE: ֻ������¼--����ʲôҲ����������
+040 USAGE: 只允许登录--其它什么也不允许做。
 
 041
 
 042
 
-043 ������ЩȨ�����漰����MySQL�����������е�һЩ��������û�����������еľ��󲿷���������Ϥ�ġ�
+043 　　这些权限所涉及到的MySQL的特征，其中的一些我们至今还没看到，而其中的绝大部分是你所熟悉的。
 
 044
 
-045 <what> ��������ЩȨ�������õ�����*.*��ζ��Ȩ�޶��������ݿ�����ݱ���Ч��dbName.*��ζ�Ŷ���ΪdbName�����ݿ��е��������ݱ���Ч�� dbName.tblName��ζ�Ž�����ΪdbName�е���ΪtblName�����ݱ���Ч��������������ͨ���ڸ����Ȩ�޺���ʹ��Բ�����е������е��б���ָ��Ȩ�޽�����Щ����Ч(�ں������ǽ���������������)��
+045 <what> 定义了这些权限所作用的区域。*.*意味着权限对所有数据库和数据表有效。dbName.*意味着对名为dbName的数据库中的所有数据表有效。 dbName.tblName意味着仅对名为dbName中的名为tblName的数据表有效。你甚至还可以通过在赋予的权限后面使用圆括号中的数据列的列表以指定权限仅对这些列有效(在后面我们将看到这样的例子)。
 
 046
 
-047 ����<user>ָ������Ӧ����ЩȨ�޵��û�����MySQL�У�һ���û�ͨ������¼���û������û�ʹ�õļ������������/IP��ַ��ָ����������ֵ������ʹ��%ͨ���(����kevin@%������ʹ���û���kevin���κλ����ϵ�¼��������ָ����Ȩ��)��
+047 　　<user>指定可以应用这些权限的用户。在MySQL中，一个用户通过它登录的用户名和用户使用的计算机的主机名/IP地址来指定。这两个值都可以使用%通配符(例如kevin@%将允许使用用户名kevin从任何机器上登录以享有你指定的权限)。
 
 048
 
-049 ����<password>ָ�����û�����MySQL�������õĿ�������÷���������˵��IDENTIFIED BY "<password>"��GRANT�������ǿ�ѡ�����ָ���Ŀ����ȡ���û�ԭ�������롣���û��Ϊһ�����û�ָ�����������������ʱ�Ͳ���Ҫ���
+049 　　<password>指定了用户连接MySQL服务所用的口令。它被用方括号括起，说明IDENTIFIED BY "<password>"在GRANT命令中是可选项。这里指定的口令会取代用户原来的密码。如果没有为一个新用户指定口令，当他进行连接时就不需要口令。
 
 050
 
-051 ��������п�ѡ��WITH GRANT OPTION����ָ�����û�����ʹ��GRANT/REVOKE�����ӵ�е�Ȩ�޸��������û�����С��ʹ�������--��Ȼ���������ܲ�����ô���ԣ����磬������ӵ��������ܵ��û����ܻ��໥�������ǵ�Ȩ�ޣ���Ҳ�������㵱���뿴���ġ�
+051 这个命令中可选的WITH GRANT OPTION部分指定了用户可以使用GRANT/REVOKE命令将他拥有的权限赋予其他用户。请小心使用这项功能--虽然这个问题可能不是那么明显！例如，两个都拥有这个功能的用户可能会相互共享他们的权限，这也许不是你当初想看到的。
 
 052
 
-053 ���������������������ӡ�����һ����Ϊdbmanager���û���������ʹ�ÿ���managedb��server.host.net���� MySQL�����������Է�����Ϊdb�����ݿ��ȫ������(�����Խ���Ȩ�޸��������û�)�������ʹ�������GRANT���
+053 　　让我们来看两个例子。建立一个名为dbmanager的用户，他可以使用口令managedb从server.host.net连接 MySQL，并仅仅可以访问名为db的数据库的全部内容(并可以将此权限赋予其他用户)，这可以使用下面的GRANT命令：
 
 054
 
@@ -18048,21 +18048,21 @@ view sourceprint
 
 060
 
-061 ���ڸı�����û��Ŀ���Ϊfunkychicken�������ʽ���£�
+061 现在改变这个用户的口令为funkychicken，命令格式如下：
 
-062 ���� mysql> GRANT USAGE ON *.*
+062 　　 mysql> GRANT USAGE ON *.*
 
-063 ���� -> TO dbmanager@server.host.net
+063 　　 -> TO dbmanager@server.host.net
 
-064 ���� -> IDENTIFIED BY "funkychicken";
+064 　　 -> IDENTIFIED BY "funkychicken";
 
 065
 
-066 ��ע������û�и����κ������Ȩ��(the USAGEȨ��ֻ�������û���¼)�������û��Ѿ����ڵ�Ȩ�޲��ᱻ�ı䡣
+066 请注意我们没有赋予任何另外的权限(the USAGE权限只能允许用户登录)，但是用户已经存在的权限不会被改变。
 
 067
 
-068 �������������ǽ���һ���µ���Ϊjessica���û��������Դ�host.net�������������ӵ�MySQL�������Ը������ݿ����û��������� email��ַ�����ǲ���Ҫ�����������ݿ����Ϣ��Ҳ����˵����db���ݿ����ֻ����Ȩ��(���磬Select)�����������Զ�Users����name�к�email��ִ��Update�������������£�
+068 　　现在让我们建立一个新的名为jessica的用户，他可以从host.net域的任意机器连接到MySQL。他可以更新数据库中用户的姓名和 email地址，但是不需要查阅其它数据库的信息。也就是说他对db数据库具有只读的权限(例如，Select)，但是他可以对Users表的name列和email列执行Update操作。命令如下：
 
 069
 
@@ -18080,7 +18080,7 @@ view sourceprint
 
 076
 
-077 ������ע���ڵ�һ��������������ָ��Jessica�����������ӵ�������ʱʹ����%(ͨ���)���š����⣬����Ҳû�и����������û���������Ȩ�޵���������Ϊ��������������û�д���WITH GRANT OPTION���ڶ�������ʾ�������ͨ���ڸ����Ȩ�޺����Բ�������ö��ŷָ����е��б����ض��������и���Ȩ�ޡ�
+077 　　请注意在第一个命令中我们在指定Jessica可以用来连接的主机名时使用了%(通配符)符号。此外，我们也没有给他向其他用户传递他的权限的能力，因为我们在命令的最后没有带上WITH GRANT OPTION。第二个命令示范了如何通过在赋予的权限后面的圆括号中用逗号分隔的列的列表对特定的数据列赋予权限。
 
 078
 
@@ -18098,45 +18098,45 @@ view sourceprint
 
 085
 
-086 ���Ի�����WIN32 mysql5.0.45
+086 测试环境：WIN32 mysql5.0.45
 
 087
 
 088
 
-089 ����Ҫ����һ�£�һ������£��޸�MySQL���룬��Ȩ������Ҫ��mysql���rootȨ�޵ġ�
+089 首先要声明一下：一般情况下，修改MySQL密码，授权，是需要有mysql里的root权限的。
 
 090
 
-091 ע������������WIN������ʾ���£�phpMyAdminͬ�����á�
+091 注：本操作是在WIN命令提示符下，phpMyAdmin同样适用。
 
-092     �û���phplamp  �û����ݿ⣺phplampDB
+092     用户：phplamp  用户数据库：phplampDB
 
 093
 
-094 1.�½��û���
+094 1.新建用户。
 
 095
 
-096 //��¼MYSQL
+096 //登录MYSQL
 
 097 @>mysql -u root -p
 
-098 @>����
+098 @>密码
 
-099 //�����û�
+099 //创建用户
 
 100 mysql> insert into mysql.user(Host,User,Password) values("localhost","phplamp",password("1234"));
 
-101 //ˢ��ϵͳȨ�ޱ�
+101 //刷新系统权限表
 
 102 mysql>flush privileges;
 
-103 �����ʹ�����һ����Ϊ��phplamp  ����Ϊ��1234  ���û���
+103 这样就创建了一个名为：phplamp  密码为：1234  的用户。
 
 104
 
-105 Ȼ���¼һ�¡�
+105 然后登录一下。
 
 106
 
@@ -18144,45 +18144,45 @@ view sourceprint
 
 108 @>mysql -u phplamp -p
 
-109 @>��������
+109 @>输入密码
 
-110 mysql>��¼�ɹ�
+110 mysql>登录成功
 
 111
 
-112 2.Ϊ�û���Ȩ��
+112 2.为用户授权。
 
 113
 
-114 //��¼MYSQL����ROOTȨ�ޣ�����������ROOT���ݵ�¼.
+114 //登录MYSQL（有ROOT权限）。我里我以ROOT身份登录.
 
 115 @>mysql -u root -p
 
-116 @>����
+116 @>密码
 
-117 //����Ϊ�û�����һ�����ݿ�(phplampDB)
+117 //首先为用户创建一个数据库(phplampDB)
 
 118 mysql>create database phplampDB;
 
-119 //��Ȩphplamp�û�ӵ��phplamp���ݿ������Ȩ�ޡ�
+119 //授权phplamp用户拥有phplamp数据库的所有权限。
 
 120 >grant all privileges on phplampDB.* to phplamp@localhost identified by '1234';
 
-121 //ˢ��ϵͳȨ�ޱ�
+121 //刷新系统权限表
 
 122 mysql>flush privileges;
 
-123 mysql>��������
+123 mysql>其它操作
 
 124
 
 125 /*
 
-126 �����ָ������Ȩ�޸�һ�û�������������д:
+126 如果想指定部分权限给一用户，可以这样来写:
 
 127 mysql>grant select,update on phplampDB.* to phplamp@localhost identified by '1234';
 
-128 //ˢ��ϵͳȨ�ޱ���
+128 //刷新系统权限表。
 
 129 mysql>flush privileges;
 
@@ -18190,29 +18190,29 @@ view sourceprint
 
 131
 
-132 3.ɾ���û���
+132 3.删除用户。
 
 133 @>mysql -u root -p
 
-134 @>����
+134 @>密码
 
 135 mysql>DELETE FROM user WHERE User="phplamp" and Host="localhost";
 
 136 mysql>flush privileges;
 
-137 //ɾ���û������ݿ�
+137 //删除用户的数据库
 
 138 mysql>drop database phplampDB;
 
 139
 
-140 4.�޸�ָ���û����롣
+140 4.修改指定用户密码。
 
 141 @>mysql -u root -p
 
-142 @>����
+142 @>密码
 
-143 mysql>update mysql.user set password=password('������') where User="phplamp" and Host="localhost";
+143 mysql>update mysql.user set password=password('新密码') where User="phplamp" and Host="localhost";
 
 144 mysql>flush privileges;
 
@@ -18243,24 +18243,24 @@ view sourceprint
 
 
 
-����ʵ���������� MySQL 5.0 �����ϰ汾��
+本文实例，运行于 MySQL 5.0 及以上版本。
 
-MySQL �����û�Ȩ������ļ򵥸�ʽ�ɸ���Ϊ��
+MySQL 赋予用户权限命令的简单格式可概括为：
 
-grant Ȩ�� on ���ݿ���� to �û�
-
-
+grant 权限 on 数据库对象 to 用户
 
 
 
 
-һ��grant ��ͨ�����û�����ѯ�����롢���¡�ɾ�� ���ݿ������б����ݵ�Ȩ����
+
+
+一、grant 普通数据用户，查询、插入、更新、删除 数据库中所有表数据的权利。
 
 grant select on testdb.* to common_user@'%'
 grant insert on testdb.* to common_user@'%'
 grant update on testdb.* to common_user@'%'
 grant delete on testdb.* to common_user@'%'
-���ߣ���һ�� MySQL �����������
+或者，用一条 MySQL 命令来替代：
 
 grant select, insert, update, delete on testdb.* to common_user@'%'
 
@@ -18269,37 +18269,37 @@ grant select, insert, update, delete on testdb.* to common_user@'%'
 
 
 
-����grant ���ݿ⿪����Ա������������������ͼ���洢���̡�������������Ȩ�ޡ�
+二、grant 数据库开发人员，创建表、索引、视图、存储过程、函数。。。等权限。
 
-grant �������޸ġ�ɾ�� MySQL ���ݱ��ṹȨ�ޡ�
+grant 创建、修改、删除 MySQL 数据表结构权限。
 
 grant create on testdb.* to developer@'192.168.0.%';
 grant alter  on testdb.* to developer@'192.168.0.%';
 grant drop   on testdb.* to developer@'192.168.0.%';
 
 
-grant ���� MySQL ���Ȩ�ޡ�
+grant 操作 MySQL 外键权限。
 
 grant references on testdb.* to developer@'192.168.0.%';
 
 
-grant ���� MySQL ��ʱ��Ȩ�ޡ�
+grant 操作 MySQL 临时表权限。
 
 grant create temporary tables on testdb.* to developer@'192.168.0.%';
 
 
-grant ���� MySQL ����Ȩ�ޡ�
+grant 操作 MySQL 索引权限。
 
 grant index on testdb.* to developer@'192.168.0.%';
 
 
-grant ���� MySQL ��ͼ���鿴��ͼԴ���� Ȩ�ޡ�
+grant 操作 MySQL 视图、查看视图源代码 权限。
 
 grant create view on testdb.* to developer@'192.168.0.%';
 grant show   view on testdb.* to developer@'192.168.0.%';
 
 
-grant ���� MySQL �洢���̡����� Ȩ�ޡ�
+grant 操作 MySQL 存储过程、函数 权限。
 
 grant create routine on testdb.* to developer@'192.168.0.%'; -- now, can show procedure status
 grant alter  routine on testdb.* to developer@'192.168.0.%'; -- now, you can drop a procedure
@@ -18310,17 +18310,17 @@ grant execute        on testdb.* to developer@'192.168.0.%';
 
 
 
-����grant ��ͨ DBA ����ĳ�� MySQL ���ݿ��Ȩ�ޡ�
+三、grant 普通 DBA 管理某个 MySQL 数据库的权限。
 
 grant all privileges on testdb to dba@'localhost'
-���У��ؼ��� ��privileges�� ����ʡ�ԡ�
+其中，关键字 “privileges” 可以省略。
 
 
 
 
 
 
-�ġ�grant �߼� DBA ���� MySQL ���������ݿ��Ȩ�ޡ�
+四、grant 高级 DBA 管理 MySQL 中所有数据库的权限。
 
 grant all on *.* to dba@'localhost'
 
@@ -18329,35 +18329,35 @@ grant all on *.* to dba@'localhost'
 
 
 
-�塢MySQL grant Ȩ�ޣ��ֱ���������ڶ������ϡ�
+五、MySQL grant 权限，分别可以作用在多个层次上。
 
-1. grant ���������� MySQL �������ϣ�
+1. grant 作用在整个 MySQL 服务器上：
 
-grant select on *.* to dba@localhost; -- dba ���Բ�ѯ MySQL ���������ݿ��еı���
-grant all    on *.* to dba@localhost; -- dba ���Թ��� MySQL �е��������ݿ�
-
-
-2. grant �����ڵ������ݿ��ϣ�
-
-grant select on testdb.* to dba@localhost; -- dba ���Բ�ѯ testdb �еı���
+grant select on *.* to dba@localhost; -- dba 可以查询 MySQL 中所有数据库中的表。
+grant all    on *.* to dba@localhost; -- dba 可以管理 MySQL 中的所有数据库
 
 
-3. grant �����ڵ������ݱ��ϣ�
+2. grant 作用在单个数据库上：
+
+grant select on testdb.* to dba@localhost; -- dba 可以查询 testdb 中的表。
+
+
+3. grant 作用在单个数据表上：
 
 grant select, insert, update, delete on testdb.orders to dba@localhost;
 
 
-�����ڸ�һ���û���Ȩ���ű�ʱ�����Զ��ִ��������䡣���磺
+这里在给一个用户授权多张表时，可以多次执行以上语句。例如：
 
 grant select(user_id,username) on smp.users to mo_user@'%' identified by '123345';
 grant select on smp.mo_sms to mo_user@'%' identified by '123345';
 
-4. grant �����ڱ��е����ϣ�
+4. grant 作用在表中的列上：
 
 grant select(id, se, rank) on testdb.apache_log to dba@localhost;
 
 
-5. grant �����ڴ洢���̡������ϣ�
+5. grant 作用在存储过程、函数上：
 
 grant execute on procedure testdb.pr_add to 'dba'@'localhost'
 grant execute on function testdb.fn_add to 'dba'@'localhost'
@@ -18367,14 +18367,14 @@ grant execute on function testdb.fn_add to 'dba'@'localhost'
 
 
 
-�����鿴 MySQL �û�Ȩ��
+六、查看 MySQL 用户权限
 
-�鿴��ǰ�û����Լ���Ȩ�ޣ�
+查看当前用户（自己）权限：
 
 show grants;
 
 
-�鿴���� MySQL �û�Ȩ�ޣ�
+查看其他 MySQL 用户权限：
 
 show grants for dba@localhost;
 
@@ -18383,9 +18383,9 @@ show grants for dba@localhost;
 
 
 
-�ߡ������Ѿ������ MySQL �û�Ȩ�޵�Ȩ�ޡ�
+七、撤销已经赋予给 MySQL 用户权限的权限。
 
-revoke �� grant ���﷨��ֻ࣬��Ҫ�ѹؼ��� ��to�� ���� ��from�� ���ɣ�
+revoke 跟 grant 的语法差不多，只需要把关键字 “to” 换成 “from” 即可：
 
 grant  all on *.* to   dba@localhost;
 revoke all on *.* from dba@localhost;
@@ -18395,14 +18395,14 @@ revoke all on *.* from dba@localhost;
 
 
 
-�ˡ�MySQL grant��revoke �û�Ȩ��ע������
+八、MySQL grant、revoke 用户权限注意事项
 
-1. grant, revoke �û�Ȩ�޺󣬸��û�ֻ���������� MySQL ���ݿ⣬Ȩ�޲�����Ч��
+1. grant, revoke 用户权限后，该用户只有重新连接 MySQL 数据库，权限才能生效。
 
-2. ���������Ȩ���û���Ҳ���Խ���ЩȨ�� grant �������û�����Ҫѡ�� ��grant option��
+2. 如果想让授权的用户，也可以将这些权限 grant 给其他用户，需要选项 “grant option“
 
 grant select on testdb.* to dba@localhost with grant option;
-�������һ���ò�����ʵ���У����ݿ�Ȩ������� DBA ��ͳһ������
+这个特性一般用不到。实际中，数据库权限最好由 DBA 来统一管理。
 
 
 
@@ -18414,106 +18414,106 @@ grant select on testdb.* to dba@localhost with grant option;
 
 
 
-���� SELECT command denied to user '�û���'@'������' for table '����' ���ִ��󣬽����������Ҫ�Ѱɺ���ı�����Ȩ������Ҫ����Ȩ�������ݿ�ҲҪ��
+遇到 SELECT command denied to user '用户名'@'主机名' for table '表名' 这种错误，解决方法是需要把吧后面的表名授权，即是要你授权核心数据库也要。
 
-����������SELECT command denied to user 'my'@'%' for table 'proc'���ǵ��ô洢���̵�ʱ����֣�ԭ��ΪֻҪ��ָ�������ݿ���Ȩ�����ˣ�ʲô�洢���̡������ȶ������ٹ��ˣ�˭֪��ҲҪ�����ݿ�mysql��proc����Ȩ
+我遇到的是SELECT command denied to user 'my'@'%' for table 'proc'，是调用存储过程的时候出现，原以为只要把指定的数据库授权就行了，什么存储过程、函数等都不用再管了，谁知道也要把数据库mysql的proc表授权
 
 
 
 *************************************************************************************************
 
-�ο���http://zhidao.baidu.com/question/19633785.html
+参考：http://zhidao.baidu.com/question/19633785.html
 
 
 
-mysql��Ȩ������5������user��db��host��tables_priv��columns_priv��
+mysql授权表共有5个表：user、db、host、tables_priv和columns_priv。
 
-��Ȩ����������������;��
-user��
-user���г��������ӷ��������û�������������ָ������������ȫ�֣������û���Ȩ�ޡ���user�����õ��κ�Ȩ�޾���ȫ��Ȩ�ޣ����������������ݿ⡣���磬�����������DELETEȨ�ޣ��������г����û����Դ��κα���ɾ����¼����������������֮ǰҪ���濼�ǡ�
+授权表的内容有如下用途：
+user表
+user表列出可以连接服务器的用户及其口令，并且它指定他们有哪种全局（超级用户）权限。在user表启用的任何权限均是全局权限，并适用于所有数据库。例如，如果你启用了DELETE权限，在这里列出的用户可以从任何表中删除记录，所以在你这样做之前要认真考虑。
 
-db��
-db���г����ݿ⣬���û���Ȩ�޷������ǡ�������ָ����Ȩ��������һ�����ݿ��е����б���
+db表
+db表列出数据库，而用户有权限访问它们。在这里指定的权限适用于一个数据库中的所有表。
 
-host��
-host����db�����ʹ����һ���Ϻò���Ͽ����ض����������ݿ�ķ���Ȩ�ޣ�����ܱȵ���ʹ��db��Щ�����������GRANT��REVOKE����Ӱ�죬���ԣ�����ܷ������������������
+host表
+host表与db表结合使用在一个较好层次上控制特定主机对数据库的访问权限，这可能比单独使用db好些。这个表不受GRANT和REVOKE语句的影响，所以，你可能发觉你根本不是用它。
 
-tables_priv��
-tables_priv��ָ������Ȩ�ޣ�������ָ����һ��Ȩ��������һ�����������С�
+tables_priv表
+tables_priv表指定表级权限，在这里指定的一个权限适用于一个表的所有列。
 
-columns_priv��
-columns_priv��ָ���м�Ȩ�ޡ�����ָ����Ȩ��������һ�������ض��С�
-
-
+columns_priv表
+columns_priv表指定列级权限。这里指定的权限适用于一个表的特定列。
 
 
 
 
-һ��Ȩ�ޱ�
 
-mysql���ݿ��е�3��Ȩ�ޱ���user ��db�� host
 
-Ȩ�ޱ��Ĵ�ȡ�����ǣ�
+一．权限表
 
-1)�ȴ�user���е�host�� user�� password��3���ֶ����ж����ӵ�IP���û����������Ƿ���ڱ��У�������ͨ��������֤��
+mysql数据库中的3个权限表：user 、db、 host
 
-2)ͨ��Ȩ����֤������Ȩ�޷���ʱ������user��db��tables_priv��columns_priv��˳����з��䡣���ȼ��ȫ��Ȩ�ޱ�user�����user�ж�Ӧ��Ȩ��ΪY������û����������ݿ��Ȩ�޶�ΪY�������ټ��db, tables_priv,columns_priv�����ΪN����db���м����û���Ӧ�ľ������ݿ⣬���õ�db��ΪY��Ȩ�ޣ����db��ΪN������tables_priv�д����ݿ��Ӧ�ľ������ȡ�ñ��е�Ȩ��Y���Դ����ơ�
+权限表的存取过程是：
 
-����MySQL����Ȩ�ޣ���27����
+1)先从user表中的host、 user、 password这3个字段中判断连接的IP、用户名、密码是否存在表中，存在则通过身份验证；
 
-�����²���������root���ݵ�½����grant��Ȩ����p1@localhost���ݵ�½ִ�и��������
+2)通过权限验证，进行权限分配时，按照useràdbàtables_privàcolumns_priv的顺序进行分配。即先检查全局权限表user，如果user中对应的权限为Y，则此用户对所有数据库的权限都为Y，将不再检查db, tables_priv,columns_priv；如果为N，则到db表中检查此用户对应的具体数据库，并得到db中为Y的权限；如果db中为N，则检查tables_priv中此数据库对应的具体表，取得表中的权限Y，以此类推。
+
+二．MySQL各种权限（共27个）
+
+（以下操作都是以root身份登陆进行grant授权，以p1@localhost身份登陆执行各种命令。）
 
 1. usage
 
-���ӣ���½��Ȩ�ޣ�����һ���û����ͻ��Զ�������usageȨ�ޣ�Ĭ�����裩��
+连接（登陆）权限，建立一个用户，就会自动授予其usage权限（默认授予）。
 
-mysql> grant usage on *.* to ��p1��@��localhost�� identified by ��123��;
+mysql> grant usage on *.* to ‘p1′@’localhost’ identified by ‘123′;
 
-��Ȩ��ֻ���������ݿ��½������ִ���κβ�������usageȨ�޲��ܱ����գ�Ҳ��REVOKE�û�������ɾ���û���
+该权限只能用于数据库登陆，不能执行任何操作；且usage权限不能被回收，也即REVOKE用户并不能删除用户。
 
 2. select
 
-������select��Ȩ�ޣ��ſ���ʹ��select table
+必须有select的权限，才可以使用select table
 
-mysql> grant select on pyt.* to ��p1��@��localhost��;
+mysql> grant select on pyt.* to ‘p1′@’localhost’;
 
 mysql> select * from shop;
 
 3. create
 
-������create��Ȩ�ޣ��ſ���ʹ��create table
+必须有create的权限，才可以使用create table
 
-mysql> grant create on pyt.* to ��p1��@��localhost��;
+mysql> grant create on pyt.* to ‘p1′@’localhost’;
 
 4. create routine
 
-�������create routine��Ȩ�ޣ��ſ���ʹ��{create |alter|drop} {procedure|function}
+必须具有create routine的权限，才可以使用{create |alter|drop} {procedure|function}
 
-mysql> grant create routine on pyt.* to ��p1��@��localhost��;
+mysql> grant create routine on pyt.* to ‘p1′@’localhost’;
 
-������create routineʱ���Զ�����EXECUTE, ALTER ROUTINEȨ�޸����Ĵ����ߣ�
+当授予create routine时，自动授予EXECUTE, ALTER ROUTINE权限给它的创建者：
 
-mysql> show grants for ��p1��@��localhost��;
+mysql> show grants for ‘p1′@’localhost’;
 
-+��������������������������������������������������+
++—————————————————————————+
 
 Grants for p1@localhost
 
-+�������������������������������������������������C+
++————————————————————————–+
 
-| GRANT USAGE ON *.* TO ��p1��@��localhost�� IDENTIFIED BY PASSWORD ��*23AE809DDACAF96AF0FD78ED04B6A265E05AA257�� |
+| GRANT USAGE ON *.* TO ‘p1′@’localhost’ IDENTIFIED BY PASSWORD ‘*23AE809DDACAF96AF0FD78ED04B6A265E05AA257′ |
 
-| GRANT SELECT, CREATE, CREATE ROUTINE ON `pyt`.* TO ��p1��@��localhost��|
+| GRANT SELECT, CREATE, CREATE ROUTINE ON `pyt`.* TO ‘p1′@’localhost’|
 
-| GRANT EXECUTE, ALTER ROUTINE ON PROCEDURE `pyt`.`pro_shop1` TO ��p1��@��localhost�� |
+| GRANT EXECUTE, ALTER ROUTINE ON PROCEDURE `pyt`.`pro_shop1` TO ‘p1′@’localhost’ |
 
-+��������������������������������������������������������-+
++————————————————————————————-+
 
-5. create temporary tables(ע��������tables������table)
+5. create temporary tables(注意这里是tables，不是table)
 
-������create temporary tables��Ȩ�ޣ��ſ���ʹ��create temporary tables.
+必须有create temporary tables的权限，才可以使用create temporary tables.
 
-mysql> grant create temporary tables on pyt.* to ��p1��@��localhost��;
+mysql> grant create temporary tables on pyt.* to ‘p1′@’localhost’;
 
 [mysql@mydev ~]$ mysql -h localhost -u p1 -p pyt
 
@@ -18521,77 +18521,77 @@ mysql> create temporary table tt1(id int);
 
 6. create view
 
-������create view��Ȩ�ޣ��ſ���ʹ��create view
+必须有create view的权限，才可以使用create view
 
-mysql> grant create view on pyt.* to ��p1��@��localhost��;
+mysql> grant create view on pyt.* to ‘p1′@’localhost’;
 
 mysql> create view v_shop as select price from shop;
 
 7. create user
 
-Ҫʹ��CREATE USER������ӵ��mysql���ݿ��ȫ��CREATE USERȨ�ޣ���ӵ��INSERTȨ�ޡ�
+要使用CREATE USER，必须拥有mysql数据库的全局CREATE USER权限，或拥有INSERT权限。
 
-mysql> grant create user on *.* to ��p1��@��localhost��;
+mysql> grant create user on *.* to ‘p1′@’localhost’;
 
-��mysql> grant insert on *.* to p1@localhost;
+或：mysql> grant insert on *.* to p1@localhost;
 
 8. insert
 
-������insert��Ȩ�ޣ��ſ���ʹ��insert into ��.. values��.
+必须有insert的权限，才可以使用insert into ….. values….
 
 9. alter
 
-������alter��Ȩ�ޣ��ſ���ʹ��alter table
+必须有alter的权限，才可以使用alter table
 
 alter table shop modify dealer char(15);
 
 10. alter routine
 
-�������alter routine��Ȩ�ޣ��ſ���ʹ��{alter |drop} {procedure|function}
+必须具有alter routine的权限，才可以使用{alter |drop} {procedure|function}
 
-mysql>grant alter routine on pyt.* to ��p1��@�� localhost ��;
+mysql>grant alter routine on pyt.* to ‘p1′@’ localhost ‘;
 
 mysql> drop procedure pro_shop;
 
 Query OK, 0 rows affected (0.00 sec)
 
-mysql> revoke alter routine on pyt.* from ��p1��@��localhost��;
+mysql> revoke alter routine on pyt.* from ‘p1′@’localhost’;
 
 [mysql@mydev ~]$ mysql -h localhost -u p1 -p pyt
 
 mysql> drop procedure pro_shop;
 
-ERROR 1370 (42000): alter routine command denied to user ��p1��@��localhost�� for routine ��pyt.pro_shop��
+ERROR 1370 (42000): alter routine command denied to user ‘p1′@’localhost’ for routine ‘pyt.pro_shop’
 
 11. update
 
-������update��Ȩ�ޣ��ſ���ʹ��update table
+必须有update的权限，才可以使用update table
 
-mysql> update shop set price=3.5 where article=0001 and dealer=��A';
+mysql> update shop set price=3.5 where article=0001 and dealer=’A';
 
 12. delete
 
-������delete��Ȩ�ޣ��ſ���ʹ��delete from ��.where��.(ɾ�����еļ�¼)
+必须有delete的权限，才可以使用delete from ….where….(删除表中的记录)
 
 13. drop
 
-������drop��Ȩ�ޣ��ſ���ʹ��drop database db_name; drop table tab_name;
+必须有drop的权限，才可以使用drop database db_name; drop table tab_name;
 
 drop view vi_name; drop index in_name;
 
 14. show database
 
-ͨ��show databaseֻ�ܿ�����ӵ�е�ĳЩȨ�޵����ݿ⣬������ӵ��ȫ��SHOW DATABASESȨ�ޡ�
+通过show database只能看到你拥有的某些权限的数据库，除非你拥有全局SHOW DATABASES权限。
 
-����p1@localhost�û���˵��û�ж�mysql���ݿ��Ȩ�ޣ������Դ����ݵ�½��ѯʱ���޷�����mysql���ݿ⣺
+对于p1@localhost用户来说，没有对mysql数据库的权限，所以以此身份登陆查询时，无法看到mysql数据库：
 
 mysql> show databases;
 
-+�������������C+
++——————–+
 
 | Database |
 
-+�������������C+
++——————–+
 
 | information_schema|
 
@@ -18599,11 +18599,11 @@ mysql> show databases;
 
 | test |
 
-+�������������C+
++——————–+
 
 15. show view
 
-����ӵ��show viewȨ�ޣ�����ִ��show create view��
+必须拥有show view权限，才能执行show create view。
 
 mysql> grant show view on pyt.* to p1@localhost;
 
@@ -18611,7 +18611,7 @@ mysql> show create view v_shop;
 
 16. index
 
-����ӵ��indexȨ�ޣ�����ִ��[create |drop] index
+必须拥有index权限，才能执行[create |drop] index
 
 mysql> grant index on pyt.* to p1@localhost;
 
@@ -18621,37 +18621,37 @@ mysql> drop index ix_shop on shop;
 
 17. excute
 
-ִ�д��ڵ�Functions,Procedures
+执行存在的Functions,Procedures
 
-mysql> call pro_shop1(0001,@a)��
+mysql> call pro_shop1(0001,@a)；
 
-+������+
++———+
 
 | article |
 
-+������+
++———+
 
 | 0001 |
 
 | 0001 |
 
-+������+
++———+
 
 mysql> select @a;
 
-+����+
++——+
 
 | @a |
 
-+����+
++——+
 
 | 2 |
 
-+����+
++——+
 
 18. lock tables
 
-����ӵ��lock tablesȨ�ޣ��ſ���ʹ��lock tables
+必须拥有lock tables权限，才可以使用lock tables
 
 mysql> grant lock tables on pyt.* to p1@localhost;
 
@@ -18661,17 +18661,17 @@ mysql> unlock tables;
 
 19. references
 
-����REFERENCESȨ�ޣ��û��Ϳ��Խ���������һ���ֶ���Ϊĳһ���������Լ����
+有了REFERENCES权限，用户就可以将其它表的一个字段作为某一个表的外键约束。
 
 20. reload
 
-����ӵ��reloadȨ�ޣ��ſ���ִ��flush [tables | logs | privileges]
+必须拥有reload权限，才可以执行flush [tables | logs | privileges]
 
 mysql> grant reload on pyt.* to p1@localhost;
 
 ERROR 1221 (HY000): Incorrect usage of DB GRANT and GLOBAL PRIVILEGES
 
-mysql> grant reload on *.* to ��p1��@��localhost��;
+mysql> grant reload on *.* to ‘p1′@’localhost’;
 
 Query OK, 0 rows affected (0.00 sec)
 
@@ -18679,7 +18679,7 @@ mysql> flush tables;
 
 21. replication client
 
-ӵ�д�Ȩ�޿��Բ�ѯmaster server��slave server״̬��
+拥有此权限可以查询master server、slave server状态。
 
 mysql> show master status;
 
@@ -18687,25 +18687,25 @@ ERROR 1227 (42000): Access denied; you need the SUPER,REPLICATION CLIENT privile
 
 mysql> grant Replication client on *.* to p1@localhost;
 
-��mysql> grant super on *.* to p1@localhost;
+或：mysql> grant super on *.* to p1@localhost;
 
 mysql> show master status;
 
-+������������+������-+���������C+������������+
++——————+———-+————–+——————+
 
 | File | Position | Binlog_Do_DB | Binlog_Ignore_DB |
 
-+������������+������-+���������C+������������+
++——————+———-+————–+——————+
 
 | mysql-bin.000006 | 2111 | | |
 
-+������������+������-+���������C+������������+
++——————+———-+————–+——————+
 
 mysql> show slave status;
 
 22. replication slave
 
-ӵ�д�Ȩ�޿��Բ鿴�ӷ�������������������ȡ��������־��
+拥有此权限可以查看从服务器，从主服务器读取二进制日志。
 
 mysql> show slave hosts;
 
@@ -18723,25 +18723,25 @@ Empty set (0.00 sec)
 
 mysql>show binlog events;
 
-+����������+����-+����������-+�������C+��������-+���������C+
++—————+——-+—————-+———–+————-+————–+
 
-| Log_name | Pos | Event_type | Server_id| End_log_pos|Info | +����������+����-+���������C+�������C+��������-+����������+
+| Log_name | Pos | Event_type | Server_id| End_log_pos|Info | +—————+——-+————–+———–+————-+—————+
 
 | mysql-bin.000005 | 4 | Format_desc | 1 | 98 | Server ver: 5.0.77-log, Binlog ver: 4 | |mysql-bin.000005|98|Query|1|197|use `mysql`; create table a1(i int)engine=myisam|
 
-����������������������������
+……………………………………
 
 23. Shutdown
 
-�ر�MySQL��
+关闭MySQL：
 
 [mysql@mydev ~]$ mysqladmin shutdown
 
-�������ӣ�
+重新连接：
 
 [mysql@mydev ~]$ mysql
 
-ERROR 2002 (HY000): Can��t connect to local MySQL server through socket ��/tmp/mysql.sock�� (2)
+ERROR 2002 (HY000): Can’t connect to local MySQL server through socket ‘/tmp/mysql.sock’ (2)
 
 [mysql@mydev ~]$ cd /u01/mysql/bin
 
@@ -18751,7 +18751,7 @@ ERROR 2002 (HY000): Can��t connect to local MySQL server through socket ��/tmp/m
 
 24. grant option
 
-ӵ��grant option���Ϳ��Խ��Լ�ӵ�е�Ȩ�����������û����������Լ��Ѿ�ӵ�е�Ȩ�ޣ�
+拥有grant option，就可以将自己拥有的权限授予其他用户（仅限于自己已经拥有的权限）
 
 mysql> grant Grant option on pyt.* to p1@localhost;
 
@@ -18759,39 +18759,39 @@ mysql> grant select on pyt.* to p2@localhost;
 
 25. file
 
-ӵ��fileȨ�޲ſ���ִ�� select ..into outfile��load data infile�����������ǲ�Ҫ��file, process, superȨ���������Ա������˺ţ������������صİ�ȫ������
+拥有file权限才可以执行 select ..into outfile和load data infile…操作，但是不要把file, process, super权限授予管理员以外的账号，这样存在严重的安全隐患。
 
 mysql> grant file on *.* to p1@localhost;
 
-mysql> load data infile ��/home/mysql/pet.txt�� into table pet;
+mysql> load data infile ‘/home/mysql/pet.txt’ into table pet;
 
 26. super
 
-���Ȩ�������û���ֹ�κβ�ѯ���޸�ȫ�ֱ�����SET��䣻ʹ��CHANGE MASTER��PURGE MASTER LOGS��
+这个权限允许用户终止任何查询；修改全局变量的SET语句；使用CHANGE MASTER，PURGE MASTER LOGS。
 
 mysql> grant super on *.* to p1@localhost;
 
-mysql> purge master logs before ��mysql-bin.000006��;
+mysql> purge master logs before ‘mysql-bin.000006′;
 
 27. process
 
-ͨ�����Ȩ�ޣ��û�����ִ��SHOW PROCESSLIST��KILL���Ĭ������£�ÿ���û�������ִ��SHOW PROCESSLIST�������ֻ�ܲ�ѯ���û��Ľ��̡�
+通过这个权限，用户可以执行SHOW PROCESSLIST和KILL命令。默认情况下，每个用户都可以执行SHOW PROCESSLIST命令，但是只能查询本用户的进程。
 
 mysql> show processlist;
 
-+��-+����+�������C+����+������+����+����-+������������+
++—-+——+———–+——+———+——+——-+——————+
 
 | Id | User | Host | db | Command | Time | State | Info |
 
-+��-+����+�������C+����+������+����+����-+������������+
++—-+——+———–+——+———+——+——-+——————+
 
 | 12 | p1 | localhost | pyt | Query | 0 | NULL | show processlist |
 
-+��-+����+�������C+����+������+����+����-+������������+
++—-+——+———–+——+———+——+——-+——————+
 
-���⣬
+另外，
 
-����Ȩ�ޣ��� super�� process�� file�ȣ����ܹ�ָ��ĳ�����ݿ⣬on��������*.*
+管理权限（如 super， process， file等）不能够指定某个数据库，on后面必须跟*.*
 
 mysql> grant super on pyt.* to p1@localhost;
 
@@ -18806,7 +18806,7 @@ Query OK, 0 rows affected (0.01 sec)
 
 SHOW CHARACTER SET
 
-��ʾ���п��õ��ַ���
+显示所有可用的字符集
 
 SHOW CHARACTER SET;
 SHOW CHARACTER SET LIKE 'latin%';
@@ -18814,7 +18814,7 @@ SHOW CHARACTER SET LIKE 'latin%';
 
 SHOW COLLATION
 
-����������п��õ��ַ���
+输出包括所有可用的字符集
 
 SHOW COLLATION;
 SHOW COLLATION LIKE 'latin1%';
@@ -18822,7 +18822,7 @@ SHOW COLLATION LIKE 'latin1%';
 
 SHOW COLUMNS
 
-��ʾ��һ���������еĸ��е���Ϣ,������ͼ�������Ҳ�����á�
+显示在一个给定表中的各列的信息,对于视图，本语句也起作用。
 
 SHOW COLUMNS FROM mydb.mytable;
 SHOW COLUMNS FROM mytable FROM mydb;
@@ -18830,7 +18830,7 @@ SHOW COLUMNS FROM mytable FROM mydb;
 
 SHOW CREATE DATABASE
 
-��ʾ���ڴ����������ݿ�CREATE DATABASE��䡣Ҳ����ʹ��SHOW CREATE SCHEMA��
+显示用于创建给定数据库CREATE DATABASE语句。也可以使用SHOW CREATE SCHEMA。
 
 SHOW CREATE DATABASE test;
 SHOW CREATE DATABASE test\G;
@@ -18844,14 +18844,14 @@ SHOW CREATE TABLE java\G;
 
 SHOW DATABASES
 
-SHOW DATABASES������MySQL�������������о����ݿ⡣��Ҳ����ʹ��mysqlshow����õ����嵥����ֻ�ܿ�����ӵ��ĳЩȨ�޵����ݿ⣬������ӵ��ȫ��SHOW DATABASESȨ�ޡ�
+SHOW DATABASES可以在MySQL服务器主机上列举数据库。您也可以使用mysqlshow命令得到此清单。您只能看到您拥有某些权限的数据库，除非您拥有全局SHOW DATABASES权限。
 
 SHOW DATABASES;
 
 
 SHOW ENGINE
 
-SHOW ENGINE��ʾ�洢�������־��״̬��Ϣ��Ŀǰ֧��������䣺
+SHOW ENGINE显示存储引擎的日志或状态信息。目前支持以下语句：
 
 SHOW ENGINE BDB LOGS;
 SHOW ENGINE INNODB STATUS;
@@ -18859,7 +18859,7 @@ SHOW ENGINE INNODB STATUS;
 
 SHOW ENGINES
 
-SHOW ENGINES��ʾ�洢�����״̬��Ϣ�����ڼ��һ���洢�����Ƿ�֧�֣����߶��ڲ鿴Ĭ��������ʲô�������ʮ�����á�
+SHOW ENGINES显示存储引擎的状态信息。对于检查一个存储引擎是否被支持，或者对于查看默认引擎是什么，本语句十分有用。
 
 SHOW ENGINES;
 SHOW ENGINES\G;
@@ -18867,7 +18867,7 @@ SHOW ENGINES\G;
 
 SHOW ERRORS
 
-�����ֻ��ʾ���󣬲�ͬʱ��ʾ���󡢾����ע�⡣
+该语句只显示错误，不同时显示错误、警告和注意。
 
 SHOW COUNT(*) ERRORS;
 SHOW ERRORS;
@@ -18883,7 +18883,7 @@ SHOW GRANTS FOR CURRENT_USER();
 
 SHOW INDEX
 
-SHOW INDEX�᷵�ر�������Ϣ��
+SHOW INDEX会返回表索引信息。
 
 SHOW INDEX FROM mydb.mytable;
 SHOW INDEX FROM mytable FROM mydb;
@@ -18891,47 +18891,47 @@ SHOW INDEX FROM mytable FROM mydb;
 
 SHOW INNODB STATUS
 
-����SHOW ENGINE INNODB STATUS��ͬ��ʣ������޳�ʹ�á�
+这是SHOW ENGINE INNODB STATUS的同义词，但不赞成使用。
 
 
 
 SHOW LOGS
 
-����SHOW ENGINE BDB LOGS��ͬ��ʣ����ǲ��޳�ʹ�á�
+这是SHOW ENGINE BDB LOGS的同义词，但是不赞成使用。
 
 
 
 SHOW OPEN TABLES
 
-�о��ڱ������е�ǰ���򿪵ķ�TEMPORARY����
+列举在表缓存中当前被打开的非TEMPORARY表。
 
 SHOW OPEN TABLES;
 
 
 SHOW PRIVILEGES
 
-��ʾMySQL������֧�ֵ�ϵͳȨ���嵥��ȷ�е�����������ķ������İ汾����
+显示MySQL服务器支持的系统权限清单。确切的输出根据您的服务器的版本而定
 
 SHOW PRIVILEGES;
 
 
 SHOW PROCESSLIST
 
-��ʾ��Щ�߳��������С���Ҳ����ʹ��mysqladmin processlist���õ�����Ϣ���������SUPERȨ�ޣ������Կ��������̡߳�������ֻ�ܿ������Լ����߳�
+显示哪些线程正在运行。您也可以使用mysqladmin processlist语句得到此信息。如果您有SUPER权限，您可以看到所有线程。否则，您只能看到您自己的线程
 
 
 SHOW STATUS
 
-�ṩ������״̬��Ϣ������ϢҲ����ʹ��mysqladmin extended-status�����á�
+提供服务器状态信息。此信息也可以使用mysqladmin extended-status命令获得。
 
 SHOW STATUS;
 
 
 SHOW TABLE STATUS
 
-SHOW TABLE STATUS��������SHOW TABLE���ƣ������������ṩÿ�����Ĵ�����Ϣ����Ҳ����ʹ��mysqlshow --status db_name����õ����嵥��
+SHOW TABLE STATUS的性质与SHOW TABLE类似，不过，可以提供每个表的大量信息。您也可以使用mysqlshow --status db_name命令得到此清单。
 
-�����Ҳ��ʾ��ͼ��Ϣ��
+本语句也显示视图信息。
 
 SHOW TABLE STATUS;
 SHOW TABLE STATUS FROM test;
@@ -18939,14 +18939,14 @@ SHOW TABLE STATUS FROM test;
 
 SHOW TABLES
 
-SHOW TABLES�о��˸������ݿ��еķ�TEMPORARY������Ҳ����ʹ��mysqlshow db_name����õ����嵥��
+SHOW TABLES列举了给定数据库中的非TEMPORARY表。您也可以使用mysqlshow db_name命令得到此清单。
 
 SHOW TABLES;
 
 
 SHOW TRIGGERS
 
-SHOW TRIGGERS�г���Ŀǰ��MySQL����������Ĵ�������
+SHOW TRIGGERS列出了目前被MySQL服务器定义的触发程序。
 
 SHOW TRIGGERS;
 
@@ -18961,26 +18961,26 @@ SHOW VARIABLES LIKE 'have%';
 
 SHOW WARNINGS
 
-��ʾ����һ��������Ϣ����䵼�µĴ��󡢾����ע����Ϣ�������һ��ʹ�ñ������δ������Ϣ����ʲôҲ����ʾ��SHOW ERRORS���������䣬ֻ��ʾ����
+显示由上一个生成消息的语句导致的错误、警告和注意消息。如果上一个使用表的语句未生成消息，则什么也不显示。SHOW ERRORS是其相关语句，只显示错误。
 
 SHOW COUNT(*) WARNINGS;
 SHOW WARNINGS;
 
- ORA-15081 ������� 2012-08-16 15:52:17
-���ࣺ Linux
-���������
-1. oracle�û�Ҫ����asmdba�飬��Ȼ�޷����ִ�����
-2. $ORACLE_HOME/bin/oracle �ļ��������ߺ�Ȩ�޲���
-ִ�У�
-$GRID_HOME/bin/setasmgidwrap O=$ORACLE_HOME/bin/oracle  ��ע��Ҫ�Ȱѿ�down������
+ ORA-15081 解决方法 2012-08-16 15:52:17
+分类： Linux
+解决方法：
+1. oracle用户要属于asmdba组，不然无法发现磁盘组
+2. $ORACLE_HOME/bin/oracle 文件的所有者和权限不对
+执行：
+$GRID_HOME/bin/setasmgidwrap O=$ORACLE_HOME/bin/oracle  （注意要先把库down下来）
 
 
-��ȷ��oracle �ļ�Ȩ��Ϊʾ�����£�
+正确的oracle 文件权限为示例如下：
 [oracle@vm05 bin]$ ls -l oracle
 -rwsr-s--x 1 oracle asmadmin 210824714 Aug 15 16:09 oracle
 
 
-���û��ʹ��dbca���������ݿ⣬���ļ�������һ����oracle:oinstall������ʹ��setasmgidwrap�����Ϊoracle:asmadmin������oracle��û�з���ASM�������Ȩ�ޡ�
+如果没有使用dbca创建过数据库，此文件的属主一般是oracle:oinstall，必须使用setasmgidwrap命令改为oracle:asmadmin，否则oracle将没有访问ASM磁盘组的权限。
 
 root@solora11gsty # ls -ltr /app/oracle/product/11.2.0/dbhome_1/bin/oracle
 -rwsr-s--x   1 oracle   oinstall 256511080 Oct 30 16:33 /app/oracle/product/11.2.0/dbhome_1/bin/oracle
@@ -18993,7 +18993,7 @@ root@solora11gsty # ls -ltr /app/oracle/product/11.2.0/dbhome_1/bin/oracle
 -r-sr-s--x   1 oracle   asmadmin 256511080 Oct 30 16:33 /app/oracle/product/11.2.0/dbhome_1/bin/oracle
 
 
-�ڽ���RMAN DUPLICATE����֮ǰ�����ǻ�Ҫ�޸�oracle�����������Ȩ�ޡ��ο�����һ�Σ�
+在进行RMAN DUPLICATE操作之前，我们还要修改oracle二进制命令的权限。参考下面一段：
 During 11.2 Gird Infrastructure installation, it prompts to select ASM admin group and ASM dba group. Assume asmadmin is used for ASM admin group and asmdba is used for ASM dba group.
 
 Only users that are members of the asmadmin group have direct access to ASM disks and maintenance. For other database users (software owners or dba group users), the access is gained via the oracle executable ($ORACLE_HOME/bin/oracle). It should have a setgid bit with group set to "asmadmin".
@@ -19002,15 +19002,15 @@ The 11.2 "oracle" binary is changed automatically via setasmgidwrap when the ins
 
 On Standby Node1 with gird user:
 [grid@standby1 ~]$ ls $ORACLE_HOME/bin/oracle
--rwsr-s�Cx 1 oracle oinstall 232399431 Sep  2 22:28 /u01/app/oracle/product/11.2.0/dbhome_1/bin/oracle
+-rwsr-s–x 1 oracle oinstall 232399431 Sep  2 22:28 /u01/app/oracle/product/11.2.0/dbhome_1/bin/oracle
 
 [grid@standby1 ~]$ setasmgidwrap o=/paic/stg/oracle/11g/app/oracle/product/11.2.0.3.5/bin/oracle
 
 [grid@standby1 ~]$ ls /u01/app/oracle/product/11.2.0/dbhome_1/bin/oracle
--rwsr-s�Cx 1 oracle asmadmin 232399431 Sep  2 22:28 /u01/app/oracle/product/11.2.0/dbhome_1/bin/oracle
+-rwsr-s–x 1 oracle asmadmin 232399431 Sep  2 22:28 /u01/app/oracle/product/11.2.0/dbhome_1/bin/oracle
 
 
-�����������Ĳ������ڽ�������DUPLICATE���Ʋ���ʱ��ᱨASMLib��������
+如果不做上面的操作，在进行下面DUPLICATE复制操作时候会报ASMLib驱动错误：
 Errors in file /u01/app/oracle/diag/rdbms/standby/standby1/trace/standby1_rbal_13010.trc:
 ORA-15183: ASMLIB initialization error [driver/agent not installed]
 WARNING: FAILED to load library: /opt/oracle/extapi/64/asm/orcl/1/libasm.so
@@ -19025,33 +19025,33 @@ Incident details in: /u01/app/oracle/diag/rdbms/standby/standby1/incident/incdir
 
 alter database mount standby database ;
 
-Ҫ�ҳ��׽����ļ��ĵص㣬Ӧ��
+要找出套接字文件的地点，应：
 shell> netstat -ln | grep mysql
 
-ִ��mysql_install_db�ű������в�������������ִ�и����������Գ�ʼȨ�ޣ�
+执行mysql_install_db脚本。运行并重启服务器后，执行该命令来测试初始权限：
 shell> mysql -u root test
 
-���µİ�װ�Ժ���Ӧ�����ӷ�����������������û�����������ɣ�
-��                shell> mysql -u root mysql
+在新的安装以后，你应该连接服务器并且设置你的用户及其访问许可：
+·                shell> mysql -u root mysql
 
 
-�������Ϊroot�������Ӳ��ҵõ������������ζ�ţ���û������user���е�User��ֵΪ'root'����mysqld����Ϊ��Ŀͻ��˽�����������
+如果你作为root试试连接并且得到这个错误，这意味着，你没有行在user表中的User列值为'root'并且mysqld不能为你的客户端解析主机名：
 Access denied for user ''@'unknown' to database mysql
-����������£��������--skip-grant-tablesѡ���������������ұ༭��/etc/hosts����\windows\hosts���ļ�Ϊ������������С�
+在这种情况下，你必须用--skip-grant-tables选项重启服务器并且编辑“/etc/hosts”或“\windows\hosts”文件为你的主机增加行。
 
 
-�����ͨ��ʹ��--no-defaultsѡ����ÿͻ��˳���������ѡ���ļ������磺
+你可以通过使用--no-defaults选项调用客户端程序来禁用选项文件。例如：
 shell> mysqladmin --no-defaults -u root version
 
-�����ʹ��SET PASSWORD��INSERT��UPDATE�������룬�����ʹ��  PASSWORD()�����������롣����㲻ʹ��PASSWORD()���������벻���������磬���������������룬��û�ܼ��ܣ�����û����治�����ӣ�
-��                mysql> SET PASSWORD FOR 'abe'@'host_name' = 'eagle';�෴��Ӧ�����������룺
+如果你使用SET PASSWORD、INSERT或UPDATE更改密码，你必须使用  PASSWORD()函数加密密码。如果你不使用PASSWORD()函数，密码不工作。例如，下面的语句设置密码，但没能加密，因此用户后面不能连接：
+·                mysql> SET PASSWORD FOR 'abe'@'host_name' = 'eagle';相反，应这样设置密码：
 mysql> SET PASSWORD FOR 'abe'@'host_name' = PASSWORD('eagle');
 
 
 
-�����������Ϣ�����ǿ��Կ���datafile 12 not processed because file is read-onlyһ�䣬������Ϊ�ڻ�ԭ�Ŀ����ļ���12�������ļ�������Ϊֻ���ļ��������recover database��ʱ�򱻺��ԡ�����Ӧ��������־��ʱ�򣬷���LTB���ռ����Ϊ��д״̬�ļ�¼�����Ҳ��Ҫ���лָ�������ʱΪʱ�����������󱨴�������ʱ��ʲô�׶��ˣ������ļ��������ֵ��϶�12�������ļ��������Ѹı䣬Ҳ�����ѽ�����Ϊ�Ƕ�д״̬�ˡ�
+在上面输出信息中我们可以看到datafile 12 not processed because file is read-only一句，这是因为在还原的控制文件内12号数据文件被描述为只读文件，因此在recover database的时候被忽略。但在应用重做日志的时候，发现LTB表空间更改为读写状态的记录，因此也需要进行恢复，但此时为时已晚，因此最后报错。那这时候到什么阶段了？控制文件和数据字典上对12号数据文件的描述已改变，也就是已将其认为是读写状态了。
 
-��������ǣ����ظ�һ��recover database����
+解决方法是，再重复一下recover database过程
 
 RMAN> run{
 2> restore controlfile from '/u01/recovery/MAA/backupset/2012_12_24/o1_mf_ncsnf_TAG20121224T041651_8fgsq3cv_.bkp';
@@ -19062,52 +19062,52 @@ RMAN> run{
 7> alter database open resetlogs;
 8> }
 
-CLOSE #[CURSOR]:c=%u e=%u dep=%d type=%u tim=%u   ==��һ���α�رյ�����
+CLOSE #[CURSOR]:c=%u e=%u dep=%d type=%u tim=%u   ==》一个游标关闭的例子
 
- CLOSE   �α�ر�
+ CLOSE   游标关闭
 
-type    �ر��α�Ĳ�������
+type    关闭游标的操作类型
 
-��0    ���α��δ��������ִ�д���С��3�Σ�Ҳ��hard close
-��1      ���α��δ�����浫ִ�д�������3�Σ�����session cached cursor����free slot �򽫸��α����session cached cursor
-��2     ���α��δ�����浫ִ�д�������3�Σ����α�����session cached cursor�������ǽ��ϵĻ���age out��
-��3      ���α��Ѿ��ڻ�����򻹻�ȥ
+■0    该游标从未被缓存且执行次数小于3次，也叫hard close
+■1      该游标从未被缓存但执行次数至少3次，若在session cached cursor中有free slot 则将该游标放入session cached cursor
+■2     该游标从未被缓存但执行次数至少3次，该游标置入session cached cursor的条件是讲老的缓存age out掉
+■3      该游标已经在缓存里，则还会去
 
 
 STAT #[CURSOR] id=N cnt=0 [pid=0 pos=0 obj=0 op='SORT AGGREGATE ']
 
 
-��STAT   ����з�Ӧ����ִ�мƻ���ͳ����Ϣ
-��[CURSOR]     �α��
-��id    ִ�мƻ������� ��1��ʼ
-��cnt    ������Դ������
-��pid    ������Դ�� ��ID
-��pos    ��ִ�мƻ��е�λ��
-��obj     ��Ӧ����Դ��  object id
-��op=    ����Դ�ķ��ʲ��������� FULL SCAN
-11g ���ϻ��ṩ������Ϣ��
+■STAT   相关行反应解释执行计划的统计信息
+■[CURSOR]     游标号
+■id    执行计划的行数 从1开始
+■cnt    该数据源的行数
+■pid    该数据源的 父ID
+■pos    在执行计划中的位置
+■obj     对应数据源的  object id
+■op=    数据源的访问操作，例如 FULL SCAN
+11g 以上还提供如下信息：
 
 
-STAT #2 id=1 cnt=26 pid=0 pos=1 obj=0 op=��HASH GROUP BY (cr=1143 pr=1139 pw=0 time=61372 us)��
-STAT #2 id=2 cnt=77276 pid=1 pos=1 obj=96551 op=��TABLE ACCESS FULL FULLSCAN (cr=1143 pr=1139 pw=0 time=927821 us)��
+STAT #2 id=1 cnt=26 pid=0 pos=1 obj=0 op=’HASH GROUP BY (cr=1143 pr=1139 pw=0 time=61372 us)’
+STAT #2 id=2 cnt=77276 pid=1 pos=1 obj=96551 op=’TABLE ACCESS FULL FULLSCAN (cr=1143 pr=1139 pw=0 time=927821 us)’
 
 
-��CR ����һ���Զ�������
-��PR  ����������������
-��pw  ��������д������
-��time   ��λΪmicrosecond��������ĺ�ʱ
-��cost    ���������Ż����ɱ�
-��size    ����������Դ��С����λΪ�ֽ�
-��card       �������Ż�������Cardinality.
+■CR 代表一致性读的数量
+■PR  代表物理读的数量
+■pw  代表物理写的数量
+■time   单位为microsecond，本步骤的耗时
+■cost    本操作的优化器成本
+■size    评估的数据源大小，单位为字节
+■card       评估的优化器基数Cardinality.
 
  XCTEND rlbk=0, rd_only=1
 
-�� XCTEND  һ����������ı�־
-��rlbk           �����1���� �лع������� �����0 ��������� �� commit�ύ��
-��rd_only     �����1���� ����ֻ�� �� �����0 ˵�����ݸı䷢����
+■ XCTEND  一个事务结束的标志
+■rlbk           如果是1代表 有回滚操作， 如果是0 代表不会滚 即 commit提交了
+■rd_only     如果是1代表 事务只读 ， 如果是0 说明数据改变发生过
 
 
-�󶨱���
+绑定变量
 
 BINDS #20:
 kkscoacd
@@ -19115,49 +19115,49 @@ Bind#0
 oacdty=96 mxl=2000(150) mxlc=00 mal=00 scl=00 pre=00
 oacflg=03 fl2=1000000 frm=01 csi=873 siz=2000 off=0
 kxsbbbfp=7f9ccfec6420 bln=2000 avl=50 flg=05
-value=��MACLEAN
+value=”MACLEAN
 
-��BINDS #20:  ˵�� �󶨱��� ����� 20���α��
-��kkscoacd  �ǰ󶨱�����ص�������
-��Bind#0   ˵���ǵ�0������
-��oacdty      data type   96 �� ANSI fixed char
-��oacflg      ������ѡ��������־λ
-��size           Ϊ���ڴ�chunk������ڴ��С
-��mxl       �󶨱�������󳤶�
-��pre      precision
-��scl      Scale
-��kxsbbbfp         buffer point
-��bln               bind buffer length
-��avl     ʵ�ʵ�ֵ�ĳ���
-��flg          ������״̬
-��value=��MACLEAN    ʵ�ʵİ�ֵ
+■BINDS #20:  说明 绑定变量 是针对 20号游标的
+■kkscoacd  是绑定变量相关的描述符
+■Bind#0   说明是第0个变量
+■oacdty      data type   96 是 ANSI fixed char
+■oacflg      代表绑定选项的特殊标志位
+■size           为该内存chunk分配的内存大小
+■mxl       绑定变量的最大长度
+■pre      precision
+■scl      Scale
+■kxsbbbfp         buffer point
+■bln               bind buffer length
+■avl     实际的值的长度
+■flg          代表绑定状态
+■value=”MACLEAN    实际的绑定值
 
-������� ��bind 6: (No oacdef for this bind)�����Ƶ���Ϣ��˵����traceʱ ��û�ж�������ݡ� ���������traceʱ�α껹û�󶨱�����
-
-
-WAIT #20: nam=��db file scattered read�� ela= 42 file#=1 block#=80386 blocks=7 obj#=96551 tim=1344883874069383
+如果看到 “bind 6: (No oacdef for this bind)”类似的信息则说明在trace时 还没有定义绑定数据。 这可能是在trace时游标还没绑定变量。
 
 
-��WAIT #20 �ȴ� 20���α����صȴ��¼�
-��Nam      �ȴ���Ե��¼����֣�����P1��P2��P3���Բο���ͼV$EVENT_NAME��Ҳ���Դ�V$SESSION��ASH�й۲쵽�ȴ��¼�
-��ela           �������ĺ�ʱ����λΪmicrosecond
-��p1,p2,p3       ��Ը��¼�������������������V$EVENT_NAME
+WAIT #20: nam=’db file scattered read’ ela= 42 file#=1 block#=80386 blocks=7 obj#=96551 tim=1344883874069383
 
-����������� db file scattered read �� P1Ϊ�ļ��ţ� P2Ϊ ��ʼ��ţ� p3Ϊ ���Ŀ�����  ��db file scattered read �Ǵ� 1���ļ��ĵ�80386 ���鿪ʼһ�ζ�ȡ��7���顣
 
-ע����10046�� ���ֵ�WAIT ����Ϣ ���� �Ѿ������ĵȴ��¼��� ����ǰ�ȴ��򲻻���trace�г��֣�ֱ�������ǰ�ȴ������� �����ͨ��systemstate dump/errorstack��trace����õ�ǰ�ȴ���Ϣ��
+■WAIT #20 等待 20号游标的相关等待事件
+■Nam      等待针对的事件名字，它的P1、P2、P3可以参考视图V$EVENT_NAME，也可以从V$SESSION、ASH中观察到等待事件
+■ela           本操作的耗时，单位为microsecond
+■p1,p2,p3       针对该事件的三个描述参数，见V$EVENT_NAME
+
+在上例中针对 db file scattered read ， P1为文件号， P2为 起始块号， p3为 读的块数，  即db file scattered read 是从 1号文件的第80386 个块开始一次读取了7个块。
+
+注意在10046中 出现的WAIT 行信息 都是 已经结束的等待事件， 而当前等待则不会在trace中出现，直到这个当前等待结束。 你可以通过systemstate dump/errorstack等trace来获得当前等待信息。
 
 
 
 gather dongkuifeng
-���ռ�����ʱ��ͳ����Ϣ:
+我收集运行时的统计信息:
 SELECT /*+ gather_plan_statistics DKF*/max(P.PAGEVIEW)
   FROM PRODUCT P, CATALOGRELATEPRODUCT CATAP
 WHERE CATAP.CATALOGID = 291
    AND P.ID = CATAP.PRODUCTID
    AND PUBLISHSTATUS = 3;
 
-ʵ�ʵ��������SQL���,gather_plan_statistics���ռ�����ʱ��ͳ����Ϣ����ʾ,DKF ����һ����ͨ��ע��,��Ϊ��Ψһ�ı�ʶ����α��.
+实际的运行这个SQL语句,gather_plan_statistics是收集运行时的统计信息的提示,DKF 就是一个普通的注释,是为了唯一的标识这个游标的.
 
  SELECT SQL_ID,CHILD_NUMBER,sql_text
  FROM V$SQL
@@ -19168,47 +19168,47 @@ SQL_ID        CHILD_NUMBER
 ------------- ------------
 79gcyuucwuzwg            0
 
-���Ҹղŵ��α�.
+查找刚才的游标.
 SET PAGESIZE 200;
 SET LINESIZE 200;
 COL PLAN_TABLE_OUTPUT FOR A195;
 SELECT *
 FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('1zzu06r0xwj01',0,'ALL IOSTATS LAST'));
 
-������ʾ:�������ܵ��߼�IO��:17210(buffers ��ʵ�ʵ��߼�IO����,�������ۼ�ֵ,�����Ӳ�����ֵ)
-starts �Ƕ�Ӧ�Ķ���ִ�еĴ���
-E-ROWS ���Ż���������һ�����ص���������
-A-Rows  ����һ��ʵ�ʷ��ص���������
+这里显示:这个语句总的逻辑IO是:17210(buffers 是实际的逻辑IO数量,这里是累计值,包括子操作的值)
+starts 是对应的动作执行的次数
+E-ROWS 是优化器估算这一步返回的数据行数
+A-Rows  是这一步实际返回的数据行数
 
-����INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT   ��һ�����㷵��50��.��ʵ�ʷ�����8567��
-��Ϊ���㷵��50��,���Թ���INDEX RANGE SCAN| INDEX2_PRODUCT ��һ����ִ��50��,��ʵ����ִ����8567��.
-��Ȼ������ʵ��ִ���ϴ����ž޴�Ĳ���.
+明显INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT   这一步估算返回50行.但实际返回了8567行
+因为估算返回50行,所以估算INDEX RANGE SCAN| INDEX2_PRODUCT 这一步会执行50次,但实际它执行了8567次.
+显然估算与实际执行上存在着巨大的差异.
 
-���Ż�������INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT ��һ������8567�еĻ�,ִ�мƻ�����ʲô�� ʵ�ʵ�ִ��Ч���������� 
-ʹ��cardinality(t n) ��ʾ���Ϳ������� !
+那优化器估算INDEX RANGE SCAN| INDEX2_CATALOGRELATEPRODUCT 这一步返回8567行的话,执行计划会是什么呢 实际的执行效果会怎样呢 
+使用cardinality(t n) 提示不就可以了吗 !
 
 
-��,��ʵ����Ҫ�����ǲ���һ���Ż���Ϊʲô���㷵�ص�����,��������� 
+但,事实上你要做的是查找一下优化器为什么估算返回的行数,估算错了呢 
 SQL> select a.num_distinct,a.num_buckets,a.num_nulls,a.histogram,b.num_rows,round(b.num_rows/a.num_distinct) rows_per_key
   2  from user_tab_columns a,user_tables b where a.table_name='CATALOGRELATEPRODUCT' and a.column_name='CATALOGID' and b.table_name='CATALOGRELATEPRODUCT';
 
 NUM_DISTINCT NUM_BUCKETS  NUM_NULLS HISTOGRAM         NUM_ROWS ROWS_PER_KEY
 ------------ ----------- ---------- --------------- ---------- ------------
        17943           1          0 NONE                904362           50
-����,������ϲ�û���ռ���״ͼͳ����Ϣ.���Զ���min~max�ڵ��������ֵ,������ķ�����������:num_rows/num_distinct =50
-����CATAP.CATALOGID = 291,����ȷʵ����׼ȷ.��������������:
-1.Ӧ�ó�������ʹ�ð󶨱�����.
-2.���ڵ�������ֵ��˵,ȷʵ���ز��˼�������(nl��ִ�мƻ�ȷʵ�Ǻõ�,���ռ���״ͼͳ����Ϣʱ,ȷʵ��NL��).291��ʵ������һ����������ֵ(��������ǵ�������ֵ��˵,hash joinȷʵ��һ���õ�ִ�мƻ�,��nl����).��������ռ�����״ͼͳ����Ϣ�Ļ�,ÿ��Ӳ������ʱ��,����peeking,����кܴ�������,���peeking�ĸպ���291����ǵ�������ֵ,����hash join�Ļ�,����һ�������ֵ��˵,��������ʵ�ǲ��õ�.����,��ʵ�Ͳ�Ӧ���ռ���״ͼͳ����Ϣ:������Ȼ���ڼ�����������ֵ��˵,ִ�мƻ�������,�����ھ������������ֵ��˵,ִ�мƻ��Ǻܺõ�.���ڼ������ķǵ�������ֵ��˵,���ʹ������ֵ�Ļ�,�����ʹ��use_hash֮�����ʾ����������ִ�мƻ�.
+明显,这个列上并没有收集柱状图统计信息.所以对于min~max内的任意给定值,它估算的返回行数都是:num_rows/num_distinct =50
+对于CATAP.CATALOGID = 291,估算确实不够准确.但问题在于两点:
+1.应用程序中是使用绑定变量的.
+2.对于典型输入值来说,确实返回不了几行数据(nl的执行计划确实是好的,不收集柱状图统计信息时,确实走NL了).291其实并不是一个典型输入值(对于这个非典型输入值来说,hash join确实是一个好的执行计划,而nl不是).所以如果收集了柱状图统计信息的话,每次硬分析的时候,都会peeking,这带有很大的随机性,如果peeking的刚好是291这个非典型输入值,采用hash join的话,对于一般的输入值来说,性能上其实是不好的.所以,其实就不应该收集柱状图统计信息:这样虽然对于极少数的输入值来说,执行计划并不好,但对于绝大多数的输入值来说,执行计划是很好的.对于极少数的非典型输入值来说,如果使用字面值的话,你可以使用use_hash之类的提示来纠正它的执行计划.
 
 
-Script:����SQL����Ż��ű�
-2011/01/06 by Maclean Liu 3������
+Script:常用SQL语句优化脚本
+2011/01/06 by Maclean Liu 3条评论
 
 
 select /*+ dynamic_sampling(b 10) dynamic_sampling_est_cdn(b) gather_plan_statistics*/ count(*) from tvb b;
 SELECT * FROM TABLE(dbms_xplan.display_cursor(NULL,NULL,'ALLSTATS LAST'));
 
-ע��dynamic sampling used for this statement (level=2) ��ʾ��level 2������ģ� level 10�����������LEVEL 10!
+注意dynamic sampling used for this statement (level=2) 显示的level 2不是真的！ level 10在这里真的是LEVEL 10!
 
 EXPLAIN PLAN SET STATEMENT_ID = 'abc' FOR
 select count(*) from tvb ;
@@ -19236,11 +19236,11 @@ alter session set events '10046 trace name context forever,level 12';
 2.- Upload OS log file /var/log/messages
 3.- Please upload background process trace files for each instance. LMD, LMS, LMON, DBWR, LGWR, diag, pmon, smon, etc.
 
-��������ȥhttp://t.askmaclean.com/forum-4-1.html���ʣ� ����һ��ʱ���ڷ�������
-������д�� ���ݿ�汾��OS�汾����������
-������������������ AWR��ASH��ADDM��10046 TRACE
-�����ORA-600/7445���������ALERT.LOG����TRACE
-�����RAC CLUTERWARE���������CRSD.LOG��CSSD.LOG
+有问题请去http://t.askmaclean.com/forum-4-1.html提问， 会在一定时间内反馈给你
+提问请写明 数据库版本、OS版本、问题类型
+如果是性能问题请给出 AWR、ASH、ADDM及10046 TRACE
+如果是ORA-600/7445错误请给出ALERT.LOG及其TRACE
+如果是RAC CLUTERWARE问题请给出CRSD.LOG和CSSD.LOG
 
 SELECT x.ksppinm NAME, y.ksppstvl VALUE, x.ksppdesc describ
 FROM SYS.x$ksppi x, SYS.x$ksppcv y
@@ -19296,7 +19296,7 @@ SUGGESTIONS:
 
 
 
-ִ�мƻ���ʷ
+执行计划历史
 
 Want to Know if Execution Plan Changed Recently 
 
@@ -19351,11 +19351,11 @@ SELECT to_char(TIME,'hh24:mi') , S.*
  ORDER BY TIME
 
    SELECT *
-    FROM (SELECT '1.v$sql'||'ʵ����:'||GV$SQL.inst_id source,
+    FROM (SELECT '1.v$sql'||'实例号:'||GV$SQL.inst_id source,
                  SQL_ID,
                  plan_hash_value,
                  TO_CHAR (FIRST_LOAD_TIME) begin_time,
-                 '��cursor cache��' end_time,
+                 '在cursor cache中' end_time,
                  executions "No. of exec",
                  (buffer_gets / executions) "LIO/exec",
                  (cpu_time / executions / 1000000) "CPUTIM/exec",
@@ -19394,7 +19394,7 @@ SELECT to_char(TIME,'hh24:mi') , S.*
            WHERE SQL_ID = '&A'
           UNION ALL
           SELECT DISTINCT
-                 '4.dba_hist_sqlstat' || 'ʵ����:' || SQL.INSTANCE_NUMBER
+                 '4.dba_hist_sqlstat' || '实例号:' || SQL.INSTANCE_NUMBER
                     source,
                  sql_id,
                  PLAN_HASH_VALUE,
@@ -19462,79 +19462,79 @@ order by elapsed desc
 
 
 
-��
+或
 110818  7:20:33 [ERROR] Error message file '/usr/share/mysql/english/errmsg.sys' had only 480 error messages,
 but it should contain at least 481 error messages.
 Check that the above file is the right version for this program!
 110818  7:20:33 [ERROR] Aborting
 
-����취�� ���ض�Ӧ��mysql�汾�ļ����� share/english ѹ���ļ��У��ҵ�errmsg.err�ļ�����ѹ�����Ӧ�� errmsg.sys�ŵ� /usr/share/mysql/englishĿ¼�£�
+解决办法： 下载对应的mysql版本文件，在 share/english 压缩文件中，找到errmsg.err文件，解压后件对应的 errmsg.sys放到 /usr/share/mysql/english目录下；
 
-ִ��mysql_install_db�ɹ���ʹ��
-mysqld_safe --user=root& ����mysql����
-��ʹ��mysql -uroot -p ������ӵ�mysql
-�������´���
+执行mysql_install_db成功后，使用
+mysqld_safe --user=root& 启动mysql服务，
+再使用mysql -uroot -p 语句连接到mysql
+出现如下错误：
 [root@domain ~]# mysql -uroot -p
 mysql: relocation error: mysql: symbol strmov, version libmysqlclient_16 not defined in file libmysqlclient.so.16 with link time reference
 
-���ڰ�װmysqlʱ��mysql����Щlibû�а�װ����װ��Ӧ��libs���£�
+是在安装mysql时，mysql的有些lib没有安装，安装对应的libs如下：
 
-Ӧ�þ���
+应用举例
 
-����
-����ȫ�ⱸ�ݵ����ص�Ŀ¼
+导出
+导出全库备份到本地的目录
 mysqldump -u$USER -p$PASSWD -h127.0.0.1 -P3306 --routines --default-character-set=utf8 --lock-all-tables --add-drop-database -A > db.all.sql
 
-����ָ���⵽���ص�Ŀ¼(����mysql��)
+导出指定库到本地的目录(例如mysql库)
 mysqldump -u$USER -p$PASSWD -h127.0.0.1 -P3306 --routines --default-character-set=utf8 --databases mysql > db.sql
 
-����ĳ����ı������ص�Ŀ¼(����mysql���user��)
+导出某个库的表到本地的目录(例如mysql库的user表)
 mysqldump -u$USER -p$PASSWD -h127.0.0.1 -P3306 --routines --default-character-set=utf8 --tables mysql user> db.table.sql
 
-����ָ����ı�(������)�����ص�Ŀ¼(����mysql���user��,����������)
+导出指定库的表(仅数据)到本地的目录(例如mysql库的user表,带过滤条件)
 mysqldump -u$USER -p$PASSWD -h127.0.0.1 -P3306 --routines --default-character-set=utf8 --no-create-db --no-create-info --tables mysql user --where="host='localhost'"> db.table.sql
 
-����ĳ��������б��ṹ
+导出某个库的所有表结构
 mysqldump -u$USER -p$PASSWD -h127.0.0.1 -P3306 --routines --default-character-set=utf8 --no-data --databases mysql > db.nodata.sql
 
-����ĳ����ѯsql������Ϊtxt��ʽ�ļ������ص�Ŀ¼(������ֵ֮����"�Ʊ���"�ָ�)
-����sqlΪ'select user,host,password from mysql.user;'
+导出某个查询sql的数据为txt格式文件到本地的目录(各数据值之间用"制表符"分隔)
+例如sql为'select user,host,password from mysql.user;'
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8 --skip-column-names -B -e 'select user,host,password from mysql.user;' > mysql_user.txt
 
-����ĳ����ѯsql������Ϊtxt��ʽ�ļ���MySQL������.
-��¼MySQL,��Ĭ�ϵ��Ʊ������ɶ���.(��Ӧcsv��ʽ�ļ�).
-ָ����·��,mysqlҪ��д��Ȩ��.�����tmpĿ¼,�ļ�����֮��,��ɾ��!
+导出某个查询sql的数据为txt格式文件到MySQL服务器.
+登录MySQL,将默认的制表符换成逗号.(适应csv格式文件).
+指定的路径,mysql要有写的权限.最好用tmp目录,文件用完之后,再删除!
 SELECT user,host,password FROM mysql.user INTO OUTFILE '/tmp/mysql_user.csv' FIELDS TERMINATED BY ',';
-����
-�ָ�ȫ�����ݵ�MySQL,��Ϊ����mysql���Ȩ�ޱ�,���������Ҫִ��FLUSH PRIVILEGES;����
-��һ�ַ���:
+导入
+恢复全库数据到MySQL,因为包含mysql库的权限表,导入完成需要执行FLUSH PRIVILEGES;命令
+第一种方法:
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8 < db.all.sql
 
-�ڶ��ַ���:
-��¼MySQL,ִ��source����,������ļ���Ҫ�þ���·��.
+第二种方法:
+登录MySQL,执行source命令,后面的文件名要用绝对路径.
 ......
 mysql> source /tmp/db.all.sql;
-�ָ�ĳ���������(mysql���user��)
-��һ�ַ���:
+恢复某个库的数据(mysql库的user表)
+第一种方法:
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8 mysql < db.table.sql
 
-�ڶ��ַ���:
-��¼MySQL,ִ��source����,������ļ���Ҫ�þ���·��.
+第二种方法:
+登录MySQL,执行source命令,后面的文件名要用绝对路径.
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8
 ......
 mysql> use mysql;
 mysql> source /tmp/db.table.sql;
-�ָ�MySQL�����������txt��ʽ�ļ�(��ҪFILEȨ��,������ֵ֮����"�Ʊ���"�ָ�)
+恢复MySQL服务器上面的txt格式文件(需要FILE权限,各数据值之间用"制表符"分隔)
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8
 ......
 mysql> use mysql;
 mysql> LOAD DATA INFILE '/tmp/mysql_user.txt' INTO TABLE user ;
-�ָ�MySQL�����������csv��ʽ�ļ�(��ҪFILEȨ��,������ֵ֮����"����"�ָ�)
+恢复MySQL服务器上面的csv格式文件(需要FILE权限,各数据值之间用"逗号"分隔)
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8
 ......
 mysql> use mysql;
 mysql> LOAD DATA INFILE '/tmp/mysql_user.csv' INTO TABLE user FIELDS TERMINATED BY ',';
-�ָ����ص�txt��csv�ļ���MySQL
+恢复本地的txt或csv文件到MySQL
 mysql -u$USER -p$PASSWD -h127.0.0.1 -P3306 --default-character-set=utf8
 ......
 mysql> use mysql;
@@ -19542,108 +19542,108 @@ mysql> use mysql;
 mysql> LOAD DATA LOCAL INFILE '/tmp/mysql_user.csv' INTO TABLE user;
 # csv
 mysql> LOAD DATA LOCAL INFILE '/tmp/mysql_user.csv' INTO TABLE user FIELDS TERMINATED BY ',';
-ע������
+注意事项
 
-����MySQL����
--u$USER �û���
--p$PASSWD ����
--h127.0.0.1 �������Զ�̷�����,���ö�Ӧ������������IP��ַ�滻
--P3306 �˿�
---default-character-set=utf8 ָ���ַ���
-����mysql����
---skip-column-names ����ʾ�����е�����
--B ���������ķ�ʽ����mysql����.��ѯ�������ʾΪ�Ʊ��������ʽ.
--e ִ�������,�˳�
-����mysqldump����
--A ȫ�ⱸ��
---routines ���ݴ洢���̺ͺ���
---default-character-set=utf8 �����ַ���
---lock-all-tables ȫ��һ������
---add-drop-database ��ÿ��ִ�н������֮ǰ,��ִ��DROP TABLE IF EXIST���
---no-create-db �����CREATE DATABASE���
---no-create-info �����CREATE TABLE���
---databases ������Ĳ���������Ϊ����
---tables ��һ������Ϊ���� ����Ϊ����
-����LOAD DATA�﷨
-���LOAD DATA��䲻��LOCAL�ؼ���,����MySQL�ķ�������ֱ�Ӷ�ȡ�ļ�,��Ҫ����FILEȨ��.
-�����LOCAL�ؼ���,���ڿͻ��˱��ض�ȡ�����ļ�,ͨ�����紫��MySQL.
-LOAD DATA���,ͬ������¼��binlog,�������ڲ��Ļ���.
+关于MySQL连接
+-u$USER 用户名
+-p$PASSWD 密码
+-h127.0.0.1 如果连接远程服务器,请用对应的主机名或者IP地址替换
+-P3306 端口
+--default-character-set=utf8 指定字符集
+关于mysql参数
+--skip-column-names 不显示数据列的名字
+-B 以批处理的方式运行mysql程序.查询结果将显示为制表符间隔格式.
+-e 执行命令后,退出
+关于mysqldump参数
+-A 全库备份
+--routines 备份存储过程和函数
+--default-character-set=utf8 设置字符集
+--lock-all-tables 全局一致性锁
+--add-drop-database 在每次执行建表语句之前,先执行DROP TABLE IF EXIST语句
+--no-create-db 不输出CREATE DATABASE语句
+--no-create-info 不输出CREATE TABLE语句
+--databases 将后面的参数都解析为库名
+--tables 第一个参数为库名 后续为表名
+关于LOAD DATA语法
+如果LOAD DATA语句不带LOCAL关键字,就在MySQL的服务器上直接读取文件,且要具有FILE权限.
+如果带LOCAL关键字,就在客户端本地读取数据文件,通过网络传到MySQL.
+LOAD DATA语句,同样被记录到binlog,不过是内部的机制.
 
 
 
-ʹ��mysqldump -uroot -p'123' --all-database >all.sql �����������ݿ⣬��ʹ��
+使用mysqldump -uroot -p'123' --all-database >all.sql 导出所有数据库，在使用
 mysql -uroot -p'123'
 mysql>show variables like 'max_allowed_packet';
 mysql> show variables like 'net_buffer_length';
-��¼�²������ڵ�����ʱ��ʹ��
+记录下参数，在导出的时候使用
 mysqldump -uroot -p'123' --all-database --max_allowed_packet=1047552 --net_buffer_length=16384 >all.sql
-Ȼ���ٵ��뼴�ɡ�
+然后再倒入即可。
 
 
-mysqldump �ͻ������� Igor Romanenko ��д�����ݿⱸ�ݳ��򡣿��������������򲿷����ݿ⵼�����ݻ�ֱ�ӵ���������һ�����ݿ��У���һ���ǵ��� MySQL ���ݿ⣩��һ����˵�����ɵ�ת���ļ��������������������ݵ� SQL ���������߼��С����⣬ mysqldump ���������� CSV �ļ������ָ������ı��ļ����� XML ��
-ע�� mysqldump ��һ�����ݳ��򣬲��������ָ���
+mysqldump 客户端是由 Igor Romanenko 编写的数据库备份程序。可以用它将整个或部分数据库导出备份或直接导出到另外一个数据库中（不一定非得是 MySQL 数据库）。一般来说，生成的转储文件会包含创建表或插入数据的 SQL ，或者两者兼有。另外， mysqldump 还可以生成 CSV 文件，带分隔符的文本文件或者 XML 。
+注： mysqldump 是一个备份程序，并不用作恢复。
 
-��������������ı����� MyISAM ���ͣ��Ƽ�ʹ�� mysqlhotcopy ���б��ݺͻָ����ٶȻ�� mysqldump ���졣��
+（如果你所创建的表都是 MyISAM 类型，推荐使用 mysqlhotcopy 进行备份和恢复，速度会比 mysqldump 更快。）
 
-ʹ�� mysqldump һ���Ϊ������ʽ��
+使用 mysqldump 一般归为三种形式：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> mysqldump [ options ] db_name [ tbl_name ... ]
 shell> mysqldump [ options ] --database db_name ...
 shell> mysqldump [ options ] -all-databases
 
-��� db_name ��δ�ӱ�������ʹ�� --databases �� --all-database ѡ� ������ᱻת���� mysqldump Ĭ�ϲ���ת�� INFORMATION_SCHEMA ����
+如果 db_name 后未接表名，或使用 --databases 或 --all-database 选项， 整个库会被转储（ mysqldump 默认不会转储 INFORMATION_SCHEMA ）。
 
-options ���ǿ�ѡ�������кܶ࣬һ��ʹ��Ĭ��ֵ���ɡ���������� --user �� --password ����ָ���������ݿ���û��������롣һ���÷����£�
+options 都是可选参数，有很多，一般使用默认值即可。其中有两项： --user 和 --password 用来指定连接数据库的用户名和密码。一般用法如下：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> mysqldump --user=user_name --password[=password] db_name > backup-file.sql
 
-user_name �� password �滻�ɾ�����û��������롣ע�⣬����ɲ������������ṩ���Ժ� MySQL ����ʾ�������롣����Ҳ��д��������
+user_name 和 password 替换成具体的用户名和密码。注意，密码可不在命令行中提供，稍后 MySQL 会提示输入密码。所以也可写成这样：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> mysqldump --user=user_name --password db_name > backup-file.sql
-Ҳ���Խ� --user �� --password �滻�� -u �� -p���÷����£�
+也可以将 --user 和 --password 替换成 -u 和 -p，用法如下：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> mysqldump -u<user_name> -p[<password>] db_name > backup-file.sql
-ͬ������ <user_name> �� <password> ����ʵֵ�滻��
+同样，将 <user_name> 和 <password> 用真实值替换。
 
 
-�������ݿ�ָ�ʱ��ʹ�� mysql ����÷����£�
+在做数据库恢复时，使用 mysql 命令，用法如下：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> mysql -u<user_name> -p db_name < backup-file.sql
-ע�⣺�˴�ʹ�õ��� mysql ������ mysqldump����Ϊ mysqldump �������������ġ�
+注意：此处使用的是 mysql 而不是 mysqldump，因为 mysqldump 是用来做导出的。
 
-�ڵ���ʱ���п��ܻ�������´���
+在导入时，有可能会出现如下错误：
 
-Command prompt����  �ղش���
+Command prompt代码  收藏代码
 ERROR 2006 (HY000) at line <line_num> : MySQL server has gone away
-������Ϊ�ڵ�������ʱ���������һ�ű�������д��һ���ܴ�� insert ��䣬���´� insert ��䳬���˻������Ĵ�С��һ���������취�����������⣺��1����һ����� SQL ����ɼ���С�ģ� �����������Ĺ��ߣ��� SplitInsert����2���Ӵ󻺳��������������� MySQL �İ�װĿ¼���� my.ini �����ӻ��޸����������
+这是因为在导入数据时，往往会把一张表的数据写成一个很大的 insert 语句，导致此 insert 语句超过了缓冲区的大小。一般有两个办法来解决这个问题：（1）把一个大的 SQL 语句拆成几个小的， 网上有这样的工具，如 SplitInsert；（2）加大缓冲区的容量，进入 MySQL 的安装目录，打开 my.ini ，增加或修改以下配置项：
 
-Configuration����  �ղش���
+Configuration代码  收藏代码
 max_allowed_packet=20M
-ֵ�Ĵ�Сȡ�������ݵĶ��٣��޸ĺ���Ҫ�������ݿ⡣
+值的大小取决于数据的多少，修改后需要重启数据库。
 
 
-С���ɣ�
+小技巧：
 
-���� backup-file.sql ����ֶ����ļ�����ǰ�����룺
+生成 backup-file.sql 后可手动在文件的最前处加入：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 SET AUTOCOMMIT=0;
 SET FOREIGH_KEY_CHECKS=0;
-���ļ������λ�ü��룺
+在文件的最后位置加入：
 
 SET FOREIGN_KEY_CHECKS=1;
 COMMIT;
 SET AUTOCOMMIT=1;
-������ִ�е���ʱ�ٶȻ��ǳ��ࡣ
+这样在执行导入时速度会快非常多。
 
-����� linux �Ͽ��Ը��Ӽ�㣺
+如果在 linux 上可以更加简便：
 
-Shell����  �ղش���
+Shell代码  收藏代码
 shell> echo 'SET AUTOCOMMIT=0;
 SET FOREIGN_KEY_CHECKS=0;
 ' > pre.sql
@@ -19713,65 +19713,65 @@ That's now been done.
 
 
 
-Oracle��ˮλ��(HWM)�������Ż�[ת]
+Oracle高水位线(HWM)及性能优化[转]
 
 http://blog.csdn.net/wanglinchuan/archive/2008/11/21/3344552.aspx
-(�������Ի��������ɱ������������������������ο�������)
+(资料来自互联网，由本人整理发布。出处列在最后参考资料中)
 
-˵��HWM,��������Ҫ��Ҫ��̸̸ORACLE���߼��洢����.����֪��,ORACLE���߼��洢�Ϸ�4������:���ռ�,��,���Ϳ�.
-
-
-(1)��:��������С�Ĵ洢��λ,���ڱ�׼�Ŀ��С��8K,ORACLEÿһ��I/O����Ҳ�ǰ�����������,Ҳ����˵��ORACLE�������ļ�������ʱ,�Ƕ�ȡ���ٸ���,�����Ƕ�����.
+说到HWM,我们首先要简要的谈谈ORACLE的逻辑存储管理.我们知道,ORACLE在逻辑存储上分4个粒度:表空间,段,区和块.
 
 
-(2)��:��һϵ�����ڵĿ�����,��Ҳ��ORACLE�ռ����Ļ�����λ,�ٸ�������˵,�����Ǵ���һ����PM_USERʱ,����ORACLE�����һ���Ŀռ�������,���Ų��ϵ�INSERT���ݵ�PM_USER,ԭ����������ݲ��²��������ʱ,ORACLE������Ϊ��λ������չ��,Ҳ����˵�ٷ�����ٸ�����PM_USER,�����Ƕ��ٸ���.
+(1)块:是粒度最小的存储单位,现在标准的块大小是8K,ORACLE每一次I/O操作也是按块来操作的,也就是说当ORACLE从数据文件读数据时,是读取多少个块,而不是多少行.
 
 
-(3)��:����һϵ�е��������,һ����˵,������һ������ʱ(��,����),�ͻ����һ���θ��������.���Դ�ĳ����������˵,�ξ���ĳ���ض�������.��CREATE TABLE PM_USER,����ξ������ݶ�,��CREATE INDEX ON PM_USER(NAME),ORACLEͬ�������һ���θ��������,������һ����������.��ѯ�ε���Ϣ����ͨ�������ֵ�: SELECT * FROM USER_SEGMENTS�����,
+(2)区:由一系列相邻的块而组成,这也是ORACLE空间分配的基本单位,举个例子来说,当我们创建一个表PM_USER时,首先ORACLE会分配一区的空间给这个表,随着不断的INSERT数据到PM_USER,原来的这个区容不下插入的数据时,ORACLE是以区为单位进行扩展的,也就是说再分配多少个区给PM_USER,而不是多少个块.
 
 
-(4)���ռ�:������,������.���ռ�����������ϴ����������ڵ������ļ���.һ�����ݿ�����Ҫ��һ�����ռ�.
-
-OK,�������ڻص�HWM����,��ô,ʲô�Ǹ�ˮλ����� ��͸�ORACLE�Ķοռ���������.
+(3)段:是由一系列的区所组成,一般来说,当创建一个对象时(表,索引),就会分配一个段给这个对象.所以从某种意义上来说,段就是某种特定的数据.如CREATE TABLE PM_USER,这个段就是数据段,而CREATE INDEX ON PM_USER(NAME),ORACLE同样会分配一个段给这个索引,但这是一个索引段了.查询段的信息可以通过数据字典: SELECT * FROM USER_SEGMENTS来获得,
 
 
-(һ)ORACLE��HWM���綨һ������ʹ�õĿ��δʹ�õĿ�.
+(4)表空间:包含段,区及块.表空间的数据物理上储存在其所在的数据文件中.一个数据库至少要有一个表空间.
 
-�ٸ�������˵,�����Ǵ���һ����:PT_SCHE_DETAILʱ,ORACLE�ͻ�Ϊ����������һ����.���������,��ʹ����δ�����κμ�¼,Ҳ������һ����������,��һ�����ĵ�һ����ͳ�Ϊ��ͷ(SEGMENT HEADE),��ͷ�оʹ�����һЩ��Ϣ,����HWM����Ϣ�ʹ洢�ڴ�.��ʱ,��Ϊ��һ�����ĵ�һ�����ڴ洢��ͷ��һЩ��Ϣ,��Ȼû�д洢�κ�ʵ�ʵļ�¼,��Ҳ���Ǳ�ʹ��,��ʱHWM��λ�ڵ�2����.�����ǲ��ϲ������ݵ�PM_USER��,��1�����Ѿ��Ų��º����²��������,��ʱ,ORACLE����ˮλ֮�ϵĿ����ڴ洢��������,ͬʱ,HWM����Ҳ������.Ҳ����˵,�����ǲ��ϲ�������ʱ,HWM������������,����,��HWM֮�µ�,�ͱ�ʾʹ�ù��Ŀ�,HWM֮�ϵľͱ�ʾ�ѷ��䵫��δʹ�ù��Ŀ�.
-
-
-(��)HWM�ڲ�������ʱ,�����пռ䲻������пռ����չʱ��������,��ɾ������ʱ����������.
+OK,我们现在回到HWM上来,那么,什么是高水位标记呢 这就跟ORACLE的段空间管理相关了.
 
 
-��ͺñ���ˮ���ˮλ,����ˮʱ,ˮλ������,��ˮ�˳���,���ˮλ�ĺۼ����������ɼ�.
-���������ǿ�һ���Σ���һ�ű������������˿飬��ͼ 1 ��ʾ�����������������У�ɾ����һЩ�У���ͼ 2 ��ʾ�����о����������˷ѵĿռ䣺(I) �ڱ�����һ��ĩ�˺����еĿ�֮�䣬�Լ� (II) �ڿ��ڲ������л���һЩû��ɾ�����С�
+(一)ORACLE用HWM来界定一个段中使用的块和未使用的块.
+
+举个例子来说,当我们创建一个表:PT_SCHE_DETAIL时,ORACLE就会为这个对象分配一个段.在这个段中,即使我们未插入任何记录,也至少有一个区被分配,第一个区的第一个块就称为段头(SEGMENT HEADE),段头中就储存了一些信息,基中HWM的信息就存储在此.此时,因为第一个区的第一块用于存储段头的一些信息,虽然没有存储任何实际的记录,但也算是被使用,此时HWM是位于第2个块.当我们不断插入数据到PM_USER后,第1个块已经放不下后面新插入的数据,此时,ORACLE将高水位之上的块用于存储新增数据,同时,HWM本身也向上移.也就是说,当我们不断插入数据时,HWM会往不断上移,这样,在HWM之下的,就表示使用过的块,HWM之上的就表示已分配但从未使用过的块.
 
 
-ͼ1��������ñ��Ŀ顣�û�ɫ�����α�ʾ��
+(二)HWM在插入数据时,当现有空间不足而进行空间的扩展时会向上移,但删除数据时不会往下移.
 
 
-ORACLE �����ͷſռ��Թ���������ʹ�ã���һ���򵥵����ɣ����ڿռ���Ϊ�²�����б����ģ�����Ҫ��Ӧ�����е���������ռ�õ���߿ռ��Ϊ���ʹ�ñ�� (HWM)����ͼ 2 ��ʾ��
+这就好比是水库的水位,当涨水时,水位往上移,当水退出后,最高水位的痕迹还是清淅可见.
+考虑让我们看一个段，如一张表，其中填满了块，如图 1 所示。在正常操作过程中，删除了一些行，如图 2 所示。现有就有了许多浪费的空间：(I) 在表的上一个末端和现有的块之间，以及 (II) 在块内部，其中还有一些没有删除的行。
 
 
-ͼ2���к���Ŀ��Ѿ�ɾ���ˣ�HWM �Ա��ֲ���
-
-(��)HWM����Ϣ�洢�ڶ�ͷ����.
-
-HWM��������Ϣ�Ǵ����ڶ�ͷ.�ڶοռ����ֹ�������ʽʱ,ORACLE��ͨ��FREELIST(һ����������)���������ڵĿռ����.�ڶοռ����Զ�������ʽʱ(ASSM),ORACLE��ͨ��BITMAP���������ڵĿռ����.
+图1：分配给该表的块。用灰色正方形表示行
 
 
-(��)ORACLE��ȫ��ɨ���Ƕ�ȡ��ˮλ���(HWM)���µ����п�.
+ORACLE 不会释放空间以供其他对象使用，有一条简单的理由：由于空间是为新插入的行保留的，并且要适应现有行的增长。被占用的最高空间称为最高使用标记 (HWM)，如图 2 所示。
 
 
-��������Ͳ�����.���û�����һ��ȫ��ɨ��ʱ��ORACLE ʼ�ձ���Ӷ�һֱɨ�赽 HWM����ʹ��ʲôҲû�з��֡��������ӳ���ȫ��ɨ���ʱ�䡣
+图2：行后面的块已经删除了；HWM 仍保持不变
+
+(三)HWM的信息存储在段头当中.
+
+HWM本身的信息是储存在段头.在段空间是手工管理方式时,ORACLE是通过FREELIST(一个单向链表)来管理段内的空间分配.在段空间是自动管理方式时(ASSM),ORACLE是通过BITMAP来管理段内的空间分配.
 
 
-(��)����ֱ��·��������ʱ �� ���磬ͨ��ֱ�Ӽ��ز��루�� APPEND ��ʾ���룩��ͨ�� SQL*LOADER ֱ��·�� �� ���ݿ�ֱ������ HWM ֮�ϡ�������Ŀռ���˷ѵ��ˡ�
+(四)ORACLE的全表扫描是读取高水位标记(HWM)以下的所有块.
 
 
-��������������������,����ֻ�Ǵ����ռ���˷�,��ǰ�߲����ǿռ���˷�,���һ�������ص���������.�������������������:
+所以问题就产生了.当用户发出一个全表扫描时，ORACLE 始终必须从段一直扫描到 HWM，即使它什么也没有发现。该任务延长了全表扫描的时间。
 
-(A)������������ԵĻ���,��һ���ȴ���һ���οռ�Ϊ�ֹ������ı��ռ�:
+
+(五)当用直接路径插入行时 — 例如，通过直接加载插入（用 APPEND 提示插入）或通过 SQL*LOADER 直接路径 — 数据块直接置于 HWM 之上。它下面的空间就浪费掉了。
+
+
+我们来分析这两个问题,后者只是带来空间的浪费,但前者不仅是空间的浪费,而且会带来严重的性能问题.我们来看看下面的例子:
+
+(A)我们先来搭建测试的环境,第一步先创建一个段空间为手工管理的表空间:
 
 
 CREATE TABLESPACE "RAINNY"
@@ -19781,11 +19781,11 @@ AUTOEXTEND
 ON NEXT 10M MAXSIZE UNLIMITED EXTENT MANAGEMENT LOCAL
 SEGMENT SPACE MANAGEMENT MANUAL;
 
-(B)����һ����,ע��,�˱��ĵڶ����ֶ��ҹ��������CHAR(100),���ô˱��ڲ���1ǧ������¼��,�ռ����㹻��:
+(B)创建一个表,注意,此表的第二个字段我故意设成是CHAR(100),以让此表在插入1千万条记录后,空间有足够大:
 
 CREATE TABLE TEST_TAB(C1 NUMBER(10),C2 CHAR(100)) TABLESPACE RAINNY;
 
-�����¼
+插入记录
 
 DECLARE
     I NUMBER(10);
@@ -19797,7 +19797,7 @@ BEGIN
 END;
 /
 
-(C)��������ѯһ��,���ڲ���һǧ������¼�������ʵĿ����Ͳ�ѯ����ʱ��:
+(C)我们来查询一下,看在插入一千万条记录后所访问的块数和查询所用时间:
 
 SQL> SET TIMING ON
 SQL> SET AUTOTRACE TRACEONLY
@@ -19826,8 +19826,8 @@ STATISTICS
 0      SORTS (DISK)
 1      ROWS PROCESSED
 
-�������������ִ�мƻ�,���SQL�ܹ���ʱ��:1��3��.���ʷ�ʽ�ǲ���ȫ��ɨ�跽ʽ(FTS),�߼�����156310��BLOCK,��������154239��BLOCK.
-����������һ�������:
+我们来看上面的执行计划,这句SQL总供耗时是:1分3秒.访问方式是采用全表扫描方式(FTS),逻辑读了156310个BLOCK,物理读了154239个BLOCK.
+我们来分析一下这个表:
 
 
 BEGIN
@@ -19836,10 +19836,10 @@ TABNAME=> 'TEST_TAB',
 PARTNAME=> NULL);END;
 /
 
-���������Ŀǰʹ�õ�BLOCK��: 156532,δʹ�õ�BLOCK(EMPTY_BLOCKS)Ϊ:0,������Ϊ(NUM_ROWS):1000 0000
+发现这个表目前使用的BLOCK有: 156532,未使用的BLOCK(EMPTY_BLOCKS)为:0,总行数为(NUM_ROWS):1000 0000
 
 
-(D)���������ǰѴ˱��ļ�¼��DELETE��ʽɾ��,Ȼ����������SELECT COUNT(*) FROM TEST_TAB������ʱ��:
+(D)接下来我们把此表的记录用DELETE方式删掉,然后再来看看SELECT COUNT(*) FROM TEST_TAB所花的时间:
 
 
 
@@ -19895,47 +19895,47 @@ STATISTICS
 0      SORTS (DISK)
 1      ROWS PROCESSED
 
-�������,��DELETE����,��ʱ������û��һ����¼,ΪʲôSELECT COUNT(*) FROM TEST_TAB����ʱ��Ϊ1��4��, �������м�¼��΢����,����Ϊʲô�� ���Ҵ�ҿ�,���߼�����156310�� BLOCK,��֮ǰ��һǧ���м�¼ʱ���,ORACLE��ô����ô���� 
+大家来看,在DELETE表后,此时表中已没有一条记录,为什么SELECT COUNT(*) FROM TEST_TAB花的时间为1分4秒, 反而比有记录稍微长点,这是为什么呢 而且大家看,其逻辑读了156310个 BLOCK,跟之前有一千万行记录时差不多,ORACLE怎么会这么笨啊 
 
-������DELETE�����ٴη�����,������ʲô�仯:
-��ʱ, TEST_TAB��Ŀǰʹ�õ�BLOCK��: 156532,δʹ�õ�BLOCK(EMPTY_BLOCKS)Ϊ:0,������Ϊ(NUM_ROWS)�ѱ��:0
+我们在DELETE表后再次分析表,看看有什么变化:
+这时, TEST_TAB表目前使用的BLOCK是: 156532,未使用的BLOCK(EMPTY_BLOCKS)为:0,总行数为(NUM_ROWS)已变成:0
 
-Ϊʲô��Ŀǰʹ��BLOCK������156532�� 
+为什么表目前使的BLOCK数还是156532呢 
 
-����ĸ�Դ������ORACLE��HWM.Ҳ����˵,��������¼ʱ,HWM������������,������ɾ����¼��,HWMȴ����������,Ҳ����˵,DELETEһǧ������¼��,�˱���HWM����û�ƶ�,����ԭ�����Ǹ�λ��,����,HWM���µĿ���ͬ��Ҳ��һ����.ORACLE��ȫ��ɨ���Ƕ�ȡORACLE��ˮλ����µ�����BLOCK,Ҳ����˵,����HWM�µ�BLOCK����ʵ����û�д������,ORACLE����һһ��ȡ,����,��ҿ����֪,������DELETE����,ORACLE���˴����Ŀտ�,��ȥ�˴�����ʱ��.
+问题的根源就在于ORACLE的HWM.也就是说,在新增记录时,HWM会慢慢往上移,但是在删除记录后,HWM却不会往下移,也就是说,DELETE一千万条记录后,此表的HWM根本没移动,还在原来的那个位置,所以,HWM以下的块数同样也是一样的.ORACLE的全表扫描是读取ORACLE高水位标记下的所有BLOCK,也就是说,不管HWM下的BLOCK现在实际有没有存放数据,ORACLE都会一一读取,这样,大家可想而知,在我们DELETE表后,ORACLE读了大量的空块,耗去了大量的时间.
 
 
-����������DELETE����οռ�ʵ��ʹ�õ�״��:
+我们再来看DELETE表后段空间实际使用的状况:
 
 SQL> EXEC SHOW_SPACE('TEST_TAB','TEST');
 
-TOTAL BLOCKS............................164352 --�ܹ�164352��
+TOTAL BLOCKS............................164352 --总共164352块
 TOTAL BYTES.............................1346371584
-UNUSED BLOCKS...........................7168 --��7168��û���ù�,Ҳ������HWM����Ŀ���
+UNUSED BLOCKS...........................7168 --有7168块没有用过,也就是在HWM上面的块数
 UNUSED BYTES............................58720256
 LAST USED EXT FILEID....................9
-LAST USED EXT BLOCKID...................158856-- BLOCK ID ����������ļ�����ŵģ���ʾ���ʹ�õ�һ��EXTENT�ĵ�һ��BLOCK�ı��
-LAST USED BLOCK.........................1024 --�����ʹ�õ�һ��EXTENT ��һ������1024��
+LAST USED EXT BLOCKID...................158856-- BLOCK ID 是针对数据文件来编号的，表示最后使用的一个EXTENT的第一个BLOCK的编号
+LAST USED BLOCK.........................1024 --在最后使用的一个EXTENT 中一共用了1024块
 
 
 PL/SQL PROCEDURE SUCCESSFULLY COMPLETED
 
 
-�ܹ�����164352�飬����һ��SEGMENT HEADER,ʵ���ܹ�����164351���飬��7168�����û��ʹ�ù���LAST USED BLOCK��ʾ�����һ��ʹ�õ�EXTENT ��ʹ�õ�BLOCK, ��ϡ�LAST USED EXT BLOCK ID���Լ��㡡HWM λ�� :
+总共用了164352块，除了一个SEGMENT HEADER,实际总共用了164351个块，有7168块从来没有使用过。LAST USED BLOCK表示在最后一个使用的EXTENT 中使用的BLOCK, 结合　LAST USED EXT BLOCK ID可以计算　HWM 位置 :
 
-LAST USED EXT BLOCK ID + LAST USED BLOCK -1 = HWM ���ڵ������ļ���BLOCK���
+LAST USED EXT BLOCK ID + LAST USED BLOCK -1 = HWM 所在的数据文件的BLOCK编号
 
-����ó�: 158856+1024-1=159879,�������HWM���е�BLOCK���
+代入得出: 158856+1024-1=159879,这个就是HWM所有的BLOCK编号
 
-HWM���ڵĿ�:TOTAL BLOCKS- UNUSED BLOCKS=164352-7168=157184,Ҳ����˵,HWM�ڵ�157184����,��BLOCKID��159879
-
-
-(E)������,����������������:
+HWM所在的块:TOTAL BLOCKS- UNUSED BLOCKS=164352-7168=157184,也就是说,HWM在第157184个块,其BLOCKID是159879
 
 
-��һ��:ִ��ALTER TABLE TEST_TAB DEALLOCATE UNUSED;
+(E)结下来,我们再做几个试验:
 
-���ǿ����οռ��ʹ��״��:
+
+第一步:执行ALTER TABLE TEST_TAB DEALLOCATE UNUSED;
+
+我们看看段空间的使用状况:
 
 
 SQL> EXEC SHOW_SPACE('TEST_TAB','TEST');
@@ -19948,10 +19948,10 @@ LAST USED EXT FILEID....................9
 LAST USED EXT BLOCKID...................158856
 LAST USED BLOCK.........................1024
 
-��ʱ�����ٴ�������Ĺ�ʽ,���HWM��λ��: 157184-0=157184 HWM���ڵ�BLOCK ID��158856+1024-1=159879,���ոյ�û�б仯,Ҳ����˵ִ��ALTER TABLE TEST_TAB DEALLOCATE UNUSED��,�εĸ�ˮλ��ǵ�λ��û�иı�,���Ǵ�ҿ���UNUSED BLOCKS��Ϊ0��,�ܵĿ������ٵ�157184,��֤��,DEALLOCATE UNUSEDΪ�ͷ�HWM�����δʹ�ÿռ�,���ǲ������ͷ�HWM��������ɿռ�,Ҳ�����ƶ�HWM��λ��.
+此时我们再代入上面的公式,算出HWM的位置: 157184-0=157184 HWM所在的BLOCK ID是158856+1024-1=159879,跟刚刚的没有变化,也就是说执行ALTER TABLE TEST_TAB DEALLOCATE UNUSED后,段的高水位标记的位置没有改变,但是大家看看UNUSED BLOCKS变为0了,总的块数减少到157184,这证明,DEALLOCATE UNUSED为释放HWM上面的未使用空间,但是并不会释放HWM下面的自由空间,也不会移动HWM的位置.
 
 
-�ڶ���:������������ִ��ALTER TABLE TEST_TAB MOVE��οռ��ʹ��״��:
+第二步:我们再来看看执行ALTER TABLE TEST_TAB MOVE后段空间的使用状况:
 
 
 SQL> EXEC SHOW_SPACE('TEST_TAB','TEST');
@@ -19964,9 +19964,9 @@ LAST USED EXT FILEID....................9
 LAST USED EXT BLOCKID...................2632
 LAST USED BLOCK.........................3
 
-��ʱ,�ܹ��õ��Ŀ����ѱ�Ϊ8, �����ٴ�������Ĺ�ʽ,���HWM��λ��: 8-5=3 HWM���ڵ�BLOCK ID��2632+3-1=2634,
+此时,总共用到的块数已变为8, 我们再代入上面的公式,算出HWM的位置: 8-5=3 HWM所在的BLOCK ID是2632+3-1=2634,
 
-OK,���Ƿ���,��ʱHWM��λ���Ѿ������仯,����HWM��λ�����ڵ�3��BLOCK,��BLOCK ID��2634,���������ļ���ID��9(���û�з����仯,�����ļ�����ԭ�����Ǹ������ļ�,ֻ���ͷ���ԭ�������ɿռ�),���ʹ�õĿ���Ҳ��Ϊ3,Ҳ����˵�Ѿ�ʹ����3��,HWM���������һ��ʹ�õĿ���,����3������.��ҿ��ܻ�������,Ϊʲô�ͷſռ��,δʹ�õĿ黹��5���� Ҳ����˵HWM֮�ϻ�����5���ѷ��䵫��δʹ�õĿ�.�𰸾͸�HWM�ƶ��Ĺ����й�.�������ڲ�������ʱ,ORACLE������HWM֮�µĿ鵱�ж�λ���ɿռ�(ͨ�������б�FREELIST),���FREELIST����û�����ɿ���,ORACLE�Ϳ�ʼ������չ,��HWMҲ����������,ÿ5���ƶ�һ��.��������ORACLE��˵��:
+OK,我们发现,此时HWM的位置已经发生变化,现在HWM的位置是在第3个BLOCK,其BLOCK ID是2634,所有数据文件的ID是9(这个没有发生变化,数据文件还是原来的那个数据文件,只是释放了原来的自由空间),最后使用的块数也变为3,也就是说已经使用了3块,HWM就是在最后一个使用的块上,即第3个块上.大家可能会觉得奇怪,为什么释放空间后,未使用的块还有5个啊 也就是说HWM之上还是有5个已分配但从未使用的块.答案就跟HWM移动的规律有关.当我们在插入数据时,ORACLE首先在HWM之下的块当中定位自由空间(通过自由列表FREELIST),如果FREELIST当中没有自由块了,ORACLE就开始往上扩展,而HWM也跟着往上移,每5块移动一次.我们来看ORACLE的说明:
 
 
 The high water mark is:
@@ -19976,10 +19976,10 @@ The high water mark is:
 -Reset by the truncate command
 -Never reset by the delete command
 -Space above the high-water-mark can be reclaimed at the table level by using the following command:
-ALTER TABLE DEALLOCATE UNUSED��
+ALTER TABLE DEALLOCATE UNUSED…
 
 
-������������:SELECT COUNT(*) FROM TEST_TAB������ʱ��:
+我们再来看看:SELECT COUNT(*) FROM TEST_TAB所花的时间:
 
 
 SQL> SELECT COUNT(*) FROM TEST_TAB;
@@ -20008,11 +20008,11 @@ STATISTICS
 1     ROWS PROCESSED
 
 
-�ܿ�,����1��.
+很快,不到1秒.
 
-������������Ա���һ�η���, ��ʱ�����Ŀǰʹ�õ�BLOCKΪ: 0,δʹ�õ�BLOCK(EMPTY_BLOCKS)Ϊ:0,������Ϊ(NUM_ROWS):0
-��������Ҳ���Է���,��������SHOW_SPACE��ʾ�������е㲻һ��.��ô�ĸ���׼���� ��ʵ����������׼��,ֻ��������ķ����е㲻ͬ.��ʵ��,���㴴����һ����������Ժ�,��������û�в�������,������ռ��һЩ��,ORACLEҲ����������Ҫ�Ŀռ�.ͬ��,��ALTER TABLE MOVE�ͷ����ɿռ��,���Ǳ�����һЩ�ռ�������.
-���,��������ִ��TRUNCATE����,�ض������,�����οռ��ʹ��״��:
+我们最后再来对表作一次分析, 此时这个表目前使用的BLOCK为: 0,未使用的BLOCK(EMPTY_BLOCKS)为:0,总行数为(NUM_ROWS):0
+从中我们也可以发现,分析表和SHOW_SPACE显示的数据有点不一致.那么哪个是准的呢 其实这两个都是准的,只不过计算的方法有点不同.事实上,当你创建了一个对象如表以后,不管你有没有插入数据,它都会占用一些块,ORACLE也会给它分配必要的空间.同样,用ALTER TABLE MOVE释放自由空间后,还是保留了一些空间给这个表.
+最后,我们再来执行TRUNCATE命令,截断这个表,看看段空间的使用状况:
 
 
 TRUNCATE TABLE TEST_TAB;
@@ -20036,10 +20036,10 @@ PL/SQL PROCEDURE SUCCESSFULLY COMPLETED
 SQL>
 
 
-���Ƿ���TRUNCATE���MOVEû��ʲô�仯.
+我们发现TRUNCATE后和MOVE没有什么变化.
 
 
-Ϊ��,������֤һ��������Ĺ۵�,����DROPһ�±�,Ȼ���½������,������ʱ��û�в����κ�����֮ǰ,�Ƿ�ORACLEȷʵ�и������������Ҫ�Ŀռ�:
+为了,最终验证一下我上面的观点,我再DROP一下表,然后新建这个表,看看这时在没有插入任何数据之前,是否ORACLE确实有给这个对象分配必要的空间:
 
 
 DROP TABLE TEST_TAB;
@@ -20058,7 +20058,7 @@ LAST USED EXT FILEID....................9
 LAST USED EXT BLOCKID...................2112
 LAST USED BLOCK.........................3
 
-��ҿ�,��ʹ��û�в����κ�һ�м�¼,ORACLE���Ǹ���������8����.��Ȼ�������������INITIAL ������MINEXTENTS�����й�:�뿴TEST_TAB�Ĵ洢����:
+大家看,即使我没有插入任何一行记录,ORACLE还是给它分配了8个块.当然这个跟建表语句的INITIAL 参数及MINEXTENTS参数有关:请看TEST_TAB的存储参数:
 
 
 S TORAGE
@@ -20069,36 +20069,36 @@ MAXEXTENTS UNLIMITED
 );
 
 
-Ҳ����˵,��������󴴽��Ժ�,ORACLE���ٸ�������һ����,��ʼ��С��64K,һ����׼��Ĵ�С��8K,�պ���8��BLOCK.
+也就是说,在这个对象创建以后,ORACLE至少给它分配一个区,初始大小是64K,一个标准块的大小是8K,刚好是8个BLOCK.
 
 
 
-�ܽ�:
+总结:
 
 
-��9I��:
+在9I中:
 
 
-(1)���MINEXTENT ����ʹALTER TABLE TABLENAME DEALLOCATE UNUSED��HWM��������ûʹ�õĿռ��ͷ�
-(2)���MINEXTENT >HWM ���ͷ�MINEXTENTS ���ϵĿռ䡣���Ҫ�ͷ�HWM���ϵĿռ���ʹ��KEEP 0��
+(1)如果MINEXTENT 可以使ALTER TABLE TABLENAME DEALLOCATE UNUSED将HWM以上所有没使用的空间释放
+(2)如果MINEXTENT >HWM 则释放MINEXTENTS 以上的空间。如果要释放HWM以上的空间则使用KEEP 0。
 ALTER TABLE TABLESNAME DEALLOCATE UNUSED KEEP 0;
-(3) TRUNCATE TABLE DROP STORAGE(ȱʡֵ)������Խ�MINEXTENT ֮�ϵĿռ���ȫ�ͷ�(����������ϵͳ),��������HWM��
-(4)�������Ҫ�ƶ�HWM,�������ñ���ʱ����ס,������TRUNCATE TABLE REUSE STORAGE,����HWM���á�
-(5)ALTER TABLE MOVE�ὫHWM�ƶ�,����MOVEʱ��Ҫ˫���ı��ռ�,������������������Ļ�,��Ҫ�ع�����
-(6)DELETE����������HWM,Ҳ�����ͷ����ɵĿռ�(Ҳ����˵DELETE�ճ����Ŀռ�ֻ�ܸ�������������INSERT/UPDATEʹ��,���ܸ������Ķ���ʹ��)
+(3) TRUNCATE TABLE DROP STORAGE(缺省值)命令可以将MINEXTENT 之上的空间完全释放(交还给操作系统),并且重置HWM。
+(4)如果仅是要移动HWM,而不想让表长时间锁住,可以用TRUNCATE TABLE REUSE STORAGE,仅将HWM重置。
+(5)ALTER TABLE MOVE会将HWM移动,但在MOVE时需要双倍的表空间,而且如果表上有索引的话,需要重构索引
+(6)DELETE表不会重置HWM,也不会释放自由的空间(也就是说DELETE空出来的空间只能给对象本身将来的INSERT/UPDATE使用,不能给其它的对象使用)
 
 
-��ORACLE 10G:
+在ORACLE 10G:
 
 
-����ʹ��ALTER TABLE TEST_TAB SHRINK SPACE�����������ƶ�HWM,
-���Ҫͬʱѹ����������,���Է���:ALTER TABLE TEST_TAB SHRINK SPACE CASCADE
-ע��:��ʹ�ô�����ʱ��Ҫ��ʹ�п�Ǩ��row movement(���������)��
-         ��ʹ��ALTER TABLE MOVE ��ͬ����ִ�д�����󲢲���Ҫ�ع�������
+可以使用ALTER TABLE TEST_TAB SHRINK SPACE命令来联机移动HWM,
+如果要同时压缩表的索引,可以发布:ALTER TABLE TEST_TAB SHRINK SPACE CASCADE
+注意:在使用此命令时需要先使行可迁移row movement(具体见例子)。
+         与使用ALTER TABLE MOVE 不同的是执行此命令后并不需要重构索引。
 
 
 
-Oracle �ٷ�˵��
+Oracle 官方说明
 
 
 Shrinking Database Segments Online
@@ -20114,7 +20114,7 @@ Shrink operations can be performed only on segments in locally managed tablespac
     * Tables with function-based indexes
 
 
-�����Ĺ��̣�
+操作的过程：
 
 
 SQL> create table demo as select * from dba_source;
@@ -20141,7 +20141,7 @@ SQL> commit;
 Commit complete.
 
 
-//�õ�һ��40������¼�ı����������鿴������ռ�ֲ������
+//得到一个40万条记录的表，下面来查看这个表空间分布情况。
 
 
 SQL> exec show_space('demo','auto');
@@ -20166,8 +20166,8 @@ Last Used Ext BlockId...................8328
 Last Used Block.........................256
 
 
-һ����9216�����ݿ飬HWM��9216-768=8448�����.
-Ҳ����ͨ���鿴extents�õ�HWM=8*16+128*63+256=8192+256=8448
+一共有9216个数据块，HWM在9216-768=8448这个块.
+也可以通过查看extents得到HWM=8*16+128*63+256=8192+256=8448
 
 
 PL/SQL procedure successfully completed.
@@ -20203,7 +20203,7 @@ Last Used Block.........................256
 PL/SQL procedure successfully completed.
 
 
-//ɾ�����������HWMû�б仯�������ڵ�8448�����λ�á�
+//删除操作后表的HWM没有变化，还是在第8448块这个位置。
 Elapsed: 00:00:00.00
 
 
@@ -20213,7 +20213,7 @@ alter table demo shrink space
 ERROR at line 1:
 ORA-10636: ROW MOVEMENT is not enabled
 
-//��Ҫenable row movement����shrink
+//先要enable row movement才能shrink
 Elapsed: 00:00:00.09
 
 
@@ -20246,12 +20246,12 @@ Last Used Block.........................72
 PL/SQL procedure successfully completed.
 Elapsed: 00:00:00.02
 
-//���Կ���HWM������3656���������!
+//可以看到HWM降到了3656这个块上面!
 
 
 
 
- SHOW_SPACE��TOMд��һ��С���ߣ�SHOW_SPACEʵ���Ͼ���һ���洢���̣�����洢���̿������������ռ䰴ʹ�������ʮ�ֵķ��㡣����ΪSHOW_SPACE�Ľű���
+ SHOW_SPACE是TOM写的一个小工具，SHOW_SPACE实际上就是一个存储过程，这个存储过程可以用来分析空间按使用情况，十分的方便。以下为SHOW_SPACE的脚本：
 
 create or replace procedure show_space
 ( p_segname in varchar2,
@@ -20293,11 +20293,11 @@ begin
     p( 'Last Used Block', l_last_used_block );
 end;
 
-      �˹��ߵ�ʹ�÷���Ϊ��
+      此工具的使用方法为：
 
 SQL> create table t as select * from all_users;
 
-���Ѵ�����
+表已创建。
 
 SQL> set serveroutput on;
 SQL> exec show_space('T');
@@ -20309,9 +20309,9 @@ Last Used Ext FileId....................1
 Last Used Ext BlockId...................60745
 Last Used Block.........................2
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
-      �����˰汾ֻ�ʺϱ��ռ�Ϊ��ASSM��ʱ�򣬵����ռ�ΪASSMʱ�����ã���ΪDBMS_SPACE.FREE_BLOCKS��������ASSM�ϲ�����Ҫ����ASSM���ռ��ʱ��Ҳ��ʹ�������ʹ�����°汾��
+      不过此版本只适合表空间为非ASSM的时候，当表空间为ASSM时不能用，因为DBMS_SPACE.FREE_BLOCKS不允许在ASSM上操作。要想在ASSM表空间的时候也能使用则可以使用以下版本：
 
 create or replace procedure show_space
 ( p_segname_1 in varchar2,
@@ -20423,9 +20423,9 @@ p( 'Total bytes', l_full_bytes);
 end if;
 end;
 
-      �����Ǵ˰汾��SHOW_SPACE��ʹ�÷�����飺
+      以下是此版本的SHOW_SPACE的使用方法简介：
 
-ASSM ���͵ı�
+ASSM 类型的表
 SQL> exec show_space('t','auto');
 Total Blocks............................512
 Total Bytes.............................4194304
@@ -20435,7 +20435,7 @@ Last Used Ext FileId....................9
 Last Used Ext BlockId...................25608
 Last Used Block.........................50
 PL/SQL procedure successfully completed.
-ASSM ���͵�����
+ASSM 类型的索引
 SQL> exec show_space('t_index','auto','i');
 Total Blocks............................80
 Total Bytes.............................655360
@@ -20445,7 +20445,7 @@ Last Used Ext FileId....................9
 Last Used Ext BlockId...................25312
 Last Used Block.........................3
 PL/SQL procedure successfully completed.
-��analyze ����segment ��������
+对analyze 过的segment 可以这样
 SQL> exec show_space('t','auto','T','Y');
 Total Blocks............................512
 Total Bytes.............................4194304
@@ -20472,11 +20472,11 @@ PL/SQL procedure successfully completed.
 
 
 
-Show_space ����Դ��
+Show_space 过程源码
 
 
-1.1 Դ��
-Tom ��ʦ��show_space���̣���pubĳλͬѧ����֮�󣬽ű����£�
+1.1 源码
+Tom 大师的show_space过程，经pub某位同学完善之后，脚本如下：
 
 
 
@@ -20762,10 +20762,10 @@ END;
 
 
 
-1.2 ʹ��ʾ��
+1.2 使用示例
 
 
-1.2.1 MSSM �������ռ���ʾ��
+1.2.1 MSSM 管理表空间下示例
 
 
 SQL> create tablespace mssm
@@ -20800,9 +20800,9 @@ SQL> set serveroutputon
 
 SQL> execshow_space('T_MSSM','T','MANUAL');
 
-FreeBlocks.............................0   --��DBMS_SPACE.FREE_BLOCKS���
+FreeBlocks.............................0   --由DBMS_SPACE.FREE_BLOCKS输出
 
-TotalBlocks............................1152  --������DBMS_SPACE.UNUSED_SPACE���
+TotalBlocks............................1152  --以下由DBMS_SPACE.UNUSED_SPACE输出
 
 TotalBytes.............................9437184
 
@@ -20874,7 +20874,7 @@ PL/SQL procedure successfully completed.
 
 
 
-1.2.2 ASSM  �������ռ���ʾ��
+1.2.2 ASSM  管理表空间下示例
 
 
 SQL> create tablespace assm
@@ -20953,7 +20953,7 @@ PL/SQL procedure successfully completed.
 
 
 
-ע�⣺�ű��ﲢ��ʾ����DBMS_SPACE.SPACE_USAGE�����ݡ���Ϊ����֮ǰ��һ���жϡ�
+注意：脚本里并显示我们DBMS_SPACE.SPACE_USAGE的内容。因为我们之前有一个判断。
 
 
 
@@ -21007,7 +21007,7 @@ PL/SQL procedure successfullycompleted.
 
 
 
---ɾ���������ݺ��ڲ��ԣ�
+--删除部分数据后，在测试：
 
 SQL> delete fromt_assm where rownum<100;
 
@@ -21075,7 +21075,7 @@ PL/SQL procedure successfully completed.
 
 
 
---�Ա�t_assm �ռ�ͳ����Ϣ��
+--对表t_assm 收集统计信息：
 
 SQL> execdbms_stats.gather_table_stats(ownname =>'&owner',tabname=>'&tablename',estimate_percent => &est_per ,method_opt =>'forall columns size 1',degree=>&degree,cascade => true);
 
@@ -21141,13 +21141,13 @@ Total bytes.............................8773632
 
 PL/SQL procedure successfully completed.
 
---�����ռ���Ϣһ�¡�
+--两次收集信息一致。
 
 
 
 
 
-�ٴ�ʹ��analyze ������
+再次使用analyze 分析：
 
 
 
@@ -21275,13 +21275,13 @@ PL/SQL procedure successfully completed.
 
 
 
-��������ԣ�����ֵ��ͬ����ʵ���ϣ�Analyze ���ռ�������Ϣ��EMPTY_BLOCKS,AVG_SPACE,CHAIN_CNT����gather_table_stats�򲻻��ռ���
+我这里测试，两者值相同，但实际上，Analyze 会收集如下信息：EMPTY_BLOCKS,AVG_SPACE,CHAIN_CNT，而gather_table_stats则不会收集。
 
 
 
 
 
---���Է�����,�鿴ĳ����������Ϣ��
+--测试分区表,查看某个分区的信息：
 
 SQL> create table pt_assm
 
@@ -21433,23 +21433,23 @@ PL/SQL procedure successfully completed.
 
 
 
-���� ���֪ʶ��˵��
+二． 相关知识点说明
 
 
-2.1 ���ռ����ģʽ˵��
-    �ڿ�show_space�����ﺯ��֮ǰ����Ҫ���˽�Oracle ���ռ�Ĺ���ģʽ��
-
-
-
-    LogicalSpace Management�֣�Locally  managed tablespaces (default) �� Dictionary-managed tablespaces�� ����Locallymanaged tablespaces �ַ�ASSM��MSSM��
+2.1 表空间管理模式说明
+    在看show_space过程里函数之前，需要先了解Oracle 表空间的管理模式。
 
 
 
-�Զ��οռ������ASSM������ASSM�������б�freelist(MSSM)��λͼ��ȡ��������һ�������Ƶ����飬�ܹ�Ѹ����Ч�ع����洢��չ��ʣ�����飨free block��������ܹ����Ʒֶδ洢���ʣ�ASSM���ռ��ϴ����Ķλ�������һ���ƺ���Bitmap Managed Segments��BMB �Σ���
+    LogicalSpace Management分：Locally  managed tablespaces (default) 和 Dictionary-managed tablespaces。 其中Locallymanaged tablespaces 又分ASSM和MSSM。
 
 
 
-��ʹ�����οռ�����Զ���������tablespace��ʼ��
+自动段空间管理（ASSM），在ASSM中链接列表freelist(MSSM)被位图所取代，它是一个二进制的数组，能够迅速有效地管理存储扩展和剩余区块（free block），因此能够改善分段存储本质，ASSM表空间上创建的段还有另外一个称呼叫Bitmap Managed Segments（BMB 段）。
+
+
+
+从使用区段空间管理自动参数创建tablespace开始：
 
 create tablespace DAVE
 
@@ -21463,31 +21463,31 @@ SEGMENT SPACE MANAGEMENT AUTO -- Turn on ASSM;
 
 
 
-    һ���㶨�����tablespace����ô�����������ܹ�ʹ�ø��ַ��������׵ر��ƶ����µ�tablespace�����ASSM�ı��ع���tablespace���Ե��κ�ΪPCTUSED��NEXT��FREELISTS��ָ����ֵ��
+    一旦你定义好了tablespace，那么表和索引就能够使用各种方法很容易地被移动到新的tablespace里，带有ASSM的本地管理tablespace会略掉任何为PCTUSED、NEXT和FREELISTS所指定的值。
 
 
 
-    ������������������䵽���tablespace�Ժ����ڶ��������PCTUSED��ֵ�ᱻ���ԣ���Oracle9i��ʹ��λͼ�������Զ��ع���tablespace�����������freelist��
+    当表格或者索引被分配到这个tablespace以后，用于独立对象的PCTUSED的值会被忽略，而Oracle9i会使用位图数组来自动地管理tablespace里表和索引的freelist。
 
 
 
-    ������LMT��tablespace�ڲ������ı�����������ԣ����NEXT��չ�Ӿ��ǹ�ʱ�ģ���Ϊ�ɱ��ع�����tablespace��������ǡ����ǣ�INITIAL������Ȼ����Ҫ�ģ���ΪOracle��������ǰ֪����ʼ������صĴ�С������ASSM���ԣ�INITIAL��С��ֵ�������顣
+    对于在LMT的tablespace内部创建的表格和索引而言，这个NEXT扩展子句是过时的，因为由本地管理的tablespace会管理它们。但是，INITIAL参数仍然是需要的，因为Oracle不可能提前知道初始表格加载的大小。对于ASSM而言，INITIAL最小的值是三个块。
 
 
 
-�µĹ�������(ASSM)��λͼ�����ٻ����ÿ�����䵽����Ŀ飬ÿ�����ж���ʣ��ռ����λͼ��״̬��ȷ������>75%,50%-75%,25%-50%��<25%��Ҳ����˵λͼ��ʵ�������ĸ�״̬λ��������ǰ��pctused��ʲôʱ������ø����ݿ������趨��pctfree��ȷ����
+新的管理机制(ASSM)用位图来跟踪或管理每个分配到对象的块，每个块有多少剩余空间根据位图的状态来确定，如>75%,50%-75%,25%-50%和<25%，也就是说位图其实采用了四个状态位来代替以前的pctused，什么时候该利用该数据块则由设定的pctfree来确定。
 
 
 
-    ʹ��ASSM��һ���޴������ǣ�λͼfree list(MSSM)�϶��ܹ����Ỻ����æ�ȴ���buffer busy wait���ĸ��������������Oracle9i��ǰ�İ汾������һ�����ص����⡣
+    使用ASSM的一个巨大优势是，位图free list(MSSM)肯定能够减轻缓冲区忙等待（buffer busy wait）的负担，这个问题在Oracle9i以前的版本里曾是一个严重的问题。
 
 
 
 
 
-����Oracle ���ռ�ĸ���˵�����ο���
+关于Oracle 表空间的更多说明，参考：
 
-Oracle �Զ��οռ����(ASSM:auto segment space management)
+Oracle 自动段空间管理(ASSM:auto segment space management)
 
 http://blog.csdn.net/tianlesoftware/article/details/4958989
 
@@ -21495,7 +21495,7 @@ http://blog.csdn.net/tianlesoftware/article/details/4958989
 
 
 
-�������̶��ǳ���DBMS_SPACE����Oracle 11gR2 �ٷ��ĵ��е�˵�����ο��������ӣ�
+几个过程都是出自DBMS_SPACE包，Oracle 11gR2 官方文档中的说明，参考如下链接：
 
 http://docs.oracle.com/cd/E11882_01/appdev.112/e25788/d_space.htm
 
@@ -21505,12 +21505,12 @@ http://docs.oracle.com/cd/E11882_01/appdev.112/e25788/d_space.htm
 
 
 
-2.2 DBMS_SPACE.UNUSED_SPACE ����
+2.2 DBMS_SPACE.UNUSED_SPACE 过程
 Returns information about unused space in anobject (table, index, or cluster)
 
 
 
-�﷨��
+语法：
 
 DBMS_SPACE.UNUSED_SPACE (
 
@@ -21538,7 +21538,7 @@ DBMS_SPACE.UNUSED_SPACE (
 
 
 
-����˵����
+参数说明：
 
 Parameter
  Description
@@ -21605,12 +21605,12 @@ This is only used for partitioned tables; the name of subpartition should be use
 
 
 
-2.3. DBMS_SPACE.FREE_BLOCKS ���̣�ֻ��MSSM��
-This procedure returns information  about free blocks in an object (table, index,or cluster).  �ù���ֻ���÷�ASSM �����Ķ���MSSM����
+2.3. DBMS_SPACE.FREE_BLOCKS 过程（只用MSSM）
+This procedure returns information  about free blocks in an object (table, index,or cluster).  该过程只适用非ASSM 管理的对象（MSSM）。
 
 
 
-�÷���
+用法：
 
 DBMS_SPACE.FREE_BLOCKS (
 
@@ -21630,7 +21630,7 @@ DBMS_SPACE.FREE_BLOCKS (
 
 
 
-����˵����
+参数说明：
 
 Parameter
  Description
@@ -21687,10 +21687,10 @@ This is only used for partitioned tables. The name of subpartition should be use
 
 
 
-2.4. DBMS_SPACE.SPACE_USAGE���̣�ֻ��ASSM��
+2.4. DBMS_SPACE.SPACE_USAGE过程（只用ASSM）
 
 
-The first form of the procedure shows the space usage of datablocks under the segment High Water Mark. You cancalculate usagefor LOBs, LOB PARTITIONSand LOB SUBPARTITIONS. This procedure can only be used on tablespaces that arecreated with auto segment space management���ù��̷���ASSM �����Ķ����free blocks��Ϣ��ASSM����. The bitmap blocks, segment header,and extent map blocks are not accounted for by this procedure. Notethat this overload cannot be used on SECUREFILE LOBs.
+The first form of the procedure shows the space usage of datablocks under the segment High Water Mark. You cancalculate usagefor LOBs, LOB PARTITIONSand LOB SUBPARTITIONS. This procedure can only be used on tablespaces that arecreated with auto segment space management（该过程返回ASSM 管理的对象的free blocks信息（ASSM））. The bitmap blocks, segment header,and extent map blocks are not accounted for by this procedure. Notethat this overload cannot be used on SECUREFILE LOBs.
 
 
 
@@ -21698,7 +21698,7 @@ The second formof the procedure returns information about SECUREFILE LOB spaceus
 
 
 
-�﷨��
+语法：
 
 DBMS_SPACE.SPACE_USAGE(
 
@@ -21736,7 +21736,7 @@ DBMS_SPACE.SPACE_USAGE(
 
 
 
-���ߣ�
+或者：
 
 DBMS_SPACE.SPACE_USAGE(
 
@@ -21766,7 +21766,7 @@ DBMS_SPACE.SPACE_USAGE(
 
 
 
-����˵����
+参数说明：
 
 Parameter
  Description
@@ -21873,8 +21873,8 @@ partition_name
 
 
 
-2.5 ANALYZED ����
-��DBMS_SPACE.SPACE_USAGE�ռ���Ϣ֮ǰ������һ��ANALYZED���жϣ���ΪAnalyze ���ռ�������Ϣ����gather_table_stats �򲻻��ռ���
+2.5 ANALYZED 分析
+在DBMS_SPACE.SPACE_USAGE收集信息之前，做了一个ANALYZED的判断，因为Analyze 会收集以下信息，而gather_table_stats 则不会收集：
 
 EMPTY_BLOCKS,AVG_SPACE,CHAIN_CNT
 
@@ -22368,19 +22368,19 @@ exec show_space ('EMP33' , 'MOID');
 
 
 
-F5 v11 tmsh������������ֲ�
-���ࣺ ���޷��� �Ķ�����42 ״̬�������
-�����汾[1]  ����[0] �������
-V11 TMSH�����в����ֲ�#
-�鿴��ǰϵͳ���ã�#
+F5 v11 tmsh常用命令操作手册
+分类： 暂无分类 阅读量：42 状态：已审核
+词条版本[1]  附件[0] 引用情况
+V11 TMSH命令行操作手册#
+查看当前系统配置：#
 # show running-config
 # show running-config /net interface
 # show running-config /ltm pool
-����base���ݣ�#
-#save /sys base-configload base���ݣ�#
-#load /sys base-config����ϵͳ���ã�#
-#save /sys configloadϵͳ���ã�#
-#load /sys config�鿴����������Ϣ��#
+保存base内容：#
+#save /sys base-configload base内容：#
+#load /sys base-config保存系统配置：#
+#save /sys configload系统配置：#
+#load /sys config查看网络配置信息：#
 #list /net vlan
 #list /net interface
 #list /net arp
@@ -22388,106 +22388,106 @@ V11 TMSH�����в����ֲ�#
 #list /net self
 #list /net self-allow
 #list /net trunk
-�鿴POOL������Ϣ��#
+查看POOL配置信息：#
 # list /ltm pool
 # list /ltm pool [http-pool]
-�鿴vs������Ϣ��#
+查看vs配置信息：#
 # list /ltm virtual
 # list /ltm virtual-address
-�鿴/sys������Ϣ��#
+查看/sys配置信息：#
 # list /sys db
 # list /sys httpd allow
-# list /sys management-ip���鿴�豸�����ڵ�ַ��
-# list /sys management-route���鿴�豸������·�ɣ�
-# list /sys ntp���鿴ntp������Ϣ��
-# list /sys provision���鿴�豸ģ�鼤��״̬��
-# list /sys service���鿴������״̬��
-# list /sys snmp���鿴snmp������Ϣ��
-# list /sys syslog���鿴syslog������Ϣ��
-show /net���
-# show /cli history���鿴��������ʷ��¼��
-# show /net arp���鿴arpӳ����Ϣ��
-# show /net interface���鿴�����ӿ�ͳ��������Ϣ��
-# show /net route���鿴·�ɱ���
-# show /net vlan���鿴����vlan����ͳ����Ϣ��
+# list /sys management-ip（查看设备管理口地址）
+# list /sys management-route（查看设备管理口路由）
+# list /sys ntp（查看ntp配置信息）
+# list /sys provision（查看设备模块激活状态）
+# list /sys service（查看服务开启状态）
+# list /sys snmp（查看snmp配置信息）
+# list /sys syslog（查看syslog配置信息）
+show /net命令：
+# show /cli history（查看命令行历史记录）
+# show /net arp（查看arp映射信息）
+# show /net interface（查看各个接口统计流量信息）
+# show /net route（查看路由表）
+# show /net vlan（查看各个vlan流量统计信息）
 # show /net vlan-group
-# show /net trunk���鿴trunk����ͳ����Ϣ��
-show /sys���
-# show /sys config-sync���鿴ϵͳ����ͬ��״̬��Ϣ��
+# show /net trunk（查看trunk流量统计信息）
+show /sys命令：
+# show /sys config-sync（查看系统配置同步状态信息）
 # show /sys connection
-# show /sys console���鿴ϵͳ���ڵ������ʣ�
+# show /sys console（查看系统串口调试速率）
 # show /sys cpu
-# show /sys hardware���鿴ϵͳӲ����Ϣ��
+# show /sys hardware（查看系统硬件信息）
 # show /sys host-info
-# show /sys raid���鿴Ӳ��raid״̬��
-# show /sys performance system���鿴ϵͳ�������ܣ�
-# show /sys software���鿴ϵͳ����������Ϣ��
-# show /sys ip-address���鿴ϵͳip��ַ���������е�vs��pool��ַ��Ϣ��
-# show /sys ip-address all-properties���鿴ϵͳ��ַ��Ϣ��������ַ���ԣ�
-# show /sys license���鿴ϵͳlicenseժҪ��Ϣ��
+# show /sys raid（查看硬盘raid状态）
+# show /sys performance system（查看系统总体性能）
+# show /sys software（查看系统总体软件信息）
+# show /sys ip-address（查看系统ip地址，包括所有的vs、pool地址信息）
+# show /sys ip-address all-properties（查看系统地址信息，包括地址属性）
+# show /sys license（查看系统license摘要信息）
 # show /sys license detail
-# show /sys log ltm���鿴ϵͳlog��Ϣ��
-# show /sys mac-address���鿴ϵͳ�����е�mac��ַ��Ϣ��
-# show /sys mcp-state���鿴mcp����״̬��
-# show /sys memory���鿴ϵͳ�ڴ�ͳ����Ϣ��
-# show /sys ucs���鿴�����ucs�ļ����ƣ�
-# show /sys version���鿴ϵͳ�����汾��Ϣ��
-���������ʹ�ã�#
+# show /sys log ltm（查看系统log信息）
+# show /sys mac-address（查看系统中所有的mac地址信息）
+# show /sys mcp-state（查看mcp运行状态）
+# show /sys memory（查看系统内存统计信息）
+# show /sys ucs（查看保存的ucs文件名称）
+# show /sys version（查看系统软件版本信息）
+帮助命令的使用：#
 # help /net
 # help /net vlan
-��ݼ���ʹ�ã�#
-Ctrl   C��������ǰ������������
-Ctrl   A��������Ƶ��ʼ��
-Ctrl   E��������Ƶ����
-Ctrl   G���������������������ַ�����
-Ctrl   L�����������Ļ��ʾ��
-Ctrl   N����ʾ��һ����������
-Ctrl   P����ʾ��һ����������
-��tmshģʽ��ʹ����صĲ������#
-# run util ping 1.1.1.1��ִ��ping������
-# run util tcpdump��ִ��tcpdumpץ��������
-# run util tracepath 1.1.1.1��ִ��tracepath������
-# run util traceroute 1.1.1.1��ִ��traceroute������
-������ɾ��pool��#
+快捷键的使用：#
+Ctrl   C（放弃当前正在输入的命令）
+Ctrl   A（将光标移到最开始）
+Ctrl   E（将光标移到最后）
+Ctrl   G（清除正在输入的命令行字符串）
+Ctrl   L（清除所有屏幕显示）
+Ctrl   N（显示下一个输入的命令）
+Ctrl   P（显示上一次输入的命令）
+在tmsh模式下使用相关的测试命令：#
+# run util ping 1.1.1.1（执行ping操作）
+# run util tcpdump（执行tcpdump抓包分析）
+# run util tracepath 1.1.1.1（执行tracepath操作）
+# run util traceroute 1.1.1.1（执行traceroute操作）
+创建和删除pool：#
 # create /ltm pool [abc]
 # delete /ltm pool [abc]
-�޸�irules���ݣ�#
+修改irules内容：#
 # edit /ltm rule [replace-302]
-��װ����ϵͳ��hotfix������#
+安装操作系统和hotfix补丁：#
 #install sys software image BIGIP-10.0.0.5376.0.iso volume HD1.2
 #install hotfix Hotfix-BIGIP-9.6.1-824.0-HF3.im volume HD1.1
-����pool��vs��ͳ����Ϣ��#
+重置pool、vs的统计信息：#
 # reset-stats /ltm pool
 # reset-stats /ltm pool [http-pool]
 # reset-stats /ltm virtual
 # reset-stats /ltm virtual [vs-test-80]
-������ֹͣ������ϵͳ��ĳ������#
+启动、停止、重启系统中某个服务：#
 # start /sys service [snmpd]
 # stop /sys service [snmpd]
 # restart /sys service [snmpd]
-������ɾ��partition������#
+建立、删除partition分区：#
 # create /auth partition [aa]
 # delete /auth partition [aa]
-�鿴radius���������ã�#
+查看radius服务器配置：#
 # list /auth radius-server
-�����ɾ��������#
+定义和删除别名：#
 # create /cli alias [xx] command ["save /sys config"]
 # delete /cli alias [xx]
-����pool������pool-member��#
-# create /ltm pool [abc] members add { 9.9.9.9:http 7.7.7.7:http } �Դ�����pool���ӽ�����鷽ʽ��#
+创建pool并添加pool-member：#
+# create /ltm pool [abc] members add { 9.9.9.9:http 7.7.7.7:http } 对创建的pool增加健康检查方式：#
 # modify /ltm pool [abc] monitor http
 # modify /ltm pool [abc] monitor http and https
 # modify /ltm pool [abc] monitor none
-����vs��ʹ��Դ��ַ�Ự���֣���ָ��ȱʡ��pool#
+创建vs，使用源地址会话保持，并指定缺省的pool#
 # create /ltm virtual abcd { destination 6.6.6.6:http persist replace-all-with { source_addr }  pool abc }
-����radius��������#
-# create /auth radius-server [xx] secret [cisco] server 5.5.5.5�����Զ����monitor:#
-# create /ltm monitor gateway-icmp [xx] defaults-from gateway_icmp�������ر�����ӿڣ�#
+配置radius服务器：#
+# create /auth radius-server [xx] secret [cisco] server 5.5.5.5创建自定义的monitor:#
+# create /ltm monitor gateway-icmp [xx] defaults-from gateway_icmp开启、关闭网络接口：#
 # modify /net interface [1.1] enabled
-# modify /net interface [1.1] disabled�鿴stp��Ϣ��#
-# sh running-config /net stp����vlan��#
+# modify /net interface [1.1] disabled查看stp信息：#
+# sh running-config /net stp创建vlan：#
 # create /net vlan [xx] interfaces add { 1.1 }
-Search ����#
+Search 帮助#
 root@test(Active)(/Common)(tmos)# help search automap
 apm policy agent route-domain-selection
 ltm snat
@@ -22496,111 +22496,111 @@ sys application template
 root@test(Active)(/Common)(tmos)#
 
 
-Instance��enable/disable״̬��ؽű���
-      ��10.11.77.41�ϵ�/wls/apache/appsystems/agentconsole/script/cron/monitorInstanceIfDisable.pl
-      ��ÿ10����ִ��һ�Σ��쳣��־��/wls/apache/appsystems/agentconsole/log/cron/monitorInstanceIfDisable/cron.`date +\%Y\%m\%d`.log
+Instance的enable/disable状态监控脚本是
+      在10.11.77.41上的/wls/apache/appsystems/agentconsole/script/cron/monitorInstanceIfDisable.pl
+      它每10分钟执行一次，异常日志在/wls/apache/appsystems/agentconsole/log/cron/monitorInstanceIfDisable/cron.`date +\%Y\%m\%d`.log
 
-���ص�ip��Χ�ڽű������һ���ж��壬���磺
+其监控的ip范围在脚本中最后一行中定义，例如：
       $monitor->monitorInstanceIfDisable('cmdline', {filter => '^10\.( :12|33)\.( :6[4,5,6,7]|8[0,1,2,3,8,9]|9[0,1,6,7,8,9])\.'});
 
-��������������������ʱ��ֻ�޸Ľű��б����������ʽ���ּ��ɣ��޸���wls81�û�����
-�޸�ʱҪ���أ��ٺ�
+如果遇到了新增监控网段时，只修改脚本中标红的正则表达式部分即可，修改用wls81用户进行
+修改时要慎重，嘿嘿
 
-��˵��һ�´��������˼
+现说明一下此正则的意思
 ^10\.( :12|33)\.( :6[4,5,6,7]|8[0,1,2,3,8,9]|9[0,1,6,7,8,9])\.
-����ʾip��Ҫ����һ�������Żᱻ���
-��һ������10
-�ڶ�������12��33
-����������64��65��66��67��80��81��82��83��88��89��90��91��96��97��98��99
-���Ĳ�������
+它表示ip需要满足一下条件才会被监控
+第一部分是10
+第二部分是12或33
+第三部分是64、65、66、67或80、81、82、83、88、89或90、91、96、97、98、99
+第四部分随意
 
-����޸�ʱû���տ�������^_^
-
-
+如果修改时没把握可以找我^_^
 
 
-Drop user ���� ORA-00600 5463 ��ORA-00600 ktecgeb-1��
 
 
-һ������
+Drop user 触发 ORA-00600 5463 和ORA-00600 ktecgeb-1错
 
 
-�Ƴ���(Williams.huang @oracle.com)
+一、作者
 
 
-��������ʱ��
+黄陈旭(Williams.huang @oracle.com)
 
 
-�״η���ʱ�䣺2012��05��12�� ������
+二、更新时间
 
 
-�����޶�ʱ�䣺2012��05��14�� ����һ
+首次发布时间：2012年05月12日 星期六
 
 
-2012��05��21�� ����һ
+历次修订时间：2012年05月14日 星期一
 
 
-��������Ӱ�췶Χ
+2012年05月21日 星期一
 
 
-��1����Ʒ�����ݿ⡢Golden Gate��Quest �ȣ��汾
+三、问题影响范围
 
 
- Oracle  9I����
+（1）产品（数据库、Golden Gate、Quest 等）版本
 
 
- ��2��OSƽ̨�Ͱ汾
+ Oracle  9I以上
 
 
- ���ޡ�
+ （2）OS平台和版本
 
 
-�ġ���������
+ 不限。
 
 
-Drop user username cascade��ʱ�򣬱�ORA-00600 5463��ORA-00600 ktecgeb-1���󣬽���instance crash
+四、问题现象
 
 
-�塢ԭ�����
+Drop user username cascade的时候，报ORA-00600 5463和ORA-00600 ktecgeb-1错误，接着instance crash
 
 
-ԭ��������ɾ���û����Ȱ��û�����Ķ���ȫ��ɾ����SmonҪ������ʱ�����ʱ����Ҫȥ���ұ��ռ��bitmap index,�����������bitmap index�𻵣�������Smon�޷������ʱ����Smon������100��֮��ʵ������ֹ������˼·���£�
+五、原因分析
 
 
-1������event 10061��ֹSmon����ʱ�����������
+原因是由于删除用户会先把用户下面的对象全部删除，Smon要清理临时对象的时候，需要去查找表空间的bitmap index,但是由于这个bitmap index损坏，导致了Smon无法清查临时对象，Smon重试了100次之后，实例被终止。处理思路如下：
 
 
-2�����������Ҫ���Ķ���
+1、设置event 10061阻止Smon对临时对象进行清理
 
 
-3��ʹ��dbms_space_admin.segment_corrupt����������Ϊcorrupt
+2、查出所有需要清查的对象
 
 
-4��ʹ��dbms_space_admin.segment_drop_corrupt���������
+3、使用dbms_space_admin.segment_corrupt将对象设置为corrupt
 
 
-5��ʹ��dbms_space_admin.tablespace_rebuild_bitmaps�ؽ����ռ��bitmap index
+4、使用dbms_space_admin.segment_drop_corrupt将对象清除
 
 
-6���������ݿ⣬��event 10061ȥ��
+5、使用dbms_space_admin.tablespace_rebuild_bitmaps重建表空间的bitmap index
 
 
-7��ʹ��dbms_space_admin.tablespace_verify�����ռ��Ƿ�����
+6、重启数据库，将event 10061去掉
 
 
-�����������
+7、使用dbms_space_admin.tablespace_verify检查表空间是否正常
 
 
-�����û�����Ķ�����28325����������ĳЩ���������⣬��drop user������Щ�����ʱ����佫��ʧ�ܣ����������ṩ��˼·������Ĳ����������£�
+六、解决方法
 
 
-1���������ݿ⣬����event = '10061 trace name context forever, level 10'
+由于用户下面的对象有28325个，其中有某些对象有问题，当drop user遇到这些对象的时候，语句将会失败，按照上面提供的思路，具体的操作步骤如下：
 
 
-2��ִ��drop user username cascade�������м���ж϶�Σ�����������event 10061�����ݿ�crash��ֻҪ����ִ��drop user�������У�ֱ���û�ɾ����
+1、重启数据库，设置event = '10061 trace name context forever, level 10'
 
 
-3�����������Ķ���
+2、执行drop user username cascade操作，中间会中断多次，由于设置了event 10061，数据库crash，只要重新执行drop user操作就行，直到用户删除。
+
+
+3、检查有问题的对象：
 
 
 select owner,segment_name, segment_type ,tablespace_name
@@ -22609,43 +22609,43 @@ select owner,segment_name, segment_type ,tablespace_name
 from dba_segments
 
 
-where segment_type=��TEMPORARY��;
+where segment_type=’TEMPORARY’;
 
 
-4���������ʶΪcorrupt
+4、将对象标识为corrupt
 
 
-�磺exec dbms_space_admin.segment_corrupt('TABLESPACE_NAME',5,237068) ;
+如：exec dbms_space_admin.segment_corrupt('TABLESPACE_NAME',5,237068) ;
 
 
-5��������ɾ��
+5、将对象删除
 
 
-�磺exec dbms_space_admin.segment_drop_corrupt(�� TABLESPACE_NAME ��,49,1183372) ;
+如：exec dbms_space_admin.segment_drop_corrupt(‘ TABLESPACE_NAME ‘,49,1183372) ;
 
 
-6���ؽ����ռ��bitmap index
+6、重建表空间的bitmap index
 
 
 exec dbms_space_admin.tablespace_rebuild_bitmaps('TABLESPACE_NAME');
 
 
-7���������ݿ⣬��event 10061ȥ��
+7、重启数据库，将event 10061去除
 
 
-8��������ռ��Ƿ�����
+8、较验表空间是否正常
 
 
 exec dbms_space_admin.tablespace_verify ('TABLESPACE_NAME');
 
 
-�ߡ��ο��ĵ�
+七、参考文档
 
 
 ORA-600 [5463] While SMON is Doing Temporary Segment Drop ID 422039.1
 
 
-�ˡ��ؼ���
+八、关键字
 
 
 ora-00600 5463
@@ -22657,143 +22657,143 @@ ora-00600  ktecgeb-1
 Drop user
 
 
-��β�ѯһ�����ռ�������Щ����
+如何查询一个表空间上有哪些对象？
 
 select * from dba_segments a where a.tablespace_name='XXX'
 
-Ǩ����������һ�����ռ䣻
+迁移索引到另一个表空间；
 alter index GBSMAN.IDX_QDSI_POL_RE_CODE_ID rebuild online tablespace  HSCQDDATA;
 
-Ǩ�Ʊ�����һ�����ռ䡣
-alter table test move tablespace example;  --�ѱ���user�ռ�ת�Ƶ�example�ռ���
+迁移表到另一个表空间。
+alter table test move tablespace example;  --把表从user空间转移到example空间上
 
 
 su: warning: cannot change directory to /paic/mysql: Permission denied
-su: /bin/bash: Permission denied�������ɻ�
-ͨ��star������������������
+su: /bin/bash: Permission denied带来的疑惑
+通过star命令，看到了问题根本，
 [root@localhost ~]#stat /
-������£���Ϊ��ls�ǿ������ġ�
-File: ��/��
-Size: 1024            Blocks: 2          IO Block: 1024   Ŀ¼
+输出如下：因为你ls是看不到的。
+File: “/”
+Size: 1024            Blocks: 2          IO Block: 1024   目录
 Device: 803h/2051d      Inode: 2           Links: 22
 Access: (0666/drw-rw-rw-) Uid: (    0/    root)   Gid: (    0/    root)
 Access: 2007-12-01 22:28:48.000000000 +0800
 Modify: 2007-12-01 22:28:34.000000000 +0800
 Change: 2007-12-01 23:17:35.000000000 +0800
 
-��������ˣ������Ȩ���Ǵ���ģ�XȨ�޵Ķ�ʧ��ɵġ�
+问题出来了，这里的权限是错误的，X权限的丢失造成的。
 
 [root@localhost ~]#chmod 755 /
 
 
-�޸ĺ�,������ʧ��
+修改后,问题消失。
 
-������������ķ�����
-��һ�֣�chmod 666 /�����Ե��¡�
+产生上述问题的方法：
+第一种，chmod 666 /，可以导致。
 
-���ߣ�
-�ڶ��֣�chmod 700 /lib/ld-xxxx.so��Ҳ���Ե���suʧ�ܡ�
-
-
+或者，
+第二种，chmod 700 /lib/ld-xxxx.so，也可以导致su失败。
 
 
 
 
-��ȫ�����޸�Mysql���ݿ�����5�ַ���
 
-���ߣ� ���壺[���� ��С] ���ͣ�ת��
-mysql��������������ݿ⣿��ƪ������Ҫ�����˰�ȫ�����޸�Mysql���ݿ�����5�ַ���,��Ҫ�����ѿ��Բο���
+
+安全快速修改Mysql数据库名的5种方法
+
+作者： 字体：[增加 减小] 类型：转载
+mysql中如何重命名数据库？这篇文章主要介绍了安全快速修改Mysql数据库名的5种方法,需要的朋友可以参考下
 
 
 
 1. RENAME DATABASE db_name TO new_db_name
 
-�����������﷨��mysql 5.1.7�б����ӽ���������5.1.23��ȥ���ˡ�
-��˵�п��ܶ�ʧ���ݡ����ǲ�Ҫ�õĺá�
-����� http://dev.mysql.com/doc/refman/5.1/en/rename-database.html
-2.������б�����MyISAM���͵Ļ������Ը��ļ��е�����
-�ر�mysqld
-��dataĿ¼�е�db_nameĿ¼������Ϊnew_db_name
-����mysqld
-3.���������еı�
-���ƴ��� ��������:
+这个。。这个语法在mysql 5.1.7中被添加进来，到了5.1.23又去掉了。
+据说有可能丢失数据。还是不要用的好。
+详见： http://dev.mysql.com/doc/refman/5.1/en/rename-database.html
+2.如果所有表都是MyISAM类型的话，可以改文件夹的名字
+关闭mysqld
+把data目录中的db_name目录重命名为new_db_name
+开启mysqld
+3.重命名所有的表
+复制代码 代码如下:
 CREATE DATABASE new_db_name;
 RENAME TABLE db_name.table1 TO new_db_name.table1,
 db_name.table2 TO new_db_name.table2;
 DROP DATABASE db_name;
-4. mysqldump���������ٵ���
-���ƴ��� ��������:
+4. mysqldump导出数据再导入
+复制代码 代码如下:
 mysqldump -uxxxx -pxxxx -h xxxx db_name > db_name_dump.SQL
-mysql -uxxxx -pxxxx -h xxxx -e ��CREATE DATABASE new_db_name��
+mysql -uxxxx -pxxxx -h xxxx -e “CREATE DATABASE new_db_name”
 mysql -uxxxx -pxxxx -h xxxx new_db_name < db_name_dump.SQL
-mysql -uxxxx -pxxxx -h xxxx -e ��DROP DATABASE db_name��
-5.ʹ��shell�ű����������еı�
+mysql -uxxxx -pxxxx -h xxxx -e “DROP DATABASE db_name”
+5.使用shell脚本重命名所有的表
 
-���ƴ��� ��������:
+复制代码 代码如下:
 #!/bin/bash
-mysqlconn=��mysql -u xxxx -pxxxx -S /var/lib/mysql/mysql.sock -h localhost��
-olddb=��db_name��
-newdb=��new_db_name��
-#$mysqlconn -e ��CREATE DATABASE $newdb��
-params=$($mysqlconn -N -e ��SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE table_schema='$olddb'��)
+mysqlconn=”mysql -u xxxx -pxxxx -S /var/lib/mysql/mysql.sock -h localhost”
+olddb=”db_name”
+newdb=”new_db_name”
+#$mysqlconn -e “CREATE DATABASE $newdb”
+params=$($mysqlconn -N -e “SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE table_schema='$olddb'”)
 for name in $params; do
-$mysqlconn -e ��RENAME TABLE $olddb.$name to $newdb.$name��;
+$mysqlconn -e “RENAME TABLE $olddb.$name to $newdb.$name”;
 done;
-#$mysqlconn -e ��DROP DATABASE $olddb��
-���Ƿ���3���Ż��档
+#$mysqlconn -e “DROP DATABASE $olddb”
+就是方法3的优化版。
 
-С��ע��������Щ��������Σ�յģ���������ִ�в���ǰ������������ݿ⣡
+小编注：以上这些操作都是危险的，所以请在执行操作前，备份你的数据库！
 
 
 
-infobright��
-mysqldump����mysql schema
-infobright��
+infobright：
+mysqldump导出mysql schema
+infobright：
 mysqldump -uroot -p'123456' dopool_serv_logs --lock-tables=false -E -R -q -d > /tmp/merge_dopool_serv_logs.sql
-��Ϊinfobright��֧��lock table�������--lock-tables=false
+因为infobright不支持lock table命令，所以--lock-tables=false
 mysqldump -uroot -p'123456' dopool_serv_logs --opt  -E -R -q -d > /tmp/merge_dopool_serv_logs.sql
 
--E ����events
--R �����洢���̺��Զ��庯��
--q --quick ֱ��д�ļ������Ỻ��
--d --no-data ����������
+-E 导出events
+-R 导出存储过程和自定义函数
+-q --quick 直接写文件，不会缓冲
+-d --no-data 不导出数据
 #Mysql
 
 
-�ܼ򵥵ķ�������my.cnf������
+很简单的方法：在my.cnf中添加
 [mysql]
 default-character-set=utf8
 
-�������ϲ鵽������/etc/my.cnf�м���
+我在网上查到的是在/etc/my.cnf中加入
 sql_mode=''
 character-set-server=utf8
 collation-server=utf8_general_ci
 init_connect="SET NAMES 'utf8'"
 
-������һ�£�û�����ã�����
+我用了一下，没起作用！！！
 
-Ŀǰÿ�β�ѯ��sqlǰ�����һ��set names utf8;
-
-
-����~ �� [client] �� ��default-character-set=utf8 Ҳok
+目前每次查询。sql前必须加一个set names utf8;
 
 
+正解~ 在 [client] 段 加default-character-set=utf8 也ok
 
-�޸�mysqlĬ���ַ����ķ���
-2010-10-09 11:12 ���� ������ �ֺţ�T | T
-һ���ղأ���ʱ�鿴���������ѣ�
-mysqlĬ���ַ������޸ķ���δ�����˶��ᣬ���ľͽ���������������޸�mysqlĬ���ַ����ķ����������ο�ѧϰ��
-AD��WOT2014���û���ǩϵͳ���û����ݻ���Ӫ��ѵר��
-mysqlĬ���ַ����ܷ�����޸��أ����ǿ϶��ģ�����ͽ����������޸�mysqlĬ���ַ����ķ�����ϣ������ѧϰmysqlĬ���ַ����������������ϡ�
 
-(1) ��򵥵��޸ķ����������޸�mysql��my.ini�ļ��е��ַ�����ֵ��
 
-�� default-character-set = utf8
+修改mysql默认字符集的方法
+2010-10-09 11:12 佚名 互联网 字号：T | T
+一键收藏，随时查看，分享好友！
+mysql默认字符集的修改方法未必人人都会，下文就介绍了两个最常见的修改mysql默认字符集的方法，供您参考学习。
+AD：WOT2014：用户标签系统与用户数据化运营培训专场
+mysql默认字符集能否进行修改呢？答案是肯定的，下面就将教您两种修改mysql默认字符集的方法，希望对您学习mysql默认字符集方面能有所启迪。
+
+(1) 最简单的修改方法，就是修改mysql的my.ini文件中的字符集键值，
+
+如 default-character-set = utf8
 character_set_server = utf8
 
-�޸��������mysql�ķ���service mysql restart
+修改完后，重启mysql的服务，service mysql restart
 
-ʹ�� mysql> SHOW VARIABLES LIKE 'character%';�鿴���������ݿ������Ѹĳ�utf8
+使用 mysql> SHOW VARIABLES LIKE 'character%';查看，发现数据库编码均已改成utf8
 
 +--------------------------+---------------------------------+
 | Variable_name | Value |
@@ -22807,7 +22807,7 @@ character_set_server = utf8
 | character_set_system | utf8 |
 | character_sets_dir | D:"mysql-5.0.37"share"charsets" |
 +--------------------------+---------------------------------+
-(2) ����һ���޸�mysqlĬ���ַ����ķ���������ʹ��mysql������
+(2) 还有一种修改mysql默认字符集的方法，就是使用mysql的命令
 
 mysql> SET character_set_client = utf8 ;
 mysql> SET character_set_connection = utf8 ;
@@ -22818,10 +22818,10 @@ mysql> SET character_set_server = utf8 ;
 mysql> SET collation_connection = utf8 ;
 mysql> SET collation_database = utf8 ;
 mysql> SET collation_server = utf8 ;
-һ����������˱���mysqlĬ���ַ���Ϊutf8����ͨ��UTF-8���뷢�Ͳ�ѯ����ᷢ�ִ������ݿ����Ȼ�����롣����ͳ������connection���Ӳ��ϡ�����������ڷ��Ͳ�ѯǰִ��һ��������䣺
+一般就算设置了表的mysql默认字符集为utf8并且通过UTF-8编码发送查询，你会发现存入数据库的仍然是乱码。问题就出在这个connection连接层上。解决方法是在发送查询前执行一下下面这句：
 
 SET NAMES 'utf8';
-���൱�����������ָ�
+它相当于下面的三句指令：
 
 SET character_set_client = utf8;
 SET character_set_results = utf8;
@@ -23388,62 +23388,62 @@ tmpfs                 7.8G     0  7.8G   0% /dev/shm
 
 
 
-����ǰ�������ıʼǣ�ϣ����lz���ã�
-1. �������ݿ���л���
+我以前测试做的笔记，希望对lz有用：
+1. 主备数据库的切换：
 
-  �����ѯ
+  主库查询
   select switchover_status from v$database ;
 
-  = to_standby �����л�
+  = to_standby 可以切换
   = session active
 
-2.�������ݿ�ת��Ϊ���⡣
+2.将主数据库转换为备库。
   alter database commit to switchover to physical standby ;
 
-  ��= session active ʱ��
+  当= session active 时：
 
   alter database commit to switchover to physical standby with session shutdown ;
 
-3.�ر����⣬�Ա���������
+3.关闭主库，以备库启动：
   shutdown immediate ;
   startup mount ;
 
-4. �ڱ����ϲ�ѯ��
+4. 在备库上查询：
   select switchover_status from v$database ;
-  = to_primary  �����л�Ϊ���⡣
-  = not allowed ��ʾ�����л���
+  = to_primary  可以切换为主库。
+  = not allowed 表示不能切换。
   = session shutdown
 
-5. ������ת��Ϊ����:
+5. 将备库转换为主库:
 
   alter database commit to switchover to primary ;
 
-  ��= session active ʱ��
+  当= session active 时：
 
   alter database commit to switchover to primary  with session shutdown ;
 
-6.�رձ��⣬������������
+6.关闭备库，以主库启动：
   shutdown immediate ;
   startup mount ;
 
 
 
-ͨ�������л�ʵ�ֽ�ɫת����
+通过故障切换实现角色转换：
 
-1����ѯ���û����ɵ���־��
+1。查询获得没有完成的日志：
 select * from v$archive_gap
 
-2���ڱ������ݿ��϶Թ鵵��־ע�᣺
+2。在备用数据库上对归档日志注册：
 
 alter datasbe register physical logfile 'foo.arc';
 
-3. �ڱ������ݿ���ͨ����finish �ؼ��ֵĹ����ָ�������ִ�лָ���
-����б����������ӣ����Ҵ��ڼ���״̬��
+3. 在备用数据库上通过带finish 关键字的管理恢复命令来执行恢复：
+如果有备用重做日子，并且处于激活状态：
 alter database recover managed standby database finish ;
-���û�б����������ӣ�����û�д��ڼ���״̬��
+如果没有备用重做日子，或者没有处于激活状态：
 alter database recover managed standby database finish skip standby logfile  ;
 
-4. �л��������ݿ�Ϊ�����ݿ�
+4. 切换备用数据库为主数据库
 alter database commit to switchover to primary ;
 
 
@@ -23468,7 +23468,7 @@ BEGIN
 
    IF (n_hour >= 8 AND n_hour <= 20 AND v_count > 0)
    THEN
-      RAISE_APPLICATION_ERROR (-20001, '8��-21�㲻����������!');
+      RAISE_APPLICATION_ERROR (-20001, '8点-21点不允许做导出!');
    END IF;
 END;
 
@@ -23511,29 +23511,29 @@ END;
 
 
 
-oracle����
-���
-�߼����У�Advanced Queue�����AQ��:
-�߼�������oracle��һ�ָ߼�Ӧ��,����Ҫ�Ǳ��ʹ�����֮�����϶��ɵ�һ��Ӧ�á�����Ҫ�������ڸ�Ӧ��ϵͳ�н�����Ϣ���ݡ�
-Ŀ�ģ�
-���ø߼�������ʵ����Ϣ��������ͬ���ݿ�֮����첽���䣬����ҵ��ϵͳ�ĸ�������
-����������
-DB1��Oracle 10g Version 10.2.0.4.0
-DB2��Oracle 10g Version 10.2.0.4.0
-������ɣ�
-���ͷ���DB1����
-Queue type������������Ϣ������
-Queue table����Ϣ���͵�����
-Queue������
-Subscriber�������ߣ�ͬһ�����п�����n��������
-Propagation����������
-���շ���DB2����
-Queue type������������Ϣ������
-Queue table����Ϣ���յ�����
-Queue������
-���ͷ���DB1�����룺
-1.����aq�û�����Ȩ
---sys�û���������������Ϊaq�û�
+oracle队列
+概念：
+高级队列（Advanced Queue，简称AQ）:
+高级队列是oracle的一种高级应用,它主要是表和触发器之间的组合而成的一种应用。其主要作用是在各应用系统中进行消息传递。
+目的：
+利用高级队列来实现消息在两个不同数据库之间的异步传输，满足业务系统的改造需求。
+基本环境：
+DB1：Oracle 10g Version 10.2.0.4.0
+DB2：Oracle 10g Version 10.2.0.4.0
+基本组成：
+发送方（DB1）：
+Queue type：决定发送消息的类型
+Queue table：消息发送的载体
+Queue：队列
+Subscriber：订购者，同一个队列可以有n个订购者
+Propagation：传播进程
+接收方（DB2）：
+Queue type：决定接收消息的类型
+Queue table：消息接收的载体
+Queue：队列
+发送方（DB1）代码：
+1.创建aq用户并赋权
+--sys用户操作，其他操作为aq用户
 create user aq identified by aq;
 grant connect,resource,aq_administrator_role,unlimited tablespace to aq;
 grant create database link to aq;
@@ -23552,40 +23552,40 @@ dbms_aqadm.revoke_system_privilege('DEQUEUE_ANY', 'aq');
 end;
 /
 
-2.����db link
+2.创建db link
 create database link db2.LK connect to AQ using db2;
-ȷ��dblink��Ч��
-3.����type
+确认dblink有效。
+3.创建type
 CREATE type aq.Message_typ as object (
 subject      VARCHAR2(30),
 text         VARCHAR2(80));
-�ɸ����Լ���������������ֶΡ�
-4.����queue
+可根据自己的需求决定具体字段。
+4.创建queue
 DECLARE
    subscriber sys.aq$_agent;
 BEGIN
-   --����type����queue table
+   --根据type创建queue table
    DBMS_AQADM.CREATE_QUEUE_TABLE(queue_table         => 'aq.que_shenshou_tab',
                                  multiple_consumers => TRUE,
                                  queue_payload_type => 'aq.Message_typ');
-   --����queue table����queue
+   --根据queue table创建queue
    DBMS_AQADM.CREATE_QUEUE(queue_name   => 'aq.que_shenshou',
                            queue_table => 'aq.que_shenshou_tab');
-   --��ʼ���queue
+   --开始这个queue
    DBMS_AQADM.START_QUEUE(queue_name => 'aq.que_shenshou');
-   --����һ��subscriber
-   --�����������n��subscriber��ÿ��subscriber�൱��һ��������ͨ��
-   --����shenshou1Ϊconsumer name�����ն�Ҫ���������������������
-   --aq.que_shenshou@db2.LkΪ���նˣ�db2���ϵ�queue����dblink�����
+   --添加一个subscriber
+   --这里可以添加n个subscriber，每个subscriber相当于一个独立的通道
+   --这里shenshou1为consumer name，接收端要根据这个名字来决定出队
+   --aq.que_shenshou@db2.Lk为接收端（db2）上的queue名和dblink的组合
    subscriber := sys.aq$_agent('shenshou1', 'aq.que_shenshou@db2.lk', NULL);
    DBMS_AQADM.ADD_SUBSCRIBER(queue_name => 'que_shenshou',
                              subscriber => subscriber);
-   --����propagation
+   --创建propagation
    DBMS_AQADM.SCHEDULE_PROPAGATION(queue_name   => 'que_shenshou',
                                    destination => 'db2.lk');
 END;
-���ˣ����Ͷ˶��д�����ϡ�
-��ͨ��������ͼ�鿴��
+至此，发送端队列创建完毕。
+可通过以下视图查看：
 select * from user_queue_tables;
 select * from user_queues;
 select * from user_queue_subscribers;
@@ -23606,7 +23606,7 @@ http://docs.oracle.com/cd/E11882_01/index.htm
 
 
 
-MySQL�������
+MySQL表锁情况
 
 mysql> show global status like 'table_locks%';
 +-----------------------+-----------+
@@ -23615,11 +23615,11 @@ mysql> show global status like 'table_locks%';
 | Table_locks_immediate | 490206328 |
 | Table_locks_waited | 2084912 |
 +-----------------------+-----------+
-Table_locks_immediate��ʾ�����ͷ�MySQL��������Table_locks_waited��ʾ��Ҫ�ȴ���MySQL�����������Table_locks_immediate / Table_locks_waited > 5000����ò���InnoDB���棬��ΪInnoDB��������MyISAM��MySQL���������ڸ߲���д���Ӧ��InnoDBЧ�����Щ��ʾ���еķ�����Table_locks_immediate / Table_locks_waited = 235��MyISAM���㹻�ˡ�
+Table_locks_immediate表示立即释放MySQL表锁数，Table_locks_waited表示需要等待的MySQL表锁数，如果Table_locks_immediate / Table_locks_waited > 5000，最好采用InnoDB引擎，因为InnoDB是行锁而MyISAM是MySQL表锁，对于高并发写入的应用InnoDB效果会好些。示例中的服务器Table_locks_immediate / Table_locks_waited = 235，MyISAM就足够了。
 
-��MySQL���ݿ��У�������Ҫ�������ݿ��״̬����һЩϵͳ����������Ϊ�����ܵ���MySQL����������ļ������ĵ��������������ο���
+在MySQL数据库中，我们需要根据数据库的状态调整一些系统参数，下面为您介绍的是MySQL表锁情况和文件打开数的调整方法，供您参考。
 
-�ļ�����(open_files)
+文件打开数(open_files)
 
 mysql> show global status like 'open_files';
 +---------------+-------+
@@ -23633,7 +23633,7 @@ mysql> show variables like 'open_files_limit';
 +------------------+-------+
 | open_files_limit | 4590 |
 +------------------+-------+
-�ȽϺ��ʵ����ã�Open_files / open_files_limit * 100%
+比较合适的设置：Open_files / open_files_limit * 100%
 
 
 [padep@cnsz081003 trustdw]$ dscp padba@g3ah1020:/paic/xt/trustdw/data/oradata/trustdw/* padba@z4ah8020:/paic/xt/t0tdw/data/oradata/t0tdw >data.out 2>&1 &
@@ -23647,17 +23647,17 @@ total 12
 
 
 
-Step 4 : (���� ZHANGJIE982 variationId:2909393)
-�������:mongodb�ű��ƽ�
-mongo js�ű�ִ�з�����
-ִ������
-./mongo ip:port/admin -u admin �Cp **** /path/to/script/SR_181060_01_ucms_chanxian_wangcong189.js
-ע:
-ip:����mongodb��ip����
-port:����mongodb��port����
-****:����mongodb��password����
+Step 4 : (作者 ZHANGJIE982 variationId:2909393)
+特殊操作:mongodb脚本移交
+mongo js脚本执行方法：
+执行命令
+./mongo ip:port/admin -u admin –p **** /path/to/script/SR_181060_01_ucms_chanxian_wangcong189.js
+注:
+ip:请用mongodb的ip代替
+port:请用mongodb的port代替
+****:请用mongodb的password代替
 
-Ȼ��ȷ�Ͻű�ִ�н��������������Ƿ�SUCCESS
+然后确认脚本执行结果输出，及返回是否SUCCESS
 
 
 
@@ -23669,10 +23669,10 @@ port:����mongodb��port����
 
 
 
- RAC������ʵ���������ݿ��յ�ORA-29702���� 2013-04-02 16:36:03
-���ࣺ Linux
+ RAC环境单实例启动数据库收到ORA-29702报错 2013-04-02 16:36:03
+分类： Linux
 
-         ��RAC�����У��������û�������ڵ�ļ�Ⱥ���������µ�ʵ���������ݿ⣬���յ��������µı�����
+         在RAC环境中，如果你在没有启动节点的集群服务的情况下单实例启动数据库，将收到类似如下的报错：
 [oracle@rhel1 u01]$ sql
 
 SQL*Plus: Release 10.2.0.5.0 - Production on Tue Apr 2 15:00:27 2013
@@ -23684,9 +23684,9 @@ Connected to an idle instance.
 SQL> startup nomount
 ORA-29702: error occurred in Cluster Group Service operation
 
-        ���ݿ�ʵ���޷�������Ҫ��������CGS����ԭ����Դ�Ŵ�������ƪMETALINK������֪����
+        数据库实例无法启动，要求先启动CGS服务，原因可以大概从下面这篇METALINK文章中知道：
 AIX: ORA-29702 When Creating A Single Instance Database In A Clustered Environment [ID 198901.1]
-�޸�ʱ��:2010-10-19����:PROBLEM״̬:PUBLISHED���ȼ�:2
+修改时间:2010-10-19类型:PROBLEM状态:PUBLISHED优先级:2
 
 Problem Description
 -------------------
@@ -23729,12 +23729,12 @@ Additional Search Words
 
 ORA-29702, startup, start up, create
 
-        ����������£����֪��������Oracle Database�����е�Oracle Parallel Server option��������⣬����취��ִ���������ж��Oracle Parallel Server Option��Ȼ�����±���Oracle�ںˡ�
-        ������һ���򵥵İ취����RAC�Ľڵ����°�װһ���������Oracle Database��������������ʵ���������ݿ⣬���������ӣ�
+        从上面的文章，大概知道是由于Oracle Database软件中的Oracle Parallel Server option引起的问题，解决办法是执行相关命令卸载Oracle Parallel Server Option，然后重新编译Oracle内核。
+        这里用一个简单的办法，在RAC的节点上新安装一个单机版的Oracle Database软件，用它来单实例启动数据库，下面是例子：
 [root@rhel1 bin]# su - oracle
 [oracle@rhel1 ~]$ echo $ORACLE_HOME
 /u01/app/oracle/db_2
-        �����°�װ�ĵ�����Oracle����HOME��
+        这是新安装的单机版Oracle软件HOME。
 [oracle@rhel1 ~]$ sql
 
 SQL*Plus: Release 10.2.0.5.0 - Production on Tue Apr 2 15:39:37 2013
@@ -23751,7 +23751,7 @@ Fixed Size                  2096824 bytes
 Variable Size             125829448 bytes
 Database Buffers          297795584 bytes
 Redo Buffers                6291456 bytes
-        ����ʵ��ǰ����ȥ����RAC��صĲ������á�
+        启动实例前，先去掉和RAC相关的参数设置。
 
 SQL> show parameter control
 
@@ -23768,25 +23768,25 @@ control_files                        string
 SQL> alter database mount;
 
 Database altered.
-        ע��������ļ�������Redo�ļ�λ�õĵ�����
+        注意对数据文件和在线Redo文件位置的调整。
 
 SQL> alter database open;
 
 Database altered.
-        ���ݿ�����������
+        数据库正常启动。
 
-        ��������ӿ��Բ��룬����������ļ��������ļ�����־�ļ��������ļ��������������������ݿ⻷����Ҳ��������������
-
-
+        从这个例子可以猜想，如果将参数文件、控制文件、日志文件和数据文件拷贝到其他单机版数据库环境中也能正常的启动。
 
 
 
 
 
 
-���Կ�stginvdw2��dml_trans_invest���������͸�ˮλ
-�ñ���2014��ķ������ڸ�ˮλ���⣬Ӱ��������ܡ�
-���æ��2014�����ȱ��ݣ�Ȼ��truncate�÷�����Ȼ��ָ��÷�����
+
+
+测试库stginvdw2中dml_trans_invest分区表降低高水位
+该表中2014年的分区存在高水位问题，影响测试性能。
+请帮忙把2014分区先备份，然后truncate该分区，然后恢复该分区。
 stginvdw2= (description =(address = (protocol = tcp)(host = 10.31.10.93 )(port = 1542))(connect_data=(sid = stginvdw2)))
 
 select * from dba_tables where table_name ='DML_TRANS_INVEST';
@@ -23824,7 +23824,7 @@ PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255
 
 
 
-create database error��
+create database error：
 
 SQL>   2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17   18  CREATE DATABASE d1lucs0
 *
@@ -23836,27 +23836,27 @@ ORA-30014: operation only supported in Automatic Undo Management mode
 
 
 
-�����Ҵ�9i R2�ﵼ���˼��ű���Ȼ���뵽11g R2�У��ڵ���ɹ�����Ҫ�ռ�����Щ������Ϣ��������ֺü��ű���û���ռ�����DBMS_STATS����ʾORA-20005��object statistics are locked (stattype = ALL)����Analyze������ʾORA-38029�� ����ͳ����Ϣ��������
+昨天我从9i R2里导出了几张表，然后导入到11g R2中，在导入成功后我要收集下这些表的信息，结果发现好几张表都没法收集，用DBMS_STATS包显示ORA-20005：object statistics are locked (stattype = ALL)，用Analyze命令显示ORA-38029： 对象统计信息已锁定。
 
-����취����ȷ�����ǽ�����
-���Դ���������ȥ������
-A������Schema
+解决办法很明确，就是解锁。
+可以从两个层面去处理：
+A、解锁Schema
 DBMS_STATS.UNLOCK_schema_STATS(user);
 
-B��������������
-1)�Ȳ���������ı�select table_name from user_tab_statistics where stattype_locked is not null;
-Ȼ���ٽ�������
-exec dbms_stats.unlock_table_stats(user,'����');
-2)Ҳ��ֱ������sql�ű�
+B、解锁单个对象
+1)先查出被锁定的表select table_name from user_tab_statistics where stattype_locked is not null;
+然后再解锁对象
+exec dbms_stats.unlock_table_stats(user,'表名');
+2)也可直接生成sql脚本
 select 'exec dbms_stats.unlock_table_stats('''||user||''','''||table_name||''');' from user_tab_statistics where stattype_locked is not null;
-���ﲻ�����ɵ�sql���ö�̬��user��Ϊ����ִ������ȷ֪�������ǽ����ĸ�schema�µı�����ֹ�������
+这里不在生成的sql中用动态的user是为了让执行者明确知道到底是解锁哪个schema下的表，防止误操作。
 
 
-��������Ҫ�ر�ע�⣬OracleΪʲô��Ҫ����סͳ����Ϣ��
-һ����ԣ�����Ϊ���ȶ�ִ�мƻ�����Ϊ��Oracle 10g���ϣ�OracleĬ�ϻ��Զ��ռ�ͳ����Ϣ��Ҫ����סͳ����Ϣ����ʹ��LOCK_SCHEMA_STATS��LOCK_TABLE_STATS����
+不过，你要特别注意，Oracle为什么会要锁定住统计信息？
+一般而言，这是为了稳定执行计划，因为在Oracle 10g以上，Oracle默认会自动收集统计信息，要想锁住统计信息，请使用LOCK_SCHEMA_STATS、LOCK_TABLE_STATS包。
 
 
-�� Oracle 8i ����ǰ�İ汾����ͨ�������ִ��explain plan��ʹ��������ѯ�����ִ�мƻ���
+在 Oracle 8i 及以前的版本，可通过对语句执行explain plan后，使用下述查询获得其执行计划：
 select /*+ no_merge */
        rpad('| '||substr(lpad(' ',1*(level-1))||operation||
             decode(options, null,'',' '||options), 1, 40), 41, ' ')||'|'||
@@ -23874,9 +23874,9 @@ order by id, position
 
 
 
-�鿴ʵʱִ�мƻ�
-ǰ�᣺������ִ�мƻ����� COL_5d pool �У������������δ age out����invalidate�ȡ�
-�ŵ㣺Ϊ������ʵ��ִ�мƻ�
+查看实时执行计划
+前提：该语句的执行计划尚在 COL_5d pool 中，即，该语句尚未 age out或是invalidate等。
+优点：为该语句的实际执行计划
 select '| Operation                         | PHV/Object Name                    |  Rows | Bytes|   Cost |'
 as "Optimizer Plan:" from dual
 union all
@@ -23909,24 +23909,24 @@ accept passwd prompt 'new password of this user: ' hide
 alter user &username identified by &passwd;
 
 
-select 'exec prc_kill_session('''||username||''','''||sid||''','''||serial#||''');' from v$session where sql_id=��4u4czz8wcq8cj��;
+select 'exec prc_kill_session('''||username||''','''||sid||''','''||serial#||''');' from v$session where sql_id=’4u4czz8wcq8cj’;
 
 
-��ʾexplain plan �����plan_table �е���Ϣ����9i�ڶ��ַ�������
+显示explain plan 后存于plan_table 中的信息，与9i第二种方法相似
 SET LINESIZE 130
 SET PAGESIZE 0
 SELECT * FROM table(DBMS_XPLAN.DISPLAY);
-2.14.3.2��ʾ��ǰ�ڴ��е�ִ�мƻ�����Ϣ ����9i��һ�ַ�������
+2.14.3.2显示当前内存中的执行计划的信息 ，与9i第一种方法相似
 SELECT * FROM table(DBMS_XPLAN.DISPLAY_CURSOR(('sql_id',child_number));
-���� sql_id ��child_number �ɴ� v$sql �в����
-2.14.3.3��ʾawr �д�ŵ���ʷ��ִ�мƻ�
+其中 sql_id 与child_number 可从 v$sql 中查出。
+2.14.3.3显示awr 中存放的历史的执行计划
 SELECT * FROM table(DBMS_XPLAN.DISPLAY_AWR('sql_id'));
-���� sql_id�ɴ� v$sql �в����
-�����ʾ�� sql_id ������ִ�мƻ���
-Ҳ��ͨ����
-SELECT * FROM table(DBMS_XPLAN.DISPLAY_AWR('sql_id'����plan_hash_value��));
-���� awr ��ʷ��¼�в鿴ĳһִ�мƻ��ľ������ݡ�
-Plan_hash_value �ɴ� v$sql �л�á�
+其中 sql_id可从 v$sql 中查出。
+其会显示该 sql_id 的所有执行计划。
+也可通过：
+SELECT * FROM table(DBMS_XPLAN.DISPLAY_AWR('sql_id'，’plan_hash_value’));
+来从 awr 历史记录中查看某一执行计划的具体内容。
+Plan_hash_value 可从 v$sql 中获得。
 
 
 
@@ -23987,9 +23987,9 @@ End If;
 
 
 
-�鿴alert ��־
+查看alert 日志
 
-����ȥѲ��.���һ���û��������ʹ��sql������鿴alert��־�е�����. ��ʱ�����ô洢��������.������������,��external����һ�¿���:
+上周去巡检.结果一个用户问我如何使用sql语句来查看alert日志中的内容. 当时想着用存储过程来做.回来后想了想,用external测试一下看看:
 SQL> !pwd
 /u01/app/oracle/admin/ORALINUX/bdump
 create directory BDUMP as '/u01/app/oracle/admin/ORALINUX/bdump';
@@ -24023,9 +24023,9 @@ ORA-27037: unable to obtain file status
 
 
 
-Script:�����ⲿ��ʵ��SQL��ѯOracle�澯��־Alert.log
-2011/11/10 BY MACLEAN LIU 6������
-��ͬѧ���Ƿ������SQL���ֱ�Ӳ�ѯ�澯��־�����ݣ�������һ�Ű���Alert.log���ݵı�����ͼ�� ʵ����֮ǰ�Ѿ�������������(http://t.cn/SwGvq9)��ֻ��Ҫ����һ���洢���̼��ɴﵽĿ�ģ� �����Ҷ�ԭ�е��������һЩ������ ֱ��ִ��PL/SQL�鼴�����贴���洢�����ˣ���������֧��RAC�ˡ�
+Script:利用外部表实现SQL查询Oracle告警日志Alert.log
+2011/11/10 BY MACLEAN LIU 6条评论
+有同学问是否可以用SQL语句直接查询告警日志的内容，即创建一张包含Alert.log内容的表或视图。 实际上之前已经有人这样做了(http://t.cn/SwGvq9)，只需要运行一个存储过程即可达到目的， 这里我对原有的语句做了一些改良， 直接执行PL/SQL块即可无需创建存储过程了，而且现在支持RAC了。
 
 --drop table alert_log_view;
 --drop directory bdump;
@@ -24072,7 +24072,7 @@ begin
 end;
 /
 
-ִ������PL/SQL���룬�ᴴ����Ϊbdump$SID��Ŀ¼ ��ALERT_LOG_VIEW$SID���ⲿ��(��RAC�е�1��ʵ��PROD1����ΪALERT_LOG_VIEW1,��ʵ��single instance��Ϊ ALERT_LOG_VIEW)�� ��Ҫʱֱ�Ӳ�ѯALERT_LOG_VIEW���ɣ�Ʃ��Ҫ�Ӹ澯��Ϣ���ҳ��������ORA-����ļ�¼:
+执行以上PL/SQL代码，会创建名为bdump$SID的目录 和ALERT_LOG_VIEW$SID的外部表(如RAC中的1号实例PROD1，则为ALERT_LOG_VIEW1,单实例single instance则为 ALERT_LOG_VIEW)， 需要时直接查询ALERT_LOG_VIEW即可，譬如要从告警信息中找出最近三天ORA-错误的记录:
 
 col lineno noprint
 col ora_error noprint
@@ -24117,7 +24117,7 @@ select "LINENO", "THEDATE", "ORA_ERROR", "MSG_LINE"
    and thedate >= (trunc(sysdate) - 3)
  order by thedate
 
-ʾ�����
+示例输出
 
 10/11/2011 03:15:49 Thu Nov 10 03:15:49 2011
                     Errors in file /s01/orabase/diag/rdbms/vprod/VPROD1/trace/VPROD1_ora_5547.trc  (incident=11105):
@@ -24130,7 +24130,7 @@ select "LINENO", "THEDATE", "ORA_ERROR", "MSG_LINE"
                     Dumping diagnostic data in directory=[cdmp_20111110031552], requested by (instance=1, osid=5547), summary=[incident=11105].
 
 
-���½ű��������ɴ�������DDL���,��Ҫ�õ�DBMS_METADATA.GET_DDL��
+以下脚本用于生成创建表的DDL语句,需要用到DBMS_METADATA.GET_DDL：
 -- How to use ddl.sql
 -- Run ddl.sql on the sql*plus.
 -- Login the sql*plus with apps user or dba user
@@ -24289,7 +24289,7 @@ SQL> /
 
 
 
-���½ű����������г����ģʽ����ϵ�ConstraintsԼ��:
+以下脚本可以用于列出相关模式或表上的Constraints约束:
 ---<tfsscons.sql begin>------------------------------------------------------
 SET ECHO off
 REM NAME: tfsscons.sql
@@ -24646,7 +24646,7 @@ SET VERIFY on
 ---<tfstcons.sql end>------------------------------------------------------
 
 
-�ýű������г����ӱ���û�ж�Ӧ�����������û������������������ı���:
+该脚本用于列出在子表上没有对应索引的外键，没有索引可能引发额外的表锁:
 "You should almost always index foreign keys.
 The only exception is when the matching unique or primary key is never updated or deleted."
 
@@ -25166,10 +25166,10 @@ Prompt
 -- - - - - - - - - - - - - - - - Script ends here - - - - - - - - - - - - - -
 
 
-����ҳ�Oracle����Ҫ��ֵ���ؽ�������
-2009/09/10 BY MACLEAN LIU 4������
+如何找出Oracle中需要或值得重建的索引
+2009/09/10 BY MACLEAN LIU 4条评论
 This script determines whether an index is a good candidate for a rebuild or for
-a bitmap index.  All indexes for a given schema or for a subset of schema��s are
+a bitmap index.  All indexes for a given schema or for a subset of schema’s are
 analyzed (except indexes under SYS and SYSTEM)
 Instructions
 Execution Environment:
@@ -25190,7 +25190,7 @@ when you first receive it. Check over the script to ensure that errors of
 this type are corrected.
 Description
 This script determines whether an index is a good candidate for a rebuild or for
-a bitmap index.  All indexes for a given schema or for a subset of schema��s are
+a bitmap index.  All indexes for a given schema or for a subset of schema’s are
 analyzed (except indexes under SYS and SYSTEM).
 REM =============================================================
 REM
@@ -25321,7 +25321,7 @@ PL/SQL procedure successfully completed.
 
 
 
-���½ű������г����ݿ��ж����������:
+以下脚本用以列出数据库中对象的依赖性:
 REM OBJECT DEPENDENT
 
 select D_OBJ#,
@@ -25477,7 +25477,7 @@ decode(o.status,0,'N/A',1,'VALID','INVALID') "Status"
 
 
 
- ���½ű����������ռ����ݿⰲȫ����������Ϣ:
+ 以下脚本可以用于收集数据库安全风险评估信息:
 REM list database vulnerability assessment info
 
 set escape on;
@@ -25788,28 +25788,28 @@ select username
 
 
 
- Redo��ʧ��4��������������� 2013-06-18 09:21:01
-���ࣺ Androidƽ̨
-һ.˵����
-1.������˵�ĵ�ǰ��־ָ��־״̬ΪCURRENT,ACTIVE,�ǵ�ǰ��־ָ��־״̬ΪINACTIVE
-2.���ÿ��ǹ鵵�ͷǹ鵵ģʽ��2��ģʽ�µ�Redo��ʧ���һ����
+ Redo丢失的4种情况及处理方法 2013-06-18 09:21:01
+分类： Android平台
+一.说明：
+1.以下所说的当前日志指日志状态为CURRENT,ACTIVE,非当前日志指日志状态为INACTIVE
+2.不用考虑归档和非归档模式，2种模式下的Redo丢失情况一样。
 
-��.��ʧRedo��4�������
-��һ��������ǵ�ǰ��־�������رա�
-�ڶ���������ǵ�ǰ��־���������رա�
-�������������ǰ��־�������رա�
-�������������ǰ��־���������رա�
+二.丢失Redo的4种情况：
+第一种情况：非当前日志，正常关闭。
+第二种情况：非当前日志，非正常关闭。
+第三种情况：当前日志，正常关闭。
+第四种情况：当前日志，非正常关闭。
 
-��.����������
-��һ����������Ĵ�������һ����ֱ�Ӱ���־�ļ�clear���ɡ�
+三.处理方法：
+第一、二种情况的处理方法一样，直接把日志文件clear即可。
 SQL> alter database clear logfile group 3;
-SQL> alter database clear unarchived logfile group 3;//���INACTIVE״̬������Redo��δ�鵵�����ӹؼ���unarchived���clear��������ACTIVE,INACTIVE���п���δ��ɹ鵵���鵵�Ƿ���ɿ��Բ鿴v$log.archived�ֶΣ���
+SQL> alter database clear unarchived logfile group 3;//如果INACTIVE状态的在线Redo还未归档，增加关键字unarchived完成clear操作。（ACTIVE,INACTIVE都有可能未完成归档，归档是否完成可以查看v$log.archived字段）。
 
-���ӣ�
+例子：
 
 SQL> startup mount
 
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 
 
@@ -25823,7 +25823,7 @@ Database Buffers           88080384 bytes
 
 Redo Buffers                6402048 bytes
 
-���ݿ�װ����ϡ�
+数据库装载完毕。
 
 SQL> select group#,thread#,status,archived from v$log;
 
@@ -25846,11 +25846,11 @@ alter database clear logfile group 3
 
 *
 
-�� 1 �г��ִ���:
+第 1 行出现错误:
 
-ORA-01624: ��־ 3 �ǽ����ָ�ʵ�� orcl (�߳� 1) �������
+ORA-01624: 日志 3 是紧急恢复实例 orcl (线程 1) 所必需的
 
-ORA-00312: ������־ 3 �߳� 1: 'E:\APP\ORADATA\ORCL\REDO03.LOG'
+ORA-00312: 联机日志 3 线程 1: 'E:\APP\ORADATA\ORCL\REDO03.LOG'
 
 
 
@@ -25858,56 +25858,56 @@ SQL> alter database clear logfile group 2;
 
 
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
 
-����������Ĵ����취��
+第三种情况的处理办法：
 SQL>startup mount;
 SQL>recover database until cancel;
 SQL>alter database open resetlogs;
 
 
-����1��
+例子1：
 
 SQL> shutdown immediate
-���ݿ��Ѿ��رա�
-�Ѿ�ж�����ݿ⡣
-ORACLE �����Ѿ��رա�
+数据库已经关闭。
+已经卸载数据库。
+ORACLE 例程已经关闭。
 SQL> startup mount
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  263639040 bytes
 Fixed Size                  1384012 bytes
 Variable Size             167772596 bytes
 Database Buffers           88080384 bytes
 Redo Buffers                6402048 bytes
-���ݿ�װ����ϡ�
+数据库装载完毕。
 SQL> alter database open resetlogs;
 alter database open resetlogs
 *
-�� 1 �г��ִ���:
-ORA-01139: RESETLOGS ѡ����ڲ���ȫ���ݿ�ָ�����Ч
+第 1 行出现错误:
+ORA-01139: RESETLOGS 选项仅在不完全数据库恢复后有效
 
 
 SQL> recover database until cancel;
-��ɽ��ʻָ���
+完成介质恢复。
 SQL> alter database open resetlogs;
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
-����2������������ĵڶ���������������
+例子2（第三种情况的第二个处理方法）：
 
 SQL> shutdown immediate
 
-���ݿ��Ѿ��رա�
+数据库已经关闭。
 
-�Ѿ�ж�����ݿ⡣
+已经卸载数据库。
 
-ORACLE �����Ѿ��رա�
+ORACLE 例程已经关闭。
 
 SQL> startup mount
 
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 
 
@@ -25921,7 +25921,7 @@ Database Buffers           88080384 bytes
 
 Redo Buffers                6402048 bytes
 
-���ݿ�װ����ϡ�
+数据库装载完毕。
 
 SQL> select group#,thread#,status,archived from v$log;
 
@@ -25943,7 +25943,7 @@ SQL> alter database clear logfile group 2;
 
 
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
 
 
@@ -25951,7 +25951,7 @@ SQL> alter database clear logfile group 3;
 
 
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
 
 
@@ -25959,26 +25959,26 @@ SQL> alter database clear unarchived logfile group 3;
 
 
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
-       ����CURRENT��Redo��־�ļ����ܱ�clear unarchived��
+       这里CURRENT的Redo日志文件组能被clear unarchived。
 
 SQL> alter database open;
 
 
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
-       ���Redo��־�ļ���ʧ��clear�������֮����ԭ��λ�ô����µ�Redo��־�ļ���
+       如果Redo日志文件丢失，clear操作完成之后将在原有位置创建新的Redo日志文件。
 
 
-����������Ĵ���������
-1.ͨ����������ԭ���ָ����ݡ�
-2.ͨ���޸Ĳ����ļ��еĲ���
+第四种情况的处理方法：
+1.通过备份来还原、恢复数据。
+2.通过修改参数文件中的参数
 _allow_resetlogs_corruption=TRUE
-��ǿ���������ݿ⡣//��Ȼ�ܹ��������ݿ⵽open״̬����������������ݿ������ֵ䡢�����п��ܵ��²�һ�µ�������֣�����Ҫ��open�°��������ݿ�export��Ȼ��ɾ���⣬�ؽ����ٽ�export������import���µ����ݿ��С�
+来强制启动数据库。//虽然能够启动数据库到open状态，但是启动后的数据库数据字典、数据有可能导致不一致的情况出现，故需要在open下把整个数据库export，然后删除库，重建，再将export的数据import到新的数据库中。
 
-��.��֤���ݿ��Ƿ������رյķ���
+四.验证数据库是否正常关闭的方法
 
 SQL> select open_mode from v$database;
 
@@ -26011,7 +26011,7 @@ SQL> select file#,checkpoint_change#,fuzzy from v$datafile_header;
          4            1165820 YES
 
         FUZZY bit in datafile header means that there may have been writes into a datafile after the last checkpoint. E.g. there may be changes written to datafile with higher SCN than checkpoint_change# stored in datafile header (seen from v$datafile_header.checkpoint_change#).
-        FUZYY��ʾģ���ԣ���˼�ǣ��������ļ�����ģ��״̬�������һ��CHECKPOINT�󣬸��ļ��ϵ����ݿ��ܱ��޸Ĺ��ˣ���û���ü����µ����ļ��ϣ����߸��ļ���֪��������Ҫ��ȡ��־��Ϣ���жϡ�
+        FUZYY表示模糊性，意思是，该数据文件处于模糊状态，在最近一次CHECKPOINT后，该文件上的数据可能被修改过了，但没来得及更新到该文件上（或者该文件不知道），需要读取日志信息来判断。
 
 SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
@@ -26027,19 +26027,19 @@ SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
          4            1165820
 
-        �������ݿ��Ǵ򿪵�״̬��������ֹSCN�ǿգ�SCN�����ݿɲο����£�http://space.itpub.net/23135684/viewspace-627343
+        由于数据库是打开的状态，所以终止SCN是空，SCN的内容可参考文章：http://space.itpub.net/23135684/viewspace-627343
 
 SQL> shutdown immediate
 
-���ݿ��Ѿ��رա�
+数据库已经关闭。
 
-�Ѿ�ж�����ݿ⡣
+已经卸载数据库。
 
-ORACLE �����Ѿ��رա�
+ORACLE 例程已经关闭。
 
 SQL> startup mount
 
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  313860096 bytes
 
@@ -26051,7 +26051,7 @@ Database Buffers          150994944 bytes
 
 Redo Buffers                6291456 bytes
 
-���ݿ�װ����ϡ�
+数据库装载完毕。
 
 SQL> select file#,checkpoint_change#,fuzzy from v$datafile_header;
 
@@ -26067,7 +26067,7 @@ SQL> select file#,checkpoint_change#,fuzzy from v$datafile_header;
 
          4            1166324 NO
 
-        �������������ݿ������£�FUZZY�ֶζ�Ӧ����NO����ʾû��ģ�������SCN�洢�������ļ��С�
+        在正常管理数据库的情况下，FUZZY字段都应该是NO，表示没有模糊不清的SCN存储在数据文件中。
 
 SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
@@ -26083,19 +26083,19 @@ SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
          4            1166324      1166324
 
-       �����ر����ݿ����ֹSCNӦ�ú�����SCN��ͬ��FUZZY����NO�������ݿ����ֹSCN��������SCN���������ļ�SCN����ô������Ϊ���ݿ��������رգ����ڴ����ݿ�֮ǰ����Ҫִ��ʵ���ָ���Crash�ָ���
+       正常关闭数据库的终止SCN应该和启动SCN相同。FUZZY等于NO，且数据库的终止SCN等于启动SCN等于数据文件SCN，那么可以认为数据库是正常关闭，且在打开数据库之前不需要执行实例恢复或Crash恢复。
 
 SQL> alter database open;
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
 SQL> shutdown abort
 
-ORACLE �����Ѿ��رա�
+ORACLE 例程已经关闭。
 
 SQL> startup mount
 
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  313860096 bytes
 
@@ -26107,7 +26107,7 @@ Database Buffers          150994944 bytes
 
 Redo Buffers                6291456 bytes
 
-���ݿ�װ����ϡ�
+数据库装载完毕。
 
 SQL> select file#,checkpoint_change#,fuzzy from v$datafile_header;
 
@@ -26123,7 +26123,7 @@ SQL> select file#,checkpoint_change#,fuzzy from v$datafile_header;
 
          4            1166327 YES
 
-       �������ر����ݿ�ʵ����FUZZY�ֶε�ֵ��YES��
+       非正常关闭数据库实例，FUZZY字段的值是YES。
 
 SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
@@ -26139,19 +26139,19 @@ SQL> select file#,checkpoint_change#,last_change# from v$datafile;
 
          4            1166327
 
-       �������ر����ݿ�ʵ������ֹSCN��ȻΪ�ա���ô�������ݿⱻ��֮ǰ����ʹ�ù鵵Redo��־���ʵ���ָ���Crash�ָ���
+       非正常关闭数据库实例，终止SCN依然为空。那么，在数据库被打开之前必须使用归档Redo日志完成实例恢复或Crash恢复。
 
-��.���ۣ�
-�������رյĵ�ǰ��־��ʧ�����ܵ������ݿ�������Ļ��ң�����������������ݵĶ�ʧ������������ᵼ�����ݵĶ�ʧ��
-
-
-        ������£���alter system archive log current / all / switch logfile����http://space.itpub.net/35489/viewspace-673824
+五.结论：
+非正常关闭的当前日志丢失，可能导致数据库启动后的混乱，并可能造成少量数据的丢失。其他情况不会导致数据的丢失。
 
 
+        相关文章：《alter system archive log current / all / switch logfile》：http://space.itpub.net/35489/viewspace-673824
 
 
 
-�����ڿͻ�һ��BRMϵͳ��ִ�з�������Exchange Partition������ʱ�������ORA-14098���󣬸ô��������ڷ������ϵ�LOCAL����������Ƿ������ϵ�������ƥ����ɵģ���������һ���������:
+
+
+上周在客户一套BRM系统上执行分区交换Exchange Partition操作的时候出现了ORA-14098错误，该错误是由于分区表上的LOCAL分区索引与非分区表上的索引不匹配造成的，我们来看一下这个错误:
 [oracle@rh2 ~]$ oerr ora 14098
 14098, 00000, "index mismatch for tables in ALTER TABLE EXCHANGE PARTITION"
 // *Cause:  The two tables specified in the EXCHANGE have indexes which are
@@ -26171,7 +26171,7 @@ table SALES_TMP INCLUDING INDEXES WITH VALIDATION UPDATE GLOBAL INDEXES
                                                               *
 ERROR at line 1:
 ORA-14098: index mismatch for tables in ALTER TABLE EXCHANGE PARTITION
-��������кܶ�����������������޷�ȷ���������ĸ�����������ORA-14098������ô���ǿ���ͨ��trace�ķ�ʽ��Э����λ�����������:
+如果表上有很多的索引，以至于你无法确定到底是哪个索引引发了ORA-14098错误，那么我们可以通过trace的方式来协助定位到具体的索引:
 SQL>  select * from v$version;
 
 BANNER
@@ -26213,7 +26213,7 @@ INCLUDING INDEXES WITH VALIDATION UPDATE GLOBAL INDEXES
 ERROR at line 1:
 ORA-14098: index mismatch for tables in ALTER TABLE EXCHANGE PARTITION
 
-11g��ֱ�Ӳ�ѯv$diag_info�Ϳ��Եõ�trace��·����10gִ��gettracename.sql
+11g中直接查询v$diag_info就可以得到trace的路径，10g执行gettracename.sql
 
 SELECT    d.VALUE
        || '/'
@@ -26251,8 +26251,8 @@ Current SQL statement for this session:
 ALTER TABLE sales EXCHANGE PARTITION SALES_Q4_2003 with table SALES_TMP
 INCLUDING INDEXES WITH VALIDATION UPDATE GLOBAL INDEXES
 
-���ǿ�����trace�п����ڳ���ORA-14098����ǰ�����ڶ�����SALES_UNID_TMP��Fast Full Scan
-����ͨ��10046/errorstack��trace��Ϣ����⣬������������ֱ�Ӵ�DDL����з���,������ʾ���зǷ�������DDL���:
+我们可以在trace中看到在出现ORA-14098错误前，正在对索引SALES_UNID_TMP的Fast Full Scan
+除了通过10046/errorstack的trace信息诊断外，更多的问题可以直接从DDL语句中发现,在以上示例中非分区表的DDL语句:
 -- Create table
 create table SALES_TMP
 (
@@ -26268,11 +26268,11 @@ create table SALES_TMP
 
 create index SALES_CHANNEL_TMP       ON SALES_TMP (CHANNEL_ID) ;
 create index SALES_CUST_TMP          ON SALES_TMP (CUST_ID)    ;
-create index SALES_UNID_TMP          ON SALES_TMP  (UNI_ID,TIME_ID);  --ע��ϸ�ڸ������Ƿ�UNIQUE��
+create index SALES_UNID_TMP          ON SALES_TMP  (UNI_ID,TIME_ID);  --注意细节该索引是非UNIQUE的
 create index SALES_PROD_TMP          ON SALES_TMP (PROD_ID)    ;
 create index SALES_PROMO_TMP         ON SALES_TMP (PROMO_ID)   ;
 create index SALES_TIME_TMP          ON SALES_TMP (TIME_ID)    ;
-��Ϊ��������DDL���:
+下为分区表的DDL语句:
 -- Create table
 create table SALES
 (
@@ -26290,12 +26290,12 @@ partition by range (TIME_ID)
 
 create index SALES_CHANNEL       ON SALES (CHANNEL_ID) LOCAL;
 create index SALES_CUST          ON SALES (CUST_ID)    LOCAL;
-create UNIQUE index SALES_UNID   ON SALES (UNI_ID,TIME_ID) LOCAL;      -- ��Ӧ��������UNIQUE��
+create UNIQUE index SALES_UNID   ON SALES (UNI_ID,TIME_ID) LOCAL;      -- 对应的索引是UNIQUE的
 create index SALES_PROD          ON SALES (PROD_ID)    LOCAL;
 create index SALES_PROMO         ON SALES (PROMO_ID)   LOCAL;
 create index SALES_TIME          ON SALES (TIME_ID)    LOCAL;
-���ORA-14098�����Ҫ����Ҫ�ҳ����������ԭ�򡣵����ǽ���������ʱ������Ҫȷ�����н������ϵ������ͷ������ϵı�������ƥ�䡣����ζ������ڷ���������N��LOCAL INDEXES����ô�ڽ������Ͼ�Ӧ����N���ȼ۵�����������ĵȼ�Ҫ�����ӳ���ϵ��2�����������е�λ�á����͡���С��UNIQUE/NON-UNIQUE��Ҫһ�¡�
-������������SQL������ҳ��������ͽ������������Ĳ���:
+解决ORA-14098错误的要点是要找出引发错误的原因。当我们交换分区的时候，我们要确保所有交换表上的索引和分区表上的本地索引匹配。这意味着如果在分区表上有N个LOCAL INDEXES，那么在交换表上就应当有N个等价的索引。这里的等价要求存在映射关系的2个索引，在列的位置、类型、大小及UNIQUE/NON-UNIQUE都要一致。
+可以利用如下SQL语句来找出分区表和交换表上索引的差异:
 set linesize 160 pagesize 1400
 
  col TABLE_NAME for a30
@@ -26319,15 +26319,15 @@ select TABLE_NAME, INDEX_NAME, INDEX_TYPE, UNIQUENESS, PARTITIONED
    and TABLE_NAME in ('&TABNAME1', '&TABNAME2')
  order by index_name
 /
-Ҳ����ʹ��Toad��Single Schema Object Compare�������Աȼ�������:
+也可以使用Toad的Single Schema Object Compare功能来对比检验索引:
 single_object_compare
-���ڴ��������ķ���������������������DISABLE VALIDATE��ʽ����unique constraintԼ�����Դ���ȫ�ֵ�������������������(Exchange Table)�ϴ������������Ļ�����ô�����ڽ���ǰ��ʱ��������drop������������ɺ����ؽ���
-���ʵ���޷������ORA-14098������ô���Գ���ʹ��EXCLUDING INDEXES�Ӿ�����������ά�������ڽ�����ɺ��ؽ����ʧЧ����2014/8/16
+对于存在主键的分区表，可以在主键上以DISABLE VALIDATE方式创建unique constraint约束，以代替全局的主键索引。若交换表(Exchange Table)上存在主键索引的话，那么建议在交换前暂时将该索引drop掉，待交换完成后再重建。
+如果实在无法解决该ORA-14098错误，那么可以尝试使用EXCLUDING INDEXES子句以跳过索引维护，而在交换完成后重建相关失效索引2014/8/16
 
 
 
 Script:To Report Information on Indexes
-2007/06/30 BY MACLEAN LIU ��������
+2007/06/30 BY MACLEAN LIU 暂无评论
 Reports index fragmentation statistics:
 ==========
 Script #1:
@@ -26612,8 +26612,8 @@ UNIQUE                SCOTT.S_EMP_USERID_UK                    USERID
 
 
 Script:List Schema/Table Constraints
-2011/09/07 BY MACLEAN LIU ��������
-���½ű����������г����ģʽ����ϵ�ConstraintsԼ��:
+2011/09/07 BY MACLEAN LIU 暂无评论
+以下脚本可以用于列出相关模式或表上的Constraints约束:
 ---<tfsscons.sql begin>------------------------------------------------------
 SET ECHO off
 REM NAME: tfsscons.sql
@@ -26970,7 +26970,7 @@ SET VERIFY on
 ---<tfstcons.sql end>------------------------------------------------------
 
 
-���½ű���������Oracle dbϵͳ����ǰ��ⵥ��CPu��������Ƶ�ʣ�
+以下脚本可以用于Oracle db系统上线前检测单颗CPu运算能力频率：
 
 
 SET SERVEROUTPUT ON
@@ -27077,62 +27077,62 @@ END;
 
 
 
-������ѯִ�д�����ʧЧ������
+例：查询执行次数和失效次数：
 
 select sum(pins) pins,  sum(reloads) reloads  from  v$librarycache;
 
-��� ratio = ( reloads / pins ) * 100 ���� 1 ����󡣾���Ҫ�Ӵ����صĴ�С��
+如果 ratio = ( reloads / pins ) * 100 大于 1 或更大。就需要加大共享池的大小。
 
-���Ƶأ������ֵ���ٻ���ȡ�������ݿ���ʵ��û�����Ȩ�ޡ����ݱ��������ȡ����ݿ�ϵͳ���ظ�ʹ����ͬ�����ݿ�����������Ƶ���ط���Ӳ�̣���˵�������ֵ���ٻ������ʧЧ��ɡ�
+类似地，数据字典高速缓存取决于数据库访问的用户数、权限、数据表、索引等。数据库系统会重复使用相同的数据库对象。如果程序频繁地访问硬盘，就说明数据字典高速缓存过快失效造成。
 
-������ѯ�û����Ի��gets(�ҵ����� )������getmisses(���ٻ���ʧЧ)�Ĵ�����
+例：查询用户可以获得gets(找到对象 )次数和getmisses(高速缓存失效)的次数：
 
 select sum(gets) gets , sum(getmisses) getmisses
 from  v$rowcache;
 
-��� ratio = ( getmisses / gets ) * 100 ���� 10%����Ҫ���ǼӴ�SHARED_POOL_SIZE����ֵ��
+如果 ratio = ( getmisses / gets ) * 100 大于 10%，就要考虑加大SHARED_POOL_SIZE参数值。
 
 
 
-SQL ���ܷ����� SQL Performance Analyzer SPA
-Oracle Database 11g ������ SQL ���ܷ�������ʹ�øù��߿���׼ȷ���������Ķ���ɹ������� SQL ����Ӱ�졣SQL ���ܷ������ɰ���Ԥ��Ǳ�ڵĸ��Ķ� SQL ��ѯ������������Ӱ�졣���ֹ��ܿ��� DBA �ṩ�й� SQL ������ܵ���ϸ��Ϣ�����磬ִ��ǰ���ͳ����Ϣ����߻򽵵����ܵ���䡣����һ�������Ϳ���ִ���������²����Ĳ������ڲ��Ի����н��и��ģ���ȷ�����ݿ������Ƿ��Ľ����������ܡ�
+SQL 性能分析器 SQL Performance Analyzer SPA
+Oracle Database 11g 引入了 SQL 性能分析器；使用该工具可以准确地评估更改对组成工作量的 SQL 语句的影响。SQL 性能分析器可帮助预测潜在的更改对 SQL 查询工作量的性能影响。这种功能可向 DBA 提供有关 SQL 语句性能的详细信息，例如，执行前后的统计信息，提高或降低性能的语句。这样一来，您就可以执行诸如以下操作的操作：在测试环境中进行更改，以确定数据库升级是否会改进工作量性能。
 
-11g ����������
-Ŀ���û���DBA��QA��Ӧ�ó��򿪷���Ա
-����Ԥ��ϵͳ���Ķ� SQL ��������Ӧʱ���Ӱ��
-������ͬ�汾�� SQL ���������ܣ��� SQL ִ�мƻ���ִ��ͳ����Ϣ��
-�Դ��з�ʽִ�� SQL�������ǲ����ԣ�
-�������ܲ���
-�ṩ�Ե��� SQL ��ϸ�������ܷ���
-�� SQL �Ż�ָ��������һ�����Ż��ع�
-SQL ���ܷ�������ʹ������
-SQL ���ܷ�����������Ԥ��ͷ�ֹ��Ӱ�� SQL ִ�мƻ��ṹ���κ����ݿ⻷��������������Ǳ���������⡣��Щ���Ŀ��԰������������ڣ������κ�һ�ָ��ģ�
-���ݿ�����
-ʵʩ�Ż�����
-���ķ���
-�ռ�ͳ����Ϣ
-�������ݿ����
-���Ĳ���ϵͳ��Ӳ��
+11g 的新增功能
+目标用户：DBA、QA、应用程序开发人员
+帮助预测系统更改对 SQL 工作量响应时间的影响
+建立不同版本的 SQL 工作量性能（即 SQL 执行计划和执行统计信息）
+以串行方式执行 SQL（不考虑并发性）
+分析性能差异
+提供对单个 SQL 的细粒度性能分析
+与 SQL 优化指导集成在一起以优化回归
+SQL 性能分析器：使用情形
+SQL 性能分析器可用于预测和防止会影响 SQL 执行计划结构的任何数据库环境更改所带来的潜在性能问题。这些更改可以包括（但不限于）以下任何一种更改：
+数据库升级
+实施优化建议
+更改方案
+收集统计信息
+更改数据库参数
+更改操作系统和硬件
 
-DBA ��������ʹ�� SQL ���ܷ�����Ϊ��ӵĻ���Ԥ�����ڸ��ĵ��µ� SQL ���ܸ��ġ����磬����Ӧ�ó����ڿ��������еı仯�����ݿ�Ӧ�ó��򿪷���Ա���Բ��ԶԷ��������ݿ�������дӦ�ó���ĸ��ģ��Լ����κ�Ǳ�ڵ�����Ӱ�졣
-ʹ�� SQL ���ܷ����������ԱȽ� SQL ����ͳ����Ϣ��
-SQL ���ܷ���������Ҫ
-1.  �ռ� SQL��������׶��У����ռ����ڱ�ʾ����ϵͳ�е� SQL �������� SQL ��伯������ʹ�� SQL �Ż������Զ����������ϵ����� (AWR) ������Ҫ���͵���Ϣ����Ϊ AWR �������ǲ���߸��ص� SQL������Ӧ�����޸�Ĭ�ϵ� AWR �������úͲ���Ķ��� SQL����ȷ�� AWR ������������� SQL ��䡣�����ȷ��������������� SQL ��������
-2.  ���ͣ�������׶��У�Ӧ���õ��Ĺ�����������͵�����ϵͳ��������ϵͳ���� STS��Ȼ�� STS ���뵽����ϵͳ��
-3.  ���㡰֮ǰ�汾�����ܣ��ڽ����κθ���֮ǰ��ִ�� SQL ��䣬�ռ����������ĸ��ĶԹ��������ܵĿ���Ӱ������Ļ�����Ϣ���ڴ˽׶��ռ�����Ϣ������ϵͳ��������ǰ״̬��һ�����ա��������ݰ�����
--ִ�мƻ������ɽ��ͼƻ����ɵļƻ���
--ִ��ͳ����Ϣ������ռ��ʱ�䡢�����ȡ���������̶�ȡ�������Ѵ�����������ɵ���Ϣ��
-4. ���и��ģ������֮ǰ�汾���ݺ󣬿���ʵʩ�ƻ��ĸ��ģ�Ȼ��ʼ�鿴�����ܵ�Ӱ�졣
-5.  ���㡰֮��汾�����ܣ������ݿ⻷���н����˸���֮���ִ�д˲��衣SQL ��������ÿ����䶼������ִ�У����ռ�ͳ����Ϣ��ģʽ�����У��ռ��벽�� 3 ���������Ϣ��ͬ����Ϣ��
-6.  �ȽϺͷ��� SQL ���ܣ��ڻ���������汾�� SQL �������������ݺ󣬿���ͨ���Ƚ�֮��汾��֮ǰ�汾���������������ܷ������Ƚϵĸ�����ִ��ͳ����Ϣ��������ʱ�䡢CPU ʱ��ͻ�������ȡ�����ȡ�
-7.  �Ż��ع�� SQL���ڴ˽׶��У��Ѿ�׼ȷ��ȷ������Щ SQL ����ڽ������ݿ����ʱ���ܵ����������⡣�ڴ˽׶��п���ʹ���κ�һ�����ݿ⹤�����Ż�ϵͳ�����磬���Զ�ȷ�ϵ����ʹ�� SQL �Ż�ָ�������ָ����Ȼ��ʵʩ��Ӧ�Ľ��顣Ҳ����ʹ���ڲ��� 3 �в���ļƻ�ֲ�� SQL �ƻ����� (SPM) ��ȷ���ƻ����ֲ��䡣��ʵʩ���κ��Ż�������Ӧ�ظ��ù����������µ�֮��汾��Ȼ��������ܲ�����ȷ���µ������ǿɽ��ܵġ�
-Ĭ�������SPA���漰��DML�����ֻ�в�ѯ����Query�ᱻִ�У�����ò���Ǵ�11.2��ʼ����ִ����ȫ��DML�ˣ���Ҫ�������EXECUTE_FULLDML�����Ǹò���Ŀǰ��һЩBUG:
+DBA 甚至可以使用 SQL 性能分析器为最复杂的环境预测先期更改导致的 SQL 性能更改。例如，随着应用程序在开发周期中的变化，数据库应用程序开发人员可以测试对方案、数据库对象和重写应用程序的更改，以减轻任何潜在的性能影响。
+使用 SQL 性能分析器还可以比较 SQL 性能统计信息。
+SQL 性能分析器：概要
+1.  收集 SQL：在这个阶段中，将收集用于表示生产系统中的 SQL 工作量的 SQL 语句集。可以使用 SQL 优化集或自动工作量资料档案库 (AWR) 来捕获要传送的信息。因为 AWR 本质上是捕获高负载的 SQL，所以应考虑修改默认的 AWR 快照设置和捕获的顶级 SQL，以确保 AWR 捕获最大数量的 SQL 语句。这可以确保捕获更加完整的 SQL 工作量。
+2.  传送：在这个阶段中，应将得到的工作量结果传送到测试系统。从生产系统导出 STS，然后将 STS 导入到测试系统。
+3.  计算“之前版本”性能：在进行任何更改之前，执行 SQL 语句，收集评估将来的更改对工作量性能的可能影响所需的基线信息。在此阶段收集的信息给出了系统工作量当前状态的一个快照。性能数据包括：
+-执行计划（如由解释计划生成的计划）
+-执行统计信息（如由占用时间、缓冲获取次数、磁盘读取次数和已处理的行数组成的信息）
+4. 进行更改：获得了之前版本数据后，可以实施计划的更改，然后开始查看对性能的影响。
+5.  计算“之后版本”性能：在数据库环境中进行了更改之后才执行此步骤。SQL 工作量的每个语句都在虚拟执行（仅收集统计信息）模式下运行，收集与步骤 3 所捕获的信息相同的信息。
+6.  比较和分析 SQL 性能：在获得了两个版本的 SQL 工作量性能数据后，可以通过比较之后版本与之前版本的数据来进行性能分析。比较的根据是执行统计信息，如所用时间、CPU 时间和缓冲区获取次数等。
+7.  优化回归的 SQL：在此阶段中，已经准确地确认了哪些 SQL 语句在进行数据库更改时可能导致性能问题。在此阶段中可以使用任何一种数据库工具来优化系统。例如，可以对确认的语句使用 SQL 优化指导或访问指导，然后实施相应的建议。也可以使用在步骤 3 中捕获的计划植入 SQL 计划管理 (SPM) 以确保计划保持不变。在实施了任何优化操作后，应重复该过程来创建新的之后版本，然后分析性能差异以确保新的性能是可接受的。
+默认情况下SPA若涉及到DML语句则只有查询部分Query会被执行，但是貌似是从11.2开始可以执行完全的DML了，需要加入参数EXECUTE_FULLDML，但是该参数目前有一些BUG:
 Bug 10428438 : WITH EXECUTE_FULLDML ROWS IS ALWAYS SET TO 0 11.2.0.1
 Bug 14635522 : SPA SHOULD CAPTURE AND REPLAY TRANSACTIONS 11.2.0.3
 
 By default, only the query portion of DMLs is executed. Using APIs, you can execute the full DML by using the EXECUTE_FULLDML task parameter.EXECUTE_FULLDML when set to TRUE executes DML statement fully, including acquiring row locks and modifying rows; When EXECUTE_FULLDML is set to FALSE (the default value is false) to execute only the query part of the DML without modifying data. When TRUE, SQL Performance Analyzer will issue a rollback following DML execution to prevent persistent changes from being made by the DML. So SPA does not make make any change to the data in the tables.
 
-ִ�з������£�
+执行方法如下：
 
 execute DBMS_SQLPA.SET_ANALYSIS_TASK_PARAMETER(task_name   => 'TASK_21137', -
                                                parameter   => 'EXECUTE_FULLDML', -
@@ -27141,7 +27141,7 @@ execute DBMS_SQLPA.SET_ANALYSIS_TASK_PARAMETER(task_name   => 'TASK_21137', -
 
 
 
-��cursor cache���ռ�tuning set, ����12���ӣ����5����
+从cursor cache中收集tuning set, 持续12分钟，间隔5秒钟
 
 
 begin
@@ -27157,9 +27157,9 @@ basic_filter=> q'# module like 'DWH_TEST%' and sql_text not like '%applicat%' an
 
 basic_filter   => 'sql_text LIKE ''%my_objects%'' and parsing_schema_name = ''SPA_TEST_USER''',
 
-==>��������ʹ��
+==>过滤条件使用
 
-�ӵ�ǰcursor cache��ƥ������ ���SQLset ROW
+从当前cursor cache中匹配条件 获得SQLset ROW
 
 
 SELECT sql_id, sql_text
@@ -27203,7 +27203,7 @@ END;
 /
 
 
-��AWR�����м���SQLset ROW��SQL TUNING SET
+从AWR快照中加载SQLset ROW到SQL TUNING SET
 
 
 DECLARE
@@ -27222,7 +27222,7 @@ END;
 
 
 
-��SQL TUNING SET Pack�����У�
+将SQL TUNING SET Pack到表中：
 
 
 set echo on
@@ -27274,7 +27274,7 @@ SQL> desc maclean.pack_sqlset;
 
 
 
-�����Զ�Ӧ schema�����ݺ� ����PACK TABLE �������뵽 Ŀ����Կ��У�
+将测试对应 schema的数据和 上述PACK TABLE 导出导入到 目标测试库中：
 
 set echo on
 exec DBMS_SQLTUNE.UNPACK_STGTAB_SQLSET('MAC_SPA','SYS',TRUE,'PACK_SQLSET','MACLEAN');
@@ -27282,7 +27282,7 @@ alter system flush buffer_cache;
 alter system flush shared_pool;
 
 
-����SPA���� ������;
+创建SPA任务 并运行;
 
 
 var sts_task varchar2(64);
@@ -27298,11 +27298,11 @@ exec :exe_task:=dbms_sqlpa.execute_analysis_task(task_name=>'10g_11g_spa',execut
 
 
 
-ִ������Ƚ�
+执行任务比较
 
 
 
-�Ƚ�CPU_TIME
+比较CPU_TIME
 EXEC dbms_sqlpa.execute_analysis_task( -
   task_name => '10g_11g_spa', -
   execution_name => 'compare_10g_112_cpu', -
@@ -27311,7 +27311,7 @@ EXEC dbms_sqlpa.execute_analysis_task( -
   execution_desc => 'Compare 10g SQL Trace Performance to 11g Test-Execute for CPU_TIME')
   /
 
-�Ƚ�BUFFER_GETS
+比较BUFFER_GETS
 EXEC dbms_sqlpa.execute_analysis_task( -
   task_name => '10g_11g_spa', -
   execution_name => 'compare_10g_112_buffergets', -
@@ -27320,7 +27320,7 @@ EXEC dbms_sqlpa.execute_analysis_task( -
   execution_desc => 'Compare 10g SQL Trace Performance to 11g Test-Execute for BUFFER_GETS')
   /
 
-�Ƚ�ʵ��ִ��ʱ��
+比较实际执行时长
 
 begin
 DBMS_SQLPA.EXECUTE_ANALYSIS_TASK(
@@ -27331,7 +27331,7 @@ execution_params => dbms_advisor.arglist('execution_name1', '10g_trail', 'execut
 end;
 /
 
-�Ƚ�������
+比较物理读
 
 begin
 DBMS_SQLPA.EXECUTE_ANALYSIS_TASK(
@@ -27365,11 +27365,11 @@ ORA-27163: out of memory
 ORA-06512: at "SYS.DBMS_SQLTUNE_INTERNAL", line 8211
 ORA-06512: at "SYS.DBMS_SQLPA", line 515
 ORA-06512: at line 1
-���������ڲ������⣬ֻ�ñ�����MOS����һ�ѵ�̬�ȡ�ͬʱ��Ҳ����SR���ܿ�SR�ͻظ���,ͬʱ��Ҳ�ѵ���һƪ�ĵ���XML Parser Fails With ORA-27163 (Out Of Memory) (�ĵ� ID 1599434.1)��SR�ظ��ķ��������������Ľ���취����һ���ģ���Ҫ����event 31156���������ֱ����session����������ã��������֮���ٴ�����SPA����û�б�����
+出现这种内部的问题，只好抱着在MOS上搜一搜的态度。同时我也开了SR。很快SR就回复了,同时我也搜到了一篇文档叫XML Parser Fails With ORA-27163 (Out Of Memory) (文档 ID 1599434.1)。SR回复的方法和我搜索到的解决办法都是一样的，需要设置event 31156。这个可以直接在session级别进行设置，设置完成之后，再次生成SPA报告没有报错。
 
 ALTER SESSION SET EVENTS '31156 trace name context forever, level 0x400';
 
-���SPA����:
+获得SPA报告:
 
 
 
@@ -27378,7 +27378,7 @@ spool spa_report_elapsed_time.html
 SELECT dbms_sqlpa.report_analysis_task('SPA_TEST', 'HTML', 'ALL','ALL', execution_name=>'Compare_elapsed_time') FROM dual;
 spool off
 
-����buffergets �Ƚ�report
+产生buffergets 比较report
 
 set heading off long 100000000 longchunksize 10000 echo off;
 set linesize 1000 trimspool on;
@@ -27393,7 +27393,7 @@ select xmltype(dbms_sqlpa.report_analysis_task('10g_11g_spa',
 from dual;
 spool off
 
-����errors�Ƚ�report
+产生errors比较report
 spool errors_summary.html
 select xmltype(dbms_sqlpa.report_analysis_task('10g_11g_spa',
                                                 'html',
@@ -27405,7 +27405,7 @@ select xmltype(dbms_sqlpa.report_analysis_task('10g_11g_spa',
 from dual;
 spool off
 
-����unsupport�Ƚ�report
+产生unsupport比较report
 spool unsuppor_all.html
 select xmltype(dbms_sqlpa.report_analysis_task('10g_11g_spa',
                                                 'html',
@@ -27455,10 +27455,10 @@ E
 
 execution_type
 Type of the action to perform by the function. If NULL it will default to the value of the DEFAULT_EXECUTION_TYPE parameter. Possible values are:
-[TEST] EXECUTE �C test-execute every SQL statement and collect its execution plans and execution statistics. The resulting plans and statistics will be stored in the advisor framework. This is default.
-EXPLAIN PLAN �C generate explain plan for every statement in the SQL workload. This is similar to the EXPLAIN PLAN command. The resulting plans will be stored in the advisor framework in association with the task.
-COMPARE [PERFORMANCE] �C analyze and compare two versions of SQL performance data. The performance data is generated by test-executing or generating explain plan of the SQL statements. Use this option when two executions of type EXPLAIN_PLAN or TEST_EXECUTE already exist in the task
-CONVERT SQLSET �C used to read the statistics captured in a SQL Tuning Set and model them as a task execution. This can be used when you wish to avoid executing the SQL statements because valid data for the experiment already exists in the SQL Tuning Set.
+[TEST] EXECUTE – test-execute every SQL statement and collect its execution plans and execution statistics. The resulting plans and statistics will be stored in the advisor framework. This is default.
+EXPLAIN PLAN – generate explain plan for every statement in the SQL workload. This is similar to the EXPLAIN PLAN command. The resulting plans will be stored in the advisor framework in association with the task.
+COMPARE [PERFORMANCE] – analyze and compare two versions of SQL performance data. The performance data is generated by test-executing or generating explain plan of the SQL statements. Use this option when two executions of type EXPLAIN_PLAN or TEST_EXECUTE already exist in the task
+CONVERT SQLSET – used to read the statistics captured in a SQL Tuning Set and model them as a task execution. This can be used when you wish to avoid executing the SQL statements because valid data for the experiment already exists in the SQL Tuning Set.
 
 
 For 9i Upgrade to 10g
@@ -27466,7 +27466,7 @@ For 9i Upgrade to 10g
 
 exec dbms_stats.gather_system_stats(gathering_mode=>'NOWORKLOAD');
 
-alter system set "_optim_peek_user_binds"=false;           ==> ����BIND PEEK���ԣ���������10g����
+alter system set "_optim_peek_user_binds"=false;           ==> 禁用BIND PEEK特性，该特性在10g中有
 
 exec DBMS_STATS.SET_PARAM( 'method_opt','FOR ALL COLUMNS SIZE 1' );
 commit;
@@ -27548,9 +27548,9 @@ execution_params=>dbms_advisor.arglist('DATABASE_LINK','DBLINKNAME'));
 select sofar,totalwork from V$ADVISOR_PROGRESS where task_id=<TID>;
 
 
-������ORA-125XX��������
-2012/01/25 BY MACLEAN LIU ��������
-�������Action Script�����ռ����ڽ��ORA-125XX(��ORA-12560)�����������ӹ���ʱ��һЩ˼·����Ҫ���� ���е���������(client & server side)��������־��SQLNET Client trace����Ϣ�C How to troubleshooting ORA-125** connection issues��
+如何诊断ORA-125XX连接问题
+2012/01/25 BY MACLEAN LIU 暂无评论
+以下这个Action Script是我收集的在解决ORA-125XX(如ORA-12560)这类网络链接故障时的一些思路，主要包括 现有的网络配置(client & server side)、监听日志、SQLNET Client trace等信息– How to troubleshooting ORA-125** connection issues：
 
 ORA-12560
 
@@ -27603,7 +27603,7 @@ $lsnrctl status listener
 agent.log and the crsd.log ..
 crsd agent log and the crsd.log
 $crsctl getperm resource ora.LISTENER.lsnr
-sql net client trace , Client side tracing is done by adding the following syntax to the client��s sqlnet.ora file:
+sql net client trace , Client side tracing is done by adding the following syntax to the client’s sqlnet.ora file:
 We will need a timestamped matching set of client/listener sqlnet traces while error is reproduced in order to find the root cause of the issue.
 ++ Enable client sqlnet tracing.
 =======================
@@ -27621,11 +27621,11 @@ Upload the traces containing the error to me on metalink.
 To do this edit the listener.ora and add,
 TRACE_LEVEL_{listener name}=16
 TRACE_TIMESTAMP_{listener name}=TRUE
-TRACE_DIRECTORY_{listener name}=/tmp {�C this can be any directory other than a top level directory like / or c:\
+TRACE_DIRECTORY_{listener name}=/tmp {– this can be any directory other than a top level directory like / or c:\
 Replace {listener name} with the name of the listener. For example if your listener was called LISTENER then TRACE_LEVEL_LISTENER=16
 You need to restrict the amount of disk space used by the tracing then you must also set,
-TRACE_FILELEN_{listener name}=500000 {�C size of the files in K
-TRACE_FILENO_{listener name}=10 {�C number of files
+TRACE_FILELEN_{listener name}=500000 {– size of the files in K
+TRACE_FILENO_{listener name}=10 {– number of files
 This will limit the traces to 10 files of around 500Mb, so 5000Mb in total. When the 10th file is full it will reuse file number one.
 You will need to stop/start the listener for this to take effect.
 When the problem reproduces please can you upload the listener trace and the listener log.
@@ -27642,7 +27642,7 @@ truss -o /tmp/lisener.out -fae lsnrctl start {listener_name}
 Some Useful Note:
 Note.444705.1 TroubleShooting Guide For ORA-12514 TNS listener could not resolve SERVICE_NAME given in connect descriptor
 Note.761740.1 Technicians Unable To Receive Orders While MWM Components Display ODBC Errors And Are Connected
-Note.119007.1 ORA-12560: Administering the Listener on UNIX �C Troubleshooting
+Note.119007.1 ORA-12560: Administering the Listener on UNIX – Troubleshooting
 Note 276812.1 TNS-12542 Error When Executing Batch Jobs or in High Transaction Environment
 Note.219208.1 Ext/Pub Client Connection via Connect Manager Fails with TNS-12564
 Note.393941.1 Ext/Mod ORA-12564 Reported When Using 10g Connection Manager
@@ -27654,7 +27654,7 @@ For database links between different Oracle versions connections must be support
 eg: As 9.2 -} 7.3.4 is not supported then database links between these version
 are not supported in either direction.
 You are trying to connect two versions (client-server) that are not certified (as confirmed by Note 207303.1) and between which exist many technical incompatibilities.
-CLIENT �� LISTENER �� SERVER RESULT
+CLIENT — LISTENER — SERVER RESULT
 8 11.1 8 OK
 9 11.1 9 OK
 10 11.1 10 OK
@@ -27670,21 +27670,21 @@ CLIENT �� LISTENER �� SERVER RESULT
 10 11.2 8 FAILS
 11 11.2 8 FAILS
 The relevant relationship that appears to be at issue is LISTENER and DATABASE. Client version is not a factor.
-But if the ultimate outcome is that the 11.2 (11gR2) LISTENER is indicated (though I still haven��t seen documentation of this) as not compatible with use on a ORACLE 8i (8.1.7.0) DATABASE, then we��ll capture that here and move on. I would, however, like to see some evidence of this, if it is available. I can find notes in the KB about 10gR2��s listener not supporting 8i database, and I can find notes about 11gR1 having resolved that regression. But I can find nothing regarding listener/database compatibility that mentions 11gR2, that would explain our results.
+But if the ultimate outcome is that the 11.2 (11gR2) LISTENER is indicated (though I still haven’t seen documentation of this) as not compatible with use on a ORACLE 8i (8.1.7.0) DATABASE, then we’ll capture that here and move on. I would, however, like to see some evidence of this, if it is available. I can find notes in the KB about 10gR2′s listener not supporting 8i database, and I can find notes about 11gR1 having resolved that regression. But I can find nothing regarding listener/database compatibility that mentions 11gR2, that would explain our results.
 Clients should be complied with Servers , For Sever 11.2 the only supported clients are 11.2.0 , 11.1.0 , 10.2.0 : 10g end MUST be at 10.2.0.2 (or higher) respectively in order to use PLSQL between those versions. See Note:4511371.8 for more details and finally 10.1.0.5 only with extended support .
 On the other Side in order to connect from listener to DB server in a supported way , Listener version should be greater than or equal to the server version .
 Note 207303.1 should still be followed.
 
 
 
-oracle������������������ã�declare��define��variable
-1��define��variable����sqlplus�У�������sqlplus�����ж���Ч(until exit,disc��cut down session)����declare����pl/sql�С�
-2��variable��var����define�������ڣ�ǰ�����ڰ󶨱���������������&��&&���б����滻(ʹ�ó���,�������������)��
+oracle定义变量（常量）常用：declare、define、variable
+1）define、variable用于sqlplus中，在整个sqlplus连接中都生效(until exit,disc是cut down session)，而declare用于pl/sql中。
+2）variable（var）和define区别在于，前者用于绑定变量，后者是用于&或&&进行变量替换(使用场合,拿来当输入参数)。
 
 define
 SQL> define x='SCOTT'
 SQL> define
-DEFINE _DATE           = "29-9�� -13" (CHAR)
+DEFINE _DATE           = "29-9月 -13" (CHAR)
 DEFINE _CONNECT_IDENTIFIER = "myorcl11" (CHAR)
 DEFINE _USER           = "SYS" (CHAR)
 DEFINE _PRIVILEGE      = "AS SYSDBA" (CHAR)
@@ -27742,32 +27742,32 @@ DBA
 --------------------------------
 16777236
 
-ִ�д洢���̣�(��¥�Ϲ�4�ַ���)
+执行存储过程：(加楼上共4种方法)
 
-��1
+法1
 BEGIN
     getDeptCount;
 END;
-��2
+法2
 EXEC getDeptCount
-��3
+法3
 CALL  getDeptCount();
-ע�⣺
+注意：
 
-�����޲δ洢����ʱ���洢���������ܼ�()
-�ڿ��л���ͨ��EXEC���ô洢����ʱ����ʡ��()
-ͨ��CALL�����޲δ洢���̱������()
+定义无参存储过程时，存储过程名后不能加()
+在块中或是通过EXEC调用存储过程时可以省略()
+通过CALL调用无参存储过程必须加上()
 
-����ֻ��ָ������,����ָ�����Ⱦ��ȷ�Χ,����ָ��Ĭ��ֵ��
-varchar2(200)  ,ֻ����varchar2
+参数只能指定类型,不能指定长度精度范围,可以指定默认值：
+varchar2(200)  ,只能用varchar2
 
     ...PROCEDURE add_deptno(v_deptno IN dept.deptno%TYPE,
                 v_dname IN VARCHAR2,
                 v_loc IN dept.loc%TYPE DEFAULT 'BEJING')...
-�����̴��ݲ����ķ�����
-    1��λ�ô��� exec add_dept(50,'SALES','BEIJING')
-    2�����ƴ��� exec add_dept(v_dname=>'SALES',v_deptno=>50,v_loc=>'BEIJING')
-    3����ϴ��� exec add_dept(50,v_loc=>'BEIJING,v_dname=>'SALES')
+给过程传递参数的方法：
+    1，位置传递 exec add_dept(50,'SALES','BEIJING')
+    2，名称传递 exec add_dept(v_dname=>'SALES',v_deptno=>50,v_loc=>'BEIJING')
+    3，组合传递 exec add_dept(50,v_loc=>'BEIJING,v_dname=>'SALES')
 
 
 
@@ -27777,7 +27777,7 @@ varchar2(200)  ,ֻ����varchar2
 
 
 
-���½ű����������ҳ�ASM�洢�е�Spfile�����ļ�����Ϊʹ��asmcmdȥ���Һܲ����㣬��spfile��ʧ���Ǻ�ͷ������飬 ������һ���ű����Ϳ���ʡ���ٹ����أ�
+以下脚本可以用于找出ASM存储中的Spfile参数文件，因为使用asmcmd去查找很不方便，而spfile丢失又是很头大的事情， 所以有一个脚本代劳可以省不少功夫呢！
 
 
 --- listspfiles.sql
@@ -27820,8 +27820,8 @@ FULL_PATH                                                                       
 
 
 
-[MySQLSlowlog]��ȷ��ȫ�����������ѯ��־slowlog������
-2014-02-14     ����˵����    ��Դ��[MySQL Slow log]��ȷ��ȫ�����������ѯ��־slow log������   �ղ�     ��ҪͶ��
+[MySQLSlowlog]正确安全清空在线慢查询日志slowlog的流程
+2014-02-14     我来说两句    来源：[MySQL Slow log]正确安全清空在线慢查询日志slow log的流程   收藏     我要投稿
 1, see the slow log status;
 mysql> show variables like '%slow%';
 +---------------------+------------------------------------------+
@@ -27911,11 +27911,11 @@ mv /mysqllog/slow_log/slow_queries_3306.log /mysqlbackup/slow_log/slow_queries_3
 
 
 
-How to Find which Session is Holding a Particular Library Cache Lock [ID 122793.1]��ÿ��һ�롿--2012-11-13
-2012-11-12 17:22 348���Ķ� ����(0) �ղ� �ٱ�
-Ŀ¼( )[+]
+How to Find which Session is Holding a Particular Library Cache Lock [ID 122793.1]【每日一译】--2012-11-13
+2012-11-12 17:22 348人阅读 评论(0) 收藏 举报
+目录( )[+]
 
-�׻�һ�飬�򵥿ɷ�����ȥ����
+白话一遍，简单可分两步去查找
 1.
 select  kgllkses saddr,kgllkhdl handle,kgllkmod mod,kglnaobj object
 from x$kgllk lock_a
@@ -27944,7 +27944,7 @@ Information in this document applies to any platform.
 Purpose
 Purpose
 In some situations it may happen that your session is hanging and is waiting for a 'Library cache lock'. This document describes how to find the session that  is holdig the lock that you are waiting for.
- ��һЩ��������������ĻỰ�����ǲ��ҵȴ�һ���¼���LIBRARY CACHE LOCK'������ĵ�����������ҵ�ռ����ȴ����ĻỰ��
+ 在一些环境它将发生你的会话卡在那并且等待一个事件“LIBRARY CACHE LOCK'。这个文档描述了如何找到占用你等待锁的会话。
 Scope and Application
 Support Analysts and DBAs
 
@@ -27955,14 +27955,14 @@ A DML operation that is hanging because the table which is accessed is currently
 In this case, V$LOCK will show that the session doing the 'ALTER TABLE' with an exclusive DML enqueue lock on the table object (LMODE=6, TYPE=TM where ID1 is the OBJECT_ID of the table). The waiting session however does not show up in V$LOCK yet so in an environment with a lot of concurrent sessions the V$LOCK information will be insufficient to track down the culprit blocking your operation.
 The compilation of package will hang on Library Cache Lock and Library Cache Pin if any users are executing a procedure/function defined in the same package
 
-��������
-#һ��DML����������Ϊ��ǰ���ʵı��ھ����޸ģ�ALTER TABLE).������ܻỨ�Ѻܳ���ʱ�䣬��ȡ���ڱ��Ĵ�С���޸ĵ����ͣ���ALTER TABLE x MODIFY (col1 CHAR(200)�ڱ����м�ǧ�еļ�¼��
-����������£�V$LOCK����ʾ�Ự��������ALTER TABLE�����ö�ռDML�������ڱ������ϣ�LMODE=6,TYPE=TM ID1�Ǳ���OBJECT_ID�ֶ�).�ȴ��Ự������ʾ��
-V$LOCK��ͼ�������ڴ������ಢ���Ự�Ļ����V$LOCK����Ϣ�������Ը��ٵ��谭�������Ԫ�ס�
-#���ı��뽫��ΪLIBRARY CACHE LOCK��LIBRARY CACHE PIN�¼���������κ��û�ִ��һ������/������ͬһ�������еĶ��塣
+常见情形
+#一个DML操作挂起因为当前访问的表在经历修改（ALTER TABLE).这个可能会花费很长的时间，它取决于表的大小和修改的类型（如ALTER TABLE x MODIFY (col1 CHAR(200)在表上有几千行的记录）
+在这种情况下，V$LOCK将显示会话正在做”ALTER TABLE“采用独占DML对列锁在表对象上（LMODE=6,TYPE=TM ID1是表的OBJECT_ID字段).等待会话不会显示在
+V$LOCK视图，所以在存有许多并发会话的环境里，V$LOCK的信息将不足以跟踪到阻碍你操作的元凶。
+#包的编译将因为LIBRARY CACHE LOCK和LIBRARY CACHE PIN事件挂起，如果任何用户执行一个过程/函数在同一个包体中的定义。
 Method 1: Systemstate Analysis
 Systemstate event will create a tracefile containing detailed information on every Oracle process. This information includes all the resources held & requested by a specific process.
-����1��ϵͳ״̬����
+方法1：系统状态分析
 While an operation is hanging, open a new session and launch the following statement:
 For Oracle 9.2.0.1 or higher:
 $sqlplus '/ as sysdba'
@@ -27971,23 +27971,23 @@ oradebug unlimit
 oradebug dump systemstate 266
 
 For older versions you can use the following syntax that is also possible in higher versions.The level 266 is not available before 9.2.0.6
-�����ϰ汾��DB�������ʹ�����µ��﷨����Ҳ�������ڸ߰汾�С�266������9.2.0.6֮ǰ�ǲ����õġ�
+对于老版本的DB，你可以使用如下的语法，它也可以用于高版本中。266级别在9.2.0.6之前是不可用的。
 alter session set max_dump_file_size=unlimited;
 alter session set events 'immediate trace name systemstate level 10'
 
  Oracle will create a systemstate tracefile in your USER_DUMP_DEST directory.
-ORACLE������һ��ϵͳ״̬�ĸ����ļ������USER_DUMP_DESTĿ¼�
+ORACLE将创建一个系统状态的跟踪文件在你的USER_DUMP_DEST目录里。
 Get the PID (ProcessID) of the 'hanging' session:
---��ȡPID
+--获取PID
 select pid from v$process where addr=
 (select paddr from v$session where sid= <sid_of_hanging_session> );
 
 The systemstate dump contains a separate section with information for each process.
 Open the tracefile and do a search for "PROCESS <PID from above>".
 In the process section search for the wait event by doing a search on 'waiting for'.
-ϵͳ״̬��DUMP����һ�������Ĳ��ݵ���Ϣ����ÿһ�����̡�
-�򿪸����ļ�����ִ��һ�����ڡ�PROCESS PID�������� --PIDΪ�����ҳ���PID
-�ڽ��̲�����Ϣ����ҹ��ڡ�WAITING FOR���ĵȴ��¼���
+系统状态的DUMP包含一个独立的部份的信息对于每一个进程。
+打开跟踪文件并且执行一个关于”PROCESS PID“的搜索 --PID为上面找出的PID
+在进程部份信息里查找关于‘WAITING FOR’的等待事件。
 PROCESS 20:
 ----------------------------------------
 SO: 0x7d2bd820, type: 2, owner: (nil), flag: INIT/-/-/0x00
@@ -28004,7 +28004,7 @@ Process Group: DEFAULT, pseudo proc: 0x7d2ed5dc
 O/S info: user: oracle, term: pts/7, ospid: 19759
 OSD pid info: Unix process pid: 19759, image: goblin.forgotten.realms (TNS V1-V3)
 
-<cut> --Ƭ��
+<cut> --片段
 
 (session) sid: 141 trans: (nil), creator: 0x7d2bd820, flag: (41) USR/- BSY/-/-/-/-/-
 DID: 0001-0014-00000668, short-term DID: 0000-0000-00000000
@@ -28018,7 +28018,7 @@ waiting for 'library cache lock' blocking sess=0x(nil) seq=36 wait_time=0 second
 handle address=62d064dc, lock address=79f88a68, 100*mode+namespace=c9
 
 Use the handle address to find information on the object locked:
- #ʹ��HANDLE ADDRESSȥ���ұ����������Ϣ
+ #使用HANDLE ADDRESS去查找被锁对象的信息
 SO: 0x79f88a68, type: 53, owner: 0x7d3d62d0, flag: INIT/-/-/0x00
 LIBRARY OBJECT LOCK: lock=79f88a68 handle=62d064dc request=S
 call pin=(nil) session pin=(nil) hpc=0000 hlc=0000
@@ -28029,10 +28029,10 @@ name=SCOTT.EMPLOYEES
 
 We see the library object lock is being requested in Shared mode (request=S)
 Name of the the object is SCOTT.EMPLOYEES
-���ǿ���LIBRARY�Ķ���������Ҫ���Թ���ģʽ��REQUEST=S)
-��������ƽ���SCOTT.EMPLOYEES
+我们看到LIBRARY的对象锁正被要求以共享模式（REQUEST=S)
+对象的名称叫做SCOTT.EMPLOYEES
 Use the 'handle address' to find the process that is holding the lock on  your resource by doing a search on the address within the same tracefile.
- #ʹ�á�HANDLE ADDRESS'ȥ����ռ����Դ���Ľ��̣���ͬһ�������ļ�����ҵ�ַ��
+ #使用‘HANDLE ADDRESS'去查找占有资源锁的进程，在同一个跟踪文件里查找地址。
 PROCESS 18:
 ----------------------------------------
 SO: 0x7d2bcca8, type: 2, owner: (nil), flag: INIT/-/-/0x00
@@ -28058,12 +28058,12 @@ name=SCOTT.EMPLOYEES
 From the output we can see that the Process 18 (pid)  is holding  an exclusive lock (mode=X) on the object we are trying to access. Using V$PROCESS and V$SESSION we can retrieve the sid, user, terminal, program,... for this process.
 
 The actual statement that was launched by this session is also listed in the tracefile (statements and other library cache objects are preceded by 'name=').
-����������ǿ��Կ���PROCESS 18(PID)��ռ����������MODE=X����������ͼ���ʵĶ����ϡ�ʹ��V$PROCESS��V$SESSION���ǿ��Է���SID,USER,TEMINAL,PROGRAM,...����������̡�
+从输出中我们可以看到PROCESS 18(PID)正占有排它锁（MODE=X）在我们试图访问的对象上。使用V$PROCESS和V$SESSION我们可以返回SID,USER,TEMINAL,PROGRAM,...对于这个进程。
  METHOD 2: EXAMINE THE X$KGLLK TABLE
 The X$KGLLK table (accessible only as SYS/INTERNAL) contains all the library object locks (both held & requested) for all sessions and is more complete than the V$LOCK view although the column names don't always reveal their meaning.
 
 You can examine the locks requested (and held) by the waiting session by looking up the session address (SADDR) in V$SESSION and doing the following select:
-��X$KGLLK������SYS/INTERNAL���ʣ����������еĿ��������ռ�еĺ�Ҫ��ģ��������еĻỰ���ҶԱ���V$LOCK����ȫ��ģ�ֻ������ͨ��������ʾ������˼��
+表X$KGLLK表（仅SYS/INTERNAL访问）包含了所有的库对象锁（占有的和要求的）对于所有的会话并且对比于V$LOCK它更全面的，只是列名通常不能显示它的意思。
 select sid,saddr from v$session where event= 'library cache lock';
 
 SID SADDR
@@ -28080,9 +28080,9 @@ HANDLE   REQUEST   OBJECT
 62d064dc          2 EMPLOYEES
 
 This will show you the library cache lock requested by this session (KGLLKREQ > 0) where KGLNAOBJ contains the first 80 characters of the name of the object.The value in KGLLKHDL corresponds with the 'handle address' of the object in Method 1 Systemstate Analysis as shown above.
-����ʾ�˿⻺����Ҫ�������������û���KGLLKREQ>0����KGLNAOBJ�����˶������Ƶ�ǰ80���ַ���ֵKGLLKHDL��Ӧ�ڶ���ġ�HANDLE ADDRESS�� �������ϵͳ��������1�С�
+它显示了库缓存锁要求的锁对于这个用户（KGLLKREQ>0），KGLNAOBJ包含了对象名称的前80个字符。值KGLLKHDL对应于对象的’HANDLE ADDRESS‘ 在上面的系统分析方法1中。
  If we now match the KGLLKHDL with the handles of other sessions in X$KGLLK that should give us the address of the blocking session.The session holding the lock will have KGLLKMOD > 0 as it is holding the lock.
-�������������X$KGLLK��ȥƥ��KGLLKHDLֵ�������û����������������Ự�ĵ�ַ������Ựռ������ӵ��KGLLKMOD��0 ����ռ����ʱ��
+如果我们现在在X$KGLLK中去匹配KGLLKHDL值的其它用户，它将给出阻塞会话的地址。这个会话占有锁将拥有KGLLKMOD》0 当它占有锁时。
 select kgllkses saddr,kgllkhdl handle,kgllkmod mod,kglnaobj object
 from x$kgllk lock_a
 where kgllkmod > 0
@@ -28100,7 +28100,7 @@ EMPLOYEES
 
 
 If we look a bit further we can then again match KGLLKSES with SADDR in v$session to find further information on the blocking session:
-������ǿ��˸�Զһ�㣬���ǿ��Ի��ƥ��KGLLKSES����V$SESSION�е�SADDR��ֵȥ���������Ự�Ľ�һ����Ϣ��
+如果我们看了更远一点，我们可以获得匹配KGLLKSES和在V$SESSION中的SADDR的值去发现阻塞会话的进一步信息。
 
 select sid,username,terminal,program from v$session where saddr = '572eac94'
 
@@ -28113,7 +28113,7 @@ sqlplus@goblin.forgotten.realms (TNS V1-V3)
 
 
 In the same way we can also find all the blocked sessions:
-��ͬ���ķ�������Ҳ���Բ�ѯ���б������ĻỰ��
+用同样的方法我们也可以查询所有被阻塞的会话：
 select sid,username,terminal,program from v$session
 where saddr in
 (select kgllkses from x$kgllk lock_a
@@ -28142,83 +28142,83 @@ Note:1054939.6 COMPILATION OF PACKAGE IS HANGING ON LIBRARY CACHE LOCK
 
 
 
- Oracle Library Cache Lock ���˼·
-���ࣺ Oracle Troubleshooting 2012-09-07 23:26 10860���Ķ� ����(3) �ղ� �ٱ�
+ Oracle Library Cache Lock 解决思路
+分类： Oracle Troubleshooting 2012-09-07 23:26 10860人阅读 评论(3) 收藏 举报
 librarycacheoraclesessionobjectnull
 
-һ.  Library Cache Lock
+一.  Library Cache Lock
 
 
 
-Library cacheHandle �ﱣ����lock �� pin ����Ϣ��������Library cache handle ��child cursor �϶���lock ��pin�����ǳ�Ϊlibrary cache lock��library cache pin��
+Library cacheHandle 里保存了lock 和 pin 的信息。而且在Library cache handle 和child cursor 上都有lock 和pin。它们称为library cache lock和library cache pin。
 
-Library cachelock/pin���������ƶ�librarycache object�Ĳ������ʵġ�Lock����������pin����һ���ԣ�lock�������librarycache handle, ��pin�������heap��
-       ��������Ҫ����ĳ��library cache object����������Ҫ������ָ�����object��handle��lock��������lock֮�����Ǿ���Ҫpinסָ�����object��heap��
+Library cachelock/pin是用来控制对librarycache object的并发访问的。Lock管理并发，pin管理一致性，lock是针对于librarycache handle, 而pin是针对于heap。
+       当我们想要访问某个library cache object，我们首先要获得这个指向这个object的handle的lock，获得这个lock之后我们就需要pin住指向这个object的heap。
 
-       �����Ƕ԰����洢���̣���������ͼ���б����ʱ��Oracle�ͻ�����Щ�����handle�������Ȼ��һ��library cache lock��Ȼ��������Щ�����heap�ϻ��pin���������ܱ�֤�ڱ����ʱ���������̲�����������Щ����Ķ��壬���߽�����ɾ����
+       当我们对包，存储过程，函数，视图进行编译的时候，Oracle就会在这些对象的handle上面首先获得一个library cache lock，然后再在这些对象的heap上获得pin，这样就能保证在编译的时候其它进程不会来更改这些对象的定义，或者将对象删除。
 
-       ��һ��session��SQL������Ӳ������ʱ�����session�ͱ�����librarycache lock����������session�Ͳ��ܹ����ʻ��߸������SQL�����õĶ����������ȴ��¼����˺ܳ�ʱ�䣬ͨ������������̫С(���ڹ�����̫С����Ҫ����free��chunk�����߽�ĳЩ���Ա��Ƴ���object page out������Ҫ���ܳ�ʱ��)����Ȼ�ˣ�Ҳ�п��������session���ڶ�object�����޸�(����split ����),����ǰsession��Ҫ�����Ǹ�table����ô������������Ǳ���������session������ϡ�
+       当一个session对SQL语句进行硬解析的时候，这个session就必须获得librarycache lock，这样其他session就不能够访问或者更改这个SQL所引用的对象。如果这个等待事件花了很长时间，通常表明共享池太小(由于共享池太小，需要搜索free的chunk，或者将某些可以被移出的object page out，这样要花很长时间)，当然了，也有可能另外的session正在对object进行修改(比如split 分区),而当前session需要引用那个table，那么这种情况下我们必须等另外的session进行完毕。
 
-Library Cache lock��3��ģʽ��
-       ��1��Share(S):      ����ȡһ��library cache object��ʱ����
-       ��2��Exclusive(X):  ������/�޸�һ��library cache object��ʱ����
-       ��3��Null(N)��     ����ȷ������������
+Library Cache lock有3中模式：
+       （1）Share(S):      当读取一个library cache object的时候获得
+       （2）Exclusive(X):  当创建/修改一个library cache object的时候获得
+       （3）Null(N)：     用来确保对象依赖性
 
-       ����һ��������Ҫ����ĳ����ͼ����ô�ͻ���һ�����������������Ҫcreate/drop/alterĳ��������ô�ͻ���exclusive lock��Null���ǳ����⣬�������κο���ִ�еĶ���(cursor��function)���涼ӵ��NULL�������ǿ�����ʱ�������NULL���������NULL����������,�ͱ�ʾ������󱻸����ˣ���Ҫ���±��롣
-       NULL����Ҫ��Ŀ�ľ��Ǳ��ĳ�������Ƿ���Ч������һ��SQL����ڽ�����ʱ������NULL ����������SQL�Ķ���һֱ�ڹ������У���ô���NULL���ͻ�һֱ������ȥ�������SQL��������õı����޸�֮�����NULL���ͱ������ˣ���Ϊ�޸����SQL����ʱ�����Exclusive ��������NULL���������ˣ��´�ִ�����SQL��ʱ�����Ҫ���±��롣
+       比如一个进程想要编译某个视图，那么就会获得一个共享锁，如果我们要create/drop/alter某个对象，那么就会获得exclusive lock。Null锁非常特殊，我们在任何可以执行的对象(cursor，function)上面都拥有NULL锁，我们可以随时打破这个NULL锁，当这个NULL锁被打破了,就表示这个对象被更改了，需要从新编译。
+       NULL锁主要的目的就是标记某个对象是否有效。比如一个SQL语句在解析的时候获得了NULL 锁，如果这个SQL的对象一直在共享池中，那么这个NULL锁就会一直存在下去，当这个SQL语句所引用的表被修改之后，这个NULL锁就被打破了，因为修改这个SQL语句的时候会获得Exclusive 锁，由于NULL锁被打破了，下次执行这个SQL的时候就需要从新编译。
 
-Library Cache pin��2��ģʽ��
-       ��1��Share(S):      ��ȡobject heap
-       ��2��Exclusive(X)�� �޸�object heap
+Library Cache pin有2种模式：
+       （1）Share(S):      读取object heap
+       （2）Exclusive(X)： 修改object heap
 
-       ��ĳ��session��Ҫ��ȡobject heap������Ҫ���һ������ģʽ��pin����ĳ��session��Ҫ�޸�object heap������Ҫ���������pin����Ȼ���ڻ��pin֮ǰ������lock��
+       当某个session想要读取object heap，就需要获得一个共享模式的pin，当某个session想要修改object heap，就需要获得排他的pin。当然了在获得pin之前必须获得lock。
 
-       ��Oracle10gR2�У�library cache pin��library cache mutex ��ȡ����
+       在Oracle10gR2中，library cache pin被library cache mutex 所取代。
 
-Library cache latch�������ƶ�library cache object�Ĳ������ʡ�ǰ���Ѿ��ᵽ������Ҫ����library cacheobject֮ǰ������librarycache lock�� lock����һ��ԭ�Ӳ���(ԭ�Ӳ��������ڲ������в��ᱻ���ƵĲ����������������lock���Ա�����), OracleΪ�˱������lock��������library cache latch���ƣ�Ҳ����˵�ڻ��library cachelock֮ǰ����Ҫ�Ȼ��library cache latch�������library cache lock֮����ͷ�librarycache latch��
+Library cache latch用来控制对library cache object的并发访问。前面已经提到，我们要访问library cacheobject之前必须获得librarycache lock， lock不是一个原子操作(原子操作就是在操作程中不会被打破的操作，很明显这里的lock可以被打破), Oracle为了保护这个lock，引入了library cache latch机制，也就是说在获得library cachelock之前，需要先获得library cache latch，当获得library cache lock之后就释放librarycache latch。
 
-       ���ĳ��librarycache objectû�����ڴ��У���ô���lock�Ͳ��ܱ���ȡ�����ʱ����Ҫ���һ��library cache load lock latch��Ȼ���ٻ�ȡһ��librarycache load lock,��load lock���֮����ͷ�library cache load lock latch��
+       如果某个librarycache object没有在内存中，那么这个lock就不能被获取，这个时候需要获得一个library cache load lock latch，然后再获取一个librarycache load lock,当load lock获得之后就释放library cache load lock latch。
 
-       librarycache latch����������_KGL_LATCH_COUNT�Ŀ��ƣ�Ĭ��ֵΪ���ڵ���ϵͳ��CPU��������С����������Oracle������һ��Ӳ�����ƣ��ò������ܴ���67��
-       ע�⣺����ȥ��ѯ_kgl_latch_count��ʱ����ʾΪ0,����һ��bug��
+       librarycache latch受隐含参数_KGL_LATCH_COUNT的控制，默认值为大于等于系统中CPU个数的最小素数，但是Oracle对其有一个硬性限制，该参数不能大于67。
+       注意：我们去查询_kgl_latch_count有时候显示为0,这是一个bug。
 
-Oracle���������㷨��ȷ��library cache object handle�����ĸ���latch�������ģ�
+Oracle利用下面算法来确定library cache object handle是由哪个子latch来保护的：
        latch#= mod(bucket#, #latches)
 
-       Ҳ����˵���ĸ���latchȥ����ĳ��handle�Ǹ����Ǹ�handle���ڵ�bucket�ţ��Լ��ܹ��ж��ٸ���latch������hash����õ��ġ�
+       也就是说用哪个子latch去保护某个handle是根据那个handle所在的bucket号，以及总共有多少个子latch来进行hash运算得到的。
 
 
-MOS ���ĵ���122793.1����˵����librarycache lockͨ����2��ԭ��
+MOS 的文档【122793.1】里说导致librarycache lock通常有2种原因：
 
-��1��A DML operation that is hangingbecause the table which is accessed is currently undergoing changes (ALTERTABLE). This may take quite a long time depending on the size of the table andthe type of the modification (e.g. ALTER TABLE x MODIFY (col1 CHAR(200) on atable with thousands of records)
+（1）A DML operation that is hangingbecause the table which is accessed is currently undergoing changes (ALTERTABLE). This may take quite a long time depending on the size of the table andthe type of the modification (e.g. ALTER TABLE x MODIFY (col1 CHAR(200) on atable with thousands of records)
 In this case,V$LOCK will show that the session doing the 'ALTER TABLE' with an exclusive DMLenqueue lock on the table object (LMODE=6, TYPE=TM where ID1 is the OBJECT_IDof the table). The waiting session however does not show up in V$LOCK yet so inan environment with a lot of concurrent sessions the V$LOCK information will beinsufficient to track down the culprit blocking your operation.
 
-��2��The compilation of package willhang on Library Cache Lock and Library Cache Pin if any users are executing aprocedure/function defined in the same package.
+（2）The compilation of package willhang on Library Cache Lock and Library Cache Pin if any users are executing aprocedure/function defined in the same package.
 
 
-�������ݲο���
-OracleLibrary cache �ڲ����� ˵��
+更多内容参考：
+OracleLibrary cache 内部机制 说明
 http://blog.csdn.net/tianlesoftware/article/details/6629869
 
-OracleLibrary Cache ��lock �� pin ˵��
+OracleLibrary Cache 的lock 与 pin 说明
 http://blog.csdn.net/tianlesoftware/article/details/6641440
 
-OracleNamespace ˵��
+OracleNamespace 说明
 http://blog.csdn.net/tianlesoftware/article/details/6624122
 
-һ��librarycache pin���ϵĽ������
+一次librarycache pin故障的解决过程
 http://blog.csdn.net/tianlesoftware/article/details/6638899
 
 
-��.  ����Library cache lock
+二.  处理Library cache lock
 
-2.1 ʹ��hanganalyze  + systemstat ����
+2.1 使用hanganalyze  + systemstat 分析
 
-Systemstat �¼�����ÿ��oracle ���̵���ϸ��Ϣ��������hangסʱ�������¿�һ�����ڣ�ʹ�ø��¼������������Ϣ��
+Systemstat 事件包含每个oracle 进程的详细信息。当操作hang住时，可以新开一个窗口，使用该事件，捕获相关信息。
 
-Systemdump ����˵����
+Systemdump 级别说明：
 
-LEVEL������
+LEVEL参数：
 10   Dump all processes (IGN state)
 5    Level 4 + Dump all processes involved in wait chains (NLEAF state)
 4 Level 3 + Dump leaf nodes (blockers) in wait chains(LEAF,LEAF_NW,IGN_DMP state)
@@ -28226,29 +28226,29 @@ LEVEL������
 1-2  Only HANGANALYZE output, no process dump at all
 
 level 266= SYSTEM STATE (level=10, withshort stacks) =  level 10 + short stacks
-level 266 ��level 10�Ļ����ϰ����˽��̵�short stacks��Ϣ
+level 266 在level 10的基础上包含了进程的short stacks信息
 
 
-Oracle 9.2.0.1 ֮��ִ�����½ű���
+Oracle 9.2.0.1 之后，执行如下脚本：
 $sqlplus '/ as sysdba'
 oradebugs etmypid
 oradebug unlimit
 oradebug dump systemstate 266
 oradebug tracefile_name
 
-systemstat 226������9.2.0.6 ֮ǰ�����ã�������֮ǰ�İ汾����ʹ���������
+systemstat 226级别在9.2.0.6 之前不可用，所以在之前的版本可以使用如下命令：
 alter session set max_dump_file_size=unlimited;
 alter session set events 'immediate trace name systemstate level 10'
 
 
-��ִ��hanganalyze�����£�
+先执行hanganalyze，如下：
 SQL> oradebug setmypid
 SQL>oradebug unlimit
 SQL> oradebug setinst all
 SQL> oradebug -g def hanganalyze 3;
 SQL>oradebug tracefile_name
 
-�����ļ�������session����1169��������
+如下文件里其他session都被1169的阻塞：
 State of ALL nodes
 ([nodenum]/cnode/sid/sess_srno/session/ospid/state/[adjlist]):
 [1001]/1/1002/9/c00000063d7aff78/9720/NLEAF/[1169]
@@ -28266,10 +28266,10 @@ State of ALL nodes
 [1175]/1/1176/25017/c00000063d8d3dc8/18795/NLEAF/[1169]
 [1177]/1/1178/3/c0000006358ebe60/10170/NLEAF/[1169]
 
-����sess_srno ��v$session �е�serial#.
-Ospid ��ϵͳ���̺š�
+这里sess_srno 是v$session 中的serial#.
+Ospid 是系统进程号。
 
-�ҵ���sid��serial# �Ϳ��Բ鿴��Ӧsession ����Ϣ����ʲô������ ���session û��sql_id, ��ô���Խ�һ��ʹ��oradebug systemdump ��Ӧ�Ľ��̡� ���鿴��Ϣ��
+找到了sid和serial# 就可以查看对应session 的信息，是什么操作。 如果session 没有sql_id, 那么可以进一步使用oradebug systemdump 对应的进程。 来查看信息。
 
 SYS@dave2(db2)> oradebug setospid 9434
 Oracle pid: 18, Unix processpid: 27028, image: oracledave2@db2
@@ -28283,26 +28283,26 @@ SYS@dave2(db2)> oradebug TRACEFILE_NAME
 SYS@dave2(db2)> oradebug close_trace
 Statement processed.
 
-Ȼ��ʹ��awk������systemdump ��trace��
-Oracle ʹ��ass.awk ���߲鿴system state dump ˵��
+然后使用awk来分析systemdump 的trace：
+Oracle 使用ass.awk 工具查看system state dump 说明
 http://blog.csdn.net/tianlesoftware/article/details/7237729
 
-����Ҳ����ֱ����systemdump �鿴���еĽ�����Ϣ��
+这里也可以直接用systemdump 查看所有的进程信息。
 
 
-2.2 �鿴X$KGLLK��
+2.2 查看X$KGLLK表
 The X$KGLLK table (accessibleonly as SYS/INTERNAL) contains all the library object locks (both held &requested) for all sessions and is more complete than the V$LOCK view althoughthe column names don't always reveal their meaning.
---X$KGLLK ��ֻ�ܱ�SYS/INTERNAL�û����ʣ����������library object locks����Ϣ��held��requested����
+--X$KGLLK 表只能被SYS/INTERNAL用户访问，其包含所有library object locks的信息（held和requested）。
 
 
---�鿴�ȴ��¼�Ϊlibrarycache lock��session ��session address (SADDR):
+--查看等待事件为librarycache lock的session 的session address (SADDR):
 
 SQL>select sid,saddr from v$session where event='library cache lock';
 SID SADDR
 ---------- --------
 16 572ed244
 
---��x$kgllk�鿴���������Ϣ��
+--从x$kgllk查看具体的锁信息：
 select kgllkhdl Handle, kgllkreq Request,kglnaobj Object
   from x$kgllk
  where kgllkses = '572ed244'
@@ -28319,7 +28319,7 @@ KGLNAOBJ:contains the first 80 characters of the name of the object.
 KGLLKHDL:corresponds with the 'handle address' of the object
 
 
---Ȼ�����KGLLKHDL��X$KGLLK�鿴KGLLKMOD > 0��session�������ڳ��и�����
+--然后根据KGLLKHDL从X$KGLLK查看KGLLKMOD > 0的session，其正在持有该锁：
 
 select kgllkses saddr, kgllkhdl handle,kgllkmod mod, kglnaobj object
   from x$kgllk lock_a
@@ -28337,7 +28337,7 @@ SADDR    HANDLE         MOD    OBJECT
 
 
 
---�鿴����blocked��session��
+--查看所有blocked的session：
 selectsid, username,terminal, program
   from v$session
  where saddr in
@@ -28351,7 +28351,7 @@ selectsid, username,terminal, program
                    and kgllkreq = 0));
 
 
---�鿴���г���librarycache pin ����lock��session ����ʲô��
+--查看所有持有librarycache pin 或者lock的session 在做什么：
 
 SELECT s.sid, kglpnmod"Mode",kglpnreq "Req", SPID "OS Process"
   FROM v$session_wait w,x$kglpn p, v$session s, v$process o
@@ -28361,20 +28361,20 @@ SELECT s.sid, kglpnmod"Mode",kglpnreq "Req", SPID "OS Process"
    and s.paddr = o.addr
 
 
-2.3 ��������
-һ����˵��ʹ��2.1 ����2.2 �ķ����������ҵ�library cache lock�ĸ�Դ��ȷ�����ĸ�session ���µģ������������hanganalyze�У���1169��session�� ����ֻ��Ҫkill �����session������������ͻ��Զ�����ˡ�
+2.3 处理问题
+一般来说，使用2.1 或者2.2 的方法都可以找到library cache lock的根源，确定是哪个session 导致的，如我们上面的hanganalyze中，是1169的session。 我们只需要kill 掉这个session，其他的问题就会自动解决了。
 
-����DB����kill session�����kill ���ˣ���os ����kill��
+先在DB级别kill session，如果kill 不了，在os 级别kill。
 
 alter systemkill session '1170,9233';
 
-ע����os ����kill ֮ǰ������ps ����鿴һ�¸ý��̣������DB ���̣���������kill������ᵼ��ϵͳcrash��
+注意在os 级别kill 之前，先用ps 命令查看一下该进程，如果是DB 进程，不可随意kill，否则会导致系统crash。
 
-ps ?0?2�Cef|grep 9434
+ps ?0?2–ef|grep 9434
 kill -9 9434
 
 
-�ο���
+参考：
 How to Find which Session is Holding a ParticularLibrary Cache Lock [ID 122793.1]
 
 
@@ -28384,7 +28384,7 @@ How to Find which Session is Holding a ParticularLibrary Cache Lock [ID 122793.1
 
 
 
-    ��11gR1��11gR2�����ݿ�ʹ��RMANִ��duplicate ... from active database����ʱ�����������µĴ���
+    在11gR1和11gR2的数据库使用RMAN执行duplicate ... from active database操作时遇到类似如下的错误：
 Starting backup at 2013-01-22 20:19:41
 using channel ORA_DISK_1
 channel ORA_DISK_1: starting datafile copy
@@ -28410,10 +28410,10 @@ continuing other job steps, job failed will not be re-run
 channel ORA_DISK_1: starting datafile copy
 input datafile file number=00004 name=+DATA1/ractest/datafile/users.259.769378773
 
-��ο�������ƪMETALINK���£�
+请参考以下两篇METALINK文章：
 
 ORA-17628, ORA-19505 during RMAN DUPLICATE FROM ACTIVE [ID 1331986.1]
-�޸�ʱ��:2012-6-1����:PROBLEM״̬:PUBLISHED���ȼ�:3
+修改时间:2012-6-1类型:PROBLEM状态:PUBLISHED优先级:3
 
 In this Document
 Symptoms
@@ -28462,10 +28462,10 @@ References
 BUG:12609412 - ORA-17628 ORA-19505 DURING DUPLICATE FROM ACTIVE
 
 
-��һƪ�����ǣ�
+另一篇文章是：
 
 Duplicate from Active Database Failing with: RMAN-03009, ORA-17628, and ORA-19505 [ID 1439632.1]
-�޸�ʱ��:2012-3-23����:PROBLEM״̬:MODERATED���ȼ�:3
+修改时间:2012-3-23类型:PROBLEM状态:MODERATED优先级:3
 
 In this Document
   Symptoms
@@ -28687,7 +28687,7 @@ sed -n '/CREATE CONTROLFILE.*NORESETLOGS/,/;/p' /u01/app/oracle/diag/rdbms/yft/y
 221 ;
 
 
-�Զ�ˢ����ҳ
+自动刷新网页
 set wshshell = wscript.createobject ("wscript.shell")
 wshshell.appactivate"henanyidong"
 for i=1 to 1
@@ -28713,130 +28713,130 @@ Loop
 
 
 
-set a =WScript.CreateObject("WScript.Shell") '���WScript.Sehll��
-app=a.Run("iexplore")'��IE�����
-WScript.Sleep 1000 'ͣ��1000���뼴1��
+set a =WScript.CreateObject("WScript.Shell") '插件WScript.Sehll象
+app=a.Run("iexplore")'打IE浏览器
+WScript.Sleep 1000 '停顿1000毫秒即1秒
 a.AppActivate app
-a.SendKeys "+{TAB}" '�ƹ�������ַ��
-a.SendKeys "http://request.paic.com.cn/request/request/requestSearch.screen" '������ҳַ
-a.SendKeys "{ENTER}" '������
+a.SendKeys "+{TAB}" '移光标浏览器址栏
+a.SendKeys "http://request.paic.com.cn/request/request/requestSearch.screen" '输入网页址
+a.SendKeys "{ENTER}" '按车键
   Do
-    Wscript.Sleep 5000 '10��ˢ�� ���޸�
-    a.SendKeys "{F5}" '��F5ˢ��ҳ��
+    Wscript.Sleep 5000 '10秒刷新 自修改
+    a.SendKeys "{F5}" '按F5刷新页面
   Loop
-  'ֱѭ����ֱ���������������wscript.exe���� ����
+  '直循环、直打任务管理器结束wscript.exe进程 才退
 
 
 
-dbms_stats��analyze
+dbms_stats与analyze
 
-2012-06-22 12:56:26|  ���ࣺ Ĭ�Ϸ��� |�ٱ�|�ֺ� ����
+2012-06-22 12:56:26|  分类： 默认分类 |举报|字号 订阅
 dbms_stats
 
-DBMS_STATS.GATHER_TABLE_STATS���﷨����:
+DBMS_STATS.GATHER_TABLE_STATS的语法如下:
 DBMS_STATS.GATHER_TABLE_STATS (ownname VARCHAR2, tabname VARCHAR2, partname VARCHAR2, estimate_percent NUMBER,   block_sample BOOLEAN, method_opt VARCHAR2, degree NUMBER, granularity VARCHAR2, cascade BOOLEAN, stattab VARCHAR2, statid VARCHAR2, statown VARCHAR2,   no_invalidate BOOLEAN, force BOOLEAN);
-����˵��:
-ownname:Ҫ��������ӵ����
-tabname:Ҫ�����ı���.
-partname:����������,ֻ�Է������������������.
-estimate_percent:�����еİٷֱ�,ȡֵ��Χ[0.000001,100],nullΪȫ������,������. ����:DBMS_STATS.AUTO_SAMPLE_SIZE��Ĭ��ֵ,��oracle�������ȡ����ֵ.
-block_sapmple:�Ƿ��ÿ���������в���.
-method_opt:����histograms��Ϣ��������ͳ�Ƶ�
-ͨ������ method_opt�����������ܵ�����ֱ��ͼ,����ȡֵ����:
-for all columns:10gĬ��ֵ(���ݰ汾�Ĳ�ͬ��Ĭ��ֵҲ����������)��ͳ�������е�histograms.
-for all indexed columns:ͳ������indexed�е�histograms.
-for all hidden columns:ͳ���㿴�����е�histograms
-for columns <list> SIZE <N> | REPEAT | AUTO | SKEWONLY:ͳ��ָ���е�histograms.N��ȡֵ��Χ[1,254];
-REPEAT�ϴ�ͳ�ƹ���histograms;
-AUTO��oracle����N�Ĵ�С;
-SKEWONLYѡ���ķѴ�������ʱ�䣬��Ϊ��Ҫ���ÿ�������е�ÿ���е�ֵ�ķֲ������
-����dbms_stat����һ�������ĸ����зֲ��ò����ȣ��ͻ�Ϊ�Ǹ���������ֱ��ͼ���������ڴ��۵�SQL�Ż��������ǽ����������ʣ����ǽ���ȫ��ɨ����ʡ�
-degree:�������ж�.Ĭ��ֵΪnull.
-granularity:���÷������ռ�ͳ����Ϣ�����ȣ��ֱ���
-all���Ա���ȫ�֣��������ӷ��������ݶ�������
-auto��Oracle���ݷ��������ͣ��Զ���������һ�����ȵķ���
-global��ֻ��ȫ�ּ���ķ���
-global and partition��ֻ��ȫ�ֺͷ������������������ӷ����������������Ǻ�all��һ������
-partition��ֻ����������������
-subpartition��ֻ���ӷ���������
+参数说明:
+ownname:要分析表的拥有者
+tabname:要分析的表名.
+partname:分区的名字,只对分区表或分区索引有用.
+estimate_percent:采样行的百分比,取值范围[0.000001,100],null为全部分析,不采样. 常量:DBMS_STATS.AUTO_SAMPLE_SIZE是默认值,由oracle决定最佳取采样值.
+block_sapmple:是否用块采样代替行采样.
+method_opt:决定histograms信息是怎样被统计的
+通过设置 method_opt参数可以智能地生成直方图,具体取值如下:
+for all columns:10g默认值(根据版本的不同，默认值也会有所差异)，统计所有列的histograms.
+for all indexed columns:统计所有indexed列的histograms.
+for all hidden columns:统计你看不到列的histograms
+for columns <list> SIZE <N> | REPEAT | AUTO | SKEWONLY:统计指定列的histograms.N的取值范围[1,254];
+REPEAT上次统计过的histograms;
+AUTO由oracle决定N的大小;
+SKEWONLY选项会耗费大量处理时间，因为它要检查每个索引中的每个列的值的分布情况。
+假如dbms_stat发现一个索引的各个列分布得不均匀，就会为那个索引创建直方图，帮助基于代价的SQL优化器决定是进行索引访问，还是进行全表扫描访问。
+degree:决定并行度.默认值为null.
+granularity:设置分区表收集统计信息的粒度，分别有
+all：对表达全局，分区，子分区的数据都做分析
+auto：Oracle根据分区的类型，自动决定做哪一种粒度的分析
+global：只做全局级别的分析
+global and partition：只对全局和分区级别做分析，对子分区不做分析，这是和all的一个区别
+partition：只做分区级别做分析
+subpartition：只做子分区做分析
 exec DBMS_STATS.GATHER_TABLE_STATS(NULL,'T3', GRANULARITY => 'SUBPARTITION', CASCADE => TRUE);
 exec DBMS_STATS.GATHER_TABLE_STATS(NULL,'T2', GRANULARITY => 'PARTITION', CASCADE => TRUE);
 exec DBMS_STATS.GATHER_TABLE_STATS(NULL,'T1', GRANULARITY => 'GLOBAL', CASCADE => TRUE);
 
-���У�T1Ϊȫ����T2Ϊ������T3Ϊ�ӷ���
-cascace:���ռ���������Ϣ.Ĭ��Ϊfalase.
-stattabָ��Ҫ�洢ͳ����Ϣ�ı���statid����������ͳ����Ϣ�洢��ͬһ��stattab�����ڽ������֣�statown�洢ͳ����Ϣ����ӵ���ߡ�����������������ָ��,ͳ����Ϣ��ֱ�Ӹ��µ������ֵ�.
+其中，T1为全表，T2为分区，T3为子分区
+cascace:是收集索引的信息.默认为falase.
+stattab指定要存储统计信息的表；statid如果多个表的统计信息存储在同一个stattab中用于进行区分；statown存储统计信息表的拥有者。以上三个参数若不指定,统计信息会直接更新到数据字典.
 no_invalidate: Does not invalidate the dependent cursors if set to TRUE. The procedure invalidates the dependent cursors immediately if set to FALSE.
-force:��ʹ����ס��Ҳ�ռ�ͳ����Ϣ.
+force:即使表锁住了也收集统计信息.
 
-dbms_stats��ʹ��
-dbms_stats������gather_table_stats�����⻹�����¹���
-EXPORT_COLUMN_STATS�������еķ�����Ϣ
-EXPORT_INDEX_STATS����������������Ϣ
-EXPORT_SYSTEM_STATS������ϵͳ������Ϣ
-EXPORT_TABLE_STATS��������������Ϣ
-EXPORT_SCHEMA_STATS����������������Ϣ
-EXPORT_DATABASE_STATS���������ݿ������Ϣ
-IMPORT_COLUMN_STATS�������з�����Ϣ
-IMPORT_INDEX_STATS����������������Ϣ
-IMPORT_SYSTEM_STATS������ϵͳ������Ϣ
-IMPORT_TABLE_STATS�������������Ϣ
-IMPORT_SCHEMA_STATS�����뷽��������Ϣ
-IMPORT_DATABASE_STATS���������ݿ������Ϣ
-GATHER_INDEX_STATS������������Ϣ
-GATHER_TABLE_STATS����������Ϣ����cascadeΪtrueʱ�����������У���������Ϣ
-GATHER_SCHEMA_STATS������������Ϣ
-GET_COLUMN_STATS����ȡ�ֶε�ͳ����Ϣ
-GET_SYSTEM_STATS����ȡϵͳ��ͳ����Ϣ
-GET_INDEX_STATS����ȡ������ͳ����Ϣ
-GET_TABLE_STATS����ȡ����ͳ����Ϣ
-SET_COLUMN_STATS�������ֶε�ͳ����Ϣ��ͨ��Ӧ���ڲ��Ի�����Ҳ���ų��ڼ������������Ч��
-SET_SYSTEM_STATS������ϵͳ��ͳ����Ϣ
-SET_INDEX_STATS������������ͳ����Ϣ
-SET_TABLE_STATS�����ñ���ͳ����Ϣ
-DELETE_COLUMN_STATS��ɾ���ֶε�ͳ����Ϣ
-DELETE_SYSTEM_STATS��ɾ��ϵͳ��ͳ����Ϣ
-DELETE_INDEX_STATS��ɾ��������ͳ����Ϣ
-DELETE_TABLE_STATS��ɾ������ͳ����Ϣ
-DELETE_DATABASE_STATS��ɾ�����ݿ��ͳ����Ϣ
-DELETE_DICTIONARY_STATS��ɾ�������ֵ��ͳ����Ϣ
-DELETE_SCHEMA_STATS��ɾ���û�������ͳ����Ϣ
-DELETE_FIXED_OBJECTS_STATS��ɾ���̶������ͳ����Ϣ
-GATHER_SCHEMA_STATS������������Ϣ
-GATHER_DATABASE_STATS���������ݿ���Ϣ
-GATHER_SYSTEM_STATS������ϵͳ��Ϣ
-CREATE_STAT_TABLE���������ͳ����Ϣ�ı�
-DROP_STAT_TABLE��ɾ�����ͳ����Ϣ�ı�
-LOCK_TABLE_STATS����������ͳ����Ϣ�������õ�ǰͳ����Ϣ�ǳ��ã��ұ����ݼ������仯ʱ�����Կ�������ͳ����Ϣ������֮����ص��������ݷ����������������м���ֱ��ͼ�������ķ��������������������������¡�
-LOCK_SCHEMA_STATS�������û�������ͳ����Ϣ
-UNLOCK_TABLE_STATS����������ͳ����Ϣ
-UNLOCK_SCHEMA_STATS�������û�������ͳ����Ϣ
-RESTORE_SYSTEM_STATS����ԭϵͳ��ͳ����Ϣ
-RESTORE_INDEX_STATS����ԭ������ͳ����Ϣ
-RESTORE_TABLE_STATS����ԭ����ͳ����Ϣ
-RESTORE_DATABASE_STATS����ԭ���ݿ��ͳ����Ϣ
-RESTORE_DICTIONARY_STATS����ԭ�����ֵ��ͳ����Ϣ
-RESTORE_SCHEMA_STATS����ԭ�û�������ͳ����Ϣ
-RESTORE_FIXED_OBJECTS_STATS����ԭ�̶������ͳ����Ϣ
-ͳ����Ϣ��ԭ��������
-ͨ��dbms_stats.get_stats_history_availability���ҷ������ݻָ�������ʱ��㣬ֻ�������ʱ���֮��ķ������ݲſ��Ա��ָ���
+dbms_stats的使用
+dbms_stats包除了gather_table_stats过程外还有如下过程
+EXPORT_COLUMN_STATS：导出列的分析信息
+EXPORT_INDEX_STATS：导出索引分析信息
+EXPORT_SYSTEM_STATS：导出系统分析信息
+EXPORT_TABLE_STATS：导出表分析信息
+EXPORT_SCHEMA_STATS：导出方案分析信息
+EXPORT_DATABASE_STATS：导出数据库分析信息
+IMPORT_COLUMN_STATS：导入列分析信息
+IMPORT_INDEX_STATS：导入索引分析信息
+IMPORT_SYSTEM_STATS：导入系统分析信息
+IMPORT_TABLE_STATS：导入表分析信息
+IMPORT_SCHEMA_STATS：导入方案分析信息
+IMPORT_DATABASE_STATS：导入数据库分析信息
+GATHER_INDEX_STATS：分析索引信息
+GATHER_TABLE_STATS：分析表信息，当cascade为true时，分析表、列（索引）信息
+GATHER_SCHEMA_STATS：分析方案信息
+GET_COLUMN_STATS：获取字段的统计信息
+GET_SYSTEM_STATS：获取系统的统计信息
+GET_INDEX_STATS：获取索引的统计信息
+GET_TABLE_STATS：获取表的统计信息
+SET_COLUMN_STATS：设置字段的统计信息。通常应用在测试环境，也不排除在极端情况下起到奇效。
+SET_SYSTEM_STATS：设置系统的统计信息
+SET_INDEX_STATS：设置索引的统计信息
+SET_TABLE_STATS：设置表的统计信息
+DELETE_COLUMN_STATS：删除字段的统计信息
+DELETE_SYSTEM_STATS：删除系统的统计信息
+DELETE_INDEX_STATS：删除索引的统计信息
+DELETE_TABLE_STATS：删除表的统计信息
+DELETE_DATABASE_STATS：删除数据库的统计信息
+DELETE_DICTIONARY_STATS：删除数据字典的统计信息
+DELETE_SCHEMA_STATS：删除用户方案的统计信息
+DELETE_FIXED_OBJECTS_STATS：删除固定对象的统计信息
+GATHER_SCHEMA_STATS：分析方案信息
+GATHER_DATABASE_STATS：分析数据库信息
+GATHER_SYSTEM_STATS：分析系统信息
+CREATE_STAT_TABLE：建立存放统计信息的表
+DROP_STAT_TABLE：删除存放统计信息的表
+LOCK_TABLE_STATS：锁定表的统计信息。当觉得当前统计信息非常好，且表数据几乎不变化时，可以考虑锁定统计信息，锁定之后相关的所有数据分析，包括表级，列级，直方图、索引的分析都将被锁定，不允许被更新。
+LOCK_SCHEMA_STATS：锁定用户方案的统计信息
+UNLOCK_TABLE_STATS：解锁表的统计信息
+UNLOCK_SCHEMA_STATS：解锁用户方案的统计信息
+RESTORE_SYSTEM_STATS：还原系统的统计信息
+RESTORE_INDEX_STATS：还原索引的统计信息
+RESTORE_TABLE_STATS：还原表的统计信息
+RESTORE_DATABASE_STATS：还原数据库的统计信息
+RESTORE_DICTIONARY_STATS：还原数据字典的统计信息
+RESTORE_SCHEMA_STATS：还原用户方案的统计信息
+RESTORE_FIXED_OBJECTS_STATS：还原固定对象的统计信息
+统计信息还原过程如下
+通过dbms_stats.get_stats_history_availability查找分析数据恢复到最早时间点，只有在这个时间点之后的分析数据才可以被恢复。
 SQL> select dbms_stats.get_stats_history_availability from dual;
 
 GET_STATS_HISTORY_AVAILABILITY
 ---------------------------------------------------------------------------
 12-MAR-12 10.58.17.552941000 AM +08:00
-�鿴���һ�η�����T��ʱ��
+查看最后一次分析表T的时间
 
 SQL> select last_analyzed from user_tables where table_name='T';
 
 LAST_ANALYZED
 ------------------
 12-APR-12
-�ָ���T��ͳ����Ϣ
+恢复表T的统计信息
 SQL>  exec  dbms_stats.rEstore_table_stats('HR','T','11-APR-12 10.58.17.552941000 AM +08:00');
 
 PL/SQL procedure successfully completed.
-�ٴβ鿴���һ�η�����T��ʱ�䣬�ָ��ɹ�
+再次查看最后一次分析表T的时间，恢复成功
 
 SQL> select last_analyzed from user_tables where table_name='T';
 
@@ -28849,14 +28849,14 @@ LAST_ANALYZED
 
 
 
-�������ռ�ͳ����Ϣʱ���п�������ͳ����Ϣ�ռ����󣬶���������½�����ʱ���Ǿ�Ҫ����֮ǰ�ռ���ͳ����Ϣ�����ٻָ�ͳ����Ϣ�������ͨ�����尸�����ᴩdbms_stats��ʹ��
-1�����ȴ���һ�����������ñ�����������֮ǰ�ķ���ֵ��
+我们在收集统计信息时，有可能由于统计信息收集错误，而额导致性能下降，这时我们就要保存之前收集的统计信息来快速恢复统计信息。下面就通过具体案例来贯穿dbms_stats的使用
+1、首先创建一个分析表，该表是用来保存之前的分析值：
 SQL> exec dbms_stats.create_stat_table('HR',stattab=>'STAT_TABLE');
 PL/SQL procedure successfully completed.
-2���ռ�����ͳ����Ϣ:
+2、收集表的统计信息:
 SQL> exec dbms_stats.gather_table_stats(ownname=>'HR',tabname=>'T',ESTIMATE_PERCENT=>dbms_stats.auto_sample_size,METHOD_OPT=>'FOR ALL INDEXED COLUMNS',DEGREE=>4,CASCADE=>TRUE);
 PL/SQL procedure successfully completed.
-3��������������Ϣ��stat_table��
+3、导出表分析信息到stat_table中
 SQL> select count(*) from stat_table;
   COUNT(*)
 ----------
@@ -28867,25 +28867,25 @@ SQL> select count(*) from  stat_table;
   COUNT(*)
 ----------
          4
-4��ɾ��������Ϣ
+4、删除分析信息
 SQL> exec dbms_stats.delete_table_stats(ownname=>'HR',TABNAME=>'T');
 PL/SQL procedure successfully completed.
 SQL> SELECT num_rows,blocks,empty_blocks as empty, avg_space, chain_cnt, avg_row_len FROM dba_tables WHERE owner = 'TEST'
 AND table_name = 'T1';
 NUM_ROWS     BLOCKS      EMPTY AVG_SPACE CHAIN_CNT AVG_ROW_LEN
 ---------- ---------- ---------- ---------- ---------- -----------
-û�в鵽��������
-5������ͳ����Ϣ
+没有查到分析数据
+5、导入统计信息
 SQL> exec dbms_stats.import_table_stats(ownNAME=>'HR',TABNAME=>'T',STATTAB=>'STAT_TABLE');
 PL/SQL procedure successfully completed.
 SQL> select num_rows,blocks,empty_blocks,avg_space,chain_cnt from user_tables where table_name='T';
   NUM_ROWS     BLOCKS EMPTY_BLOCKS  AVG_SPACE  CHAIN_CNT
 ---------- ---------- ------------ ---------- ----------
      10104         20            0          0          0
-���Բ鵽��������
+可以查到分析数据
 
 ANALYZE
-analyze�﷨����
+analyze语法如下
 
 ANALYZE
   { TABLE [ schema.]table
@@ -28900,85 +28900,83 @@ ANALYZE
   | LIST CHAINED ROWS [ into_clause ]
   | DELETE [ SYSTEM ] STATISTICS
   } ;
-PARTITION | SUBPARTITION���Է��������������з���
-CLUSTER cluster:�Դؽ��з����������Ľ�������ALL_CLUSTERS, USER_CLUSTERS and DBA_CLUSTERS.
+PARTITION | SUBPARTITION：对分区表或索引进行分析
+CLUSTER cluster:对簇进行分析，分析的结果会放在ALL_CLUSTERS, USER_CLUSTERS and DBA_CLUSTERS.
 compute_statistics_clause
-�﷨��COMPUTE [ SYSTEM ] STATISTICS [for_clause]
-�Է���������о�ȷ��ͳ�ƣ�Ȼ�����Ϣ�洢�������ֵ��С�����ѡ��Ա�����ֶν��з�����
-computed��estimated�����ַ�ʽ��ͳ�����ݶ����Ż�������Ӱ��sql��ִ�мƻ�
-���ָ��systemѡ���ֻͳ��ϵͳ��������Ϣ
+语法：COMPUTE [ SYSTEM ] STATISTICS [for_clause]
+对分析对像进行精确的统计，然后把信息存储的数据字典中。可以选择对表或对字段进行分析。
+computed和estimated这两种方式的统计数据都被优化器用来影响sql的执行计划
+如果指定system选项就只统计系统产生的信息
 for_clause
-FOR TABLE��ֻͳ�Ʊ�
-FOR COLUMNS��ֻͳ��ĳ���ֶ�
-FOR ALL COLUMNS��ͳ�������ֶ�
-FOR ALL INDEXED COLUMNS��ͳ�������������ֶΣ���
-analyze table t compute statistics for table for all indexed columns size  25;       #sizeΪֱ��ͼ��Ͱ��
+FOR TABLE：只统计表
+FOR COLUMNS：只统计某个字段
+FOR ALL COLUMNS：统计所有字段
+FOR ALL INDEXED COLUMNS：统计索引的所有字段，如
+analyze table t compute statistics for table for all indexed columns size  25;       #size为直方图的桶数
 estimate_statistics_clause
 ESTIMATE [ SYSTEM ] STATISTICS [for_clause][SAMPLE integer { ROWS | PERCENT }]
-ֻ�ǶԲ�������һ����ŵ�ͳ�ơ������ڴ��
-SAMPLE��ָ������ͳ�ƶ����У����������������Ļ���oracle��Ĭ��Ϊ1064��
-ROWS causes������ Oracle to sample integer rows of the table or cluster or integer entries from the index. The integer must be at least 1.
-PERCENT causes���ٷ�������
+只是对部分行做一个大概的统计。适用于大表
+SAMPLE：指定具体统计多少行，如果忽略这个参数的话，oracle会默认为1064行
+ROWS causes：行数 Oracle to sample integer rows of the table or cluster or integer entries from the index. The integer must be at least 1.
+PERCENT causes：百分数，如
 ANALYZE TABLE employees ESTIMATE STATISTICS SAMPLE 100 ROWS;
 ANALYZE TABLE employees ESTIMATE STATISTICS SAMPLE 15 PERCENT;
 validation_clauses
-����REF(�α�,��̬�������������ʱ����)���Ƕ���Ľṹ����
+分析REF(游标,动态关联结果集的临时对象)或是对像的结构，如
 ANALYZE TABLE employees VALIDATE STRUCTURE CASCADE;
 ANALYZE TABLE customers VALIDATE REF UPDATE;
-analyze������
-�����Է��������ֵ��
-Oracle 9i�в����Է����ⲿ������������DBMS_STATS��ʵ�����Ŀ��
-�����Է�����ʱ��
-�����Լ������������ֶ�����
+analyze的限制
+不可以分析数据字典表
+Oracle 9i中不可以分析外部表，但可以用DBMS_STATS来实现这个目的
+不可以分析临时表
+不可以计算或估计下列字段类型
 REFs, varrays, nested tables, LOBs (LOBs are not analyzed, they are skipped), LONGs, or object types.
-ͳ����Ϣ��ص���ͼ
-���������з����󣬷����Ľ��Ĭ�ϻ����USER_INDEXES, ALL_INDEXES,�� DBA_INDEXES��
-���������ݣ�
+统计信息相关的视图
+对索引进行分析后，分析的结果默认会放在USER_INDEXES, ALL_INDEXES,或 DBA_INDEXES中
+分析的内容：
 Depth of the index from its root block to its leaf blocks (BLEVEL)
 Number of leaf blocks (LEAF_BLOCKS)
 Number of distinct index values (DISTINCT_KEYS)
 Average number of leaf blocks for each index value (AVG_LEAF_BLOCKS_PER_KEY)
 Average number of data blocks for each index value (for an index on a table) (AVG_DATA_BLOCKS_PER_KEY)
 Clustering factor (how well ordered the rows are about the indexed values) (CLUSTERING_FACTOR)
-�Ա����з����󣬷����Ľ��Ĭ�ϻ����USER_TABLES, ALL_TABLES, and DBA_TABLES���У��ڷ�������ʱ��oracleҲ��������ں�����index�����õı���ʽ
-���������ݣ�
+对表进行分析后，分析的结果默认会放在USER_TABLES, ALL_TABLES, and DBA_TABLES表中，在分析表的时候，oracle也会分析基于函数的index所引用的表达式
+分析的内容：
 Number of rows (NUM_ROWS) *
 Number of data blocks below the high water mark (that is, the number of data blocks that have been formatted to
 receive data, regardless whether they currently contain data or are empty) (BLOCKS)
 * Number of data blocks allocated to the table that have never been used (EMPTY_BLOCKS) Average available free
 space in each data block in bytes (AVG_SPACE)
 Number of chained rows (CHAIN_COUNT) Average row length, including the row's overhead, in bytes (AVG_ROW_LEN)
-USER_TAB_COL_STATISTICS�����ڴ洢������ص�ͳ����Ϣ��
-USER_HISTOGRAMS :���ڴ洢��ֱ��ͼ��ص�ͳ����Ϣ��
+USER_TAB_COL_STATISTICS：用于存储与列相关的统计信息。
+USER_HISTOGRAMS :用于存储与直方图相关的统计信息。
 
-dbms_stats��analyze��ʹ�ó���
+dbms_stats和analyze的使用场景
 
-��dbms_stats�Ƴ���Oracle��ǿ�ҽ������ռ�CBOͳ����Ϣʱ��dbms_stats���analyze��ԭ�����£�
-1��dbms_stats���Բ��з���
-2��dbms_stats���Զ������Ĺ���(alter table monitor )
-3��analyze ����������ʱͳ����Ϣ��׼ȷ
+自dbms_stats推出后，Oracle就强烈建议在收集CBO统计信息时用dbms_stats替代analyze，原因如下：
+1、dbms_stats可以并行分析
+2、dbms_stats有自动分析的功能(alter table monitor )
+3、analyze 分析分区表时统计信息不准确
 
-���ڵ�3��ԭ���ǣ�dbms_stats��ʵ�ڵ�ȥ������ȫ��ͳ����Ϣ����ָ������������analyze�ǽ����������ֲ�����statistics ���ܼ���ɱ�ȫ��statistics ,���ܵ�����
-�������������û������ݿ⣬�����Բ��ù��߰������Բ��з���
-Dbms_utility(8i��ǰ�Ĺ��߰�)
-Dbms_stats(8i�Ժ��ṩ�Ĺ��߰�)����
+关于第3点原因是，dbms_stats会实在的去分析表全局统计信息（当指定参数）；而analyze是将表分区（局部）的statistics 汇总计算成表全局statistics ,可能导致误差。
+如果想分析整个用户或数据库，还可以采用工具包，可以并行分析
+Dbms_utility(8i以前的工具包)
+Dbms_stats(8i以后提供的工具包)，如
 dbms_stats.gather_schema_stats(User,estimate_percent=>100,cascade=> TRUE);
 dbms_stats.gather_table_stats(User,TableName,degree => 4,cascade => true);
-��Ȼdbms_stats�����analyze�����֮������ƣ��Ƿ������ȫ����analyze�����أ����Ƿ񶨵ģ����ڹ���analyze�Ķ�λOracle���ͣ�
+既然dbms_stats相对于analyze有如此之多的优势，是否可以完全废弃analyze命令呢？答案是否定的，现在关于analyze的定位Oracle解释：
 Use the ANALYZE statement (rather than DBMS_STATS) for statistics collection not related to the cost-based optimizer,for example:
-1��Collect or delete statistics about an index or index partition, table or table partition, index-organized table, cluster, or scalar object attribute.
-2��Validate the structure of an index or index partition, table or table partition, index-organized table, cluster, or object reference (REF).
-3��Identify migrated and chained rows of a table or cluster.
-���Կ���analyze�Ѿ����������ռ���CBO��ص�ͳ����Ϣ�ˣ��������ڶ���ṹ�ķ�������ͨ�����ǻ�����ʹ��analyze:
-1��ͨ��Validate Structure����������Ľṹ��Ϣ
-2��ͨ��analyze��.list chained rows�ռ����������ӵ���Ϣ��
-ע����������ִ��analyze������ڵ�schema��ִ��$ORACLE_HOME/rdbms/admin/utlchain.sql(��utlchn1.sql)�ű�����chained_rows������chained_rows����֮��o�����ռ���������Ϣ
-����ע���
+1、Collect or delete statistics about an index or index partition, table or table partition, index-organized table, cluster, or scalar object attribute.
+2、Validate the structure of an index or index partition, table or table partition, index-organized table, cluster, or object reference (REF).
+3、Identify migrated and chained rows of a table or cluster.
+可以看到analyze已经不是用来收集与CBO相关的统计信息了，而侧重于对象结构的分析。故通常我们会这样使用analyze:
+1、通过Validate Structure来分析对象的结构信息
+2、通过analyze….list chained rows收集块中行链接的信息。
+注：必须先在执行analyze语句所在的schema内执行$ORACLE_HOME/rdbms/admin/utlchain.sql(或utlchn1.sql)脚本建立chained_rows表。在chained_rows建立之后﹐才能收集行链接信息
+两个注意点
 
-1����ĳ����������monitoring usage��ʱ�����ʹ��dbms_statsȥ����������ͬʱ����������oracle�����gather_index_stat��������������Ҫ�õ����������ʻὫ��������v$object_usage.USED����ΪTRUE��analyze ��Ȼ������������������ʵֻ��Ҫobj#�����Ὣ����״̬����ΪUSE = TRUE
-2��dbms_stats�޷�����cluster��������cluster����Ȼ��Ҫanalyze
-
-
+1、当某个索引处于monitoring usage的时候，如果使用dbms_stats去分析表并且同时分析索引，oracle会调用gather_index_stat来分析索引，需要用到索引名，故会将该索引的v$object_usage.USED设置为TRUE。analyze 虽然分析了索引，但是其实只需要obj#，不会将索引状态设置为USE = TRUE
+2、dbms_stats无法分析cluster表，分析cluster表仍然需要analyze
 
 
 
@@ -28989,31 +28987,33 @@ Use the ANALYZE statement (rather than DBMS_STATS) for statistics collection not
 
 
 
- δ���ù鵵���ݿ�������ļ�(spfile,control,redo,undo,temp)ȫ��ʧ�Ļָ�����
-���ࣺ ORACLE 2008-05-22 08:35 1682���Ķ� ����(3) �ղ� �ٱ�
-���ݿ�databaseoraclesqlsystemdomain
 
 
-���Ľ�����һ��δ���ù鵵���ݿ�ģ�û���κα��ݣ����з������ļ�(spfile,control,redo,undo,temp)ȫ��ʧ�Ļָ��������������ļ��������������ļ���������־�ļ����������ռ估��ʱ���ռ��ļ���
+ 未启用归档数据库非数据文件(spfile,control,redo,undo,temp)全丢失的恢复方法
+分类： ORACLE 2008-05-22 08:35 1682人阅读 评论(3) 收藏 举报
+数据库databaseoraclesqlsystemdomain
 
 
-���Ի�����
+本文介绍了一个未启用归档数据库的，没有任何备份，所有非数据文件(spfile,control,redo,undo,temp)全丢失的恢复方法。非数据文件包括启动参数文件、重做日志文件、撤消表空间及临时表空间文件。
 
-����һ�����ݿ���������ļ�:
 
-�����ļ���
+测试环境：
+
+假设一个数据库包括如下文件:
+
+控制文件：
 CONTROL01.CTL
 CONTROL02.CTL
 CONTROL03.CTL
-������־�ļ���
+重做日志文件：
 REDO01.LOG
 REDO02.LOG
 REDO03.LOG
-��ʱ�ļ���
+临时文件：
 TEMP01.DBF
-�������ռ䣺
+撤消表空间：
 UNDOTBS01.DBF
-�����ļ���
+数据文件：
 DRSYS01.DBF
 INDX01.DBF
 SYSTEM01.DBF
@@ -29021,7 +29021,7 @@ TOOLS01.DBF
 USERS01.DBF
 XDB01.DBF
 
-���ڽ����������ļ���
+现在仅存在数据文件：
 DRSYS01.DBF
 INDX01.DBF
 SYSTEM01.DBF
@@ -29029,19 +29029,19 @@ TOOLS01.DBF
 USERS01.DBF
 XDB01.DBF
 
-�����ļ���û���ˣ�����Ҳû�У����������ļ�������������(�ϴ��������ر�)�������ݿ�δ���ù鵵��
+其它文件都没有了，备份也没有，但是数据文件事务是完整的(上次是正常关闭)，且数据库未启用归档。
 
-�����ǻָ����裺
+以下是恢复步骤：
 
 
-1.�������������ļ�
+1.创建启动参数文件
 c:/mypfile.ora
 
-�����������Դ�alert.log��������Ϣ��COPY������Ҳ�����Լ��ֹ�дһ����
-������ʾ��
-ע��
-���ڳ������ռ��ļ�û�У�����ȥ���������Զ�������ز���(undo_management,undo_retention,undo_tablespace)
-control_filesָ��Ϊ����Ҫ�������µĿ����ļ�
+启动参数可以从alert.log中启动信息中COPY下来，也可以自己手工写一个。
+如下所示：
+注：
+由于撤消表空间文件没有，所以去除撤消段自动管理相关参数(undo_management,undo_retention,undo_tablespace)
+control_files指定为你想要创建的新的控制文件
 
 *.compatible='9.2.0.0.0'
 *.control_files='H:/oracle/oradata/ydgl/control01.ctl','H:/oracle/oradata/ydgl/control02.ctl','H:/oracle/oradata/ydgl/control03.ctl'
@@ -29059,29 +29059,29 @@ control_filesָ��Ϊ����Ҫ�������µĿ����ļ�
 
 
 
-2.��������(��windowsϵͳ)
+2.重启服务(仅windows系统)
 
-���������ʾֻ����ORACLE���񣬲��������ݿ�ʵ����
+以下命令表示只启动ORACLE服务，不启动数据库实例。
 oradim -stop -sid ydgl
 oradim -startup -sid ydgl -starttype srvc
 
 
-3.ʹ�ô�����pfile������δ����ģʽ
+3.使用创建的pfile启动到未加载模式
 
 startup nomount pfile='c:/mypfile.ora'
 
 
 e:/>sqlplus
 
-SQL*Plus: Release 9.2.0.1.0 - Production on ������ 5�� 21 21:51:19 2008
+SQL*Plus: Release 9.2.0.1.0 - Production on 星期三 5月 21 21:51:19 2008
 
 Copyright (c) 1982, 2002, Oracle Corporation.  All rights reserved.
 
-�������û���:  / as sysdba
-�����ӵ��������̡�
+请输入用户名:  / as sysdba
+已连接到空闲例程。
 
 SQL> startup nomount pfile='c:/mypfile.ora'
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  114367248 bytes
 Fixed Size                   453392 bytes
@@ -29091,7 +29091,7 @@ Redo Buffers                 667648 bytes
 SQL>
 
 
-4.ʹ��resetlogs���������ļ���������Ŀ����ļ���mypfile.ora�е�*.control_filesָ��
+4.使用resetlogs创建控制文件，创建后的控制文件由mypfile.ora中的*.control_files指定
 
 CREATE CONTROLFILE REUSE DATABASE "YDGL" RESETLOGS  NOARCHIVELOG
     MAXLOGFILES 5
@@ -29099,13 +29099,13 @@ CREATE CONTROLFILE REUSE DATABASE "YDGL" RESETLOGS  NOARCHIVELOG
     MAXDATAFILES 100
     MAXINSTANCES 1
     MAXLOGHISTORY 1
-LOGFILE--ָ���µ�������־�ļ������λ��(��һ��Ҫ��ԭ��һ��)
+LOGFILE--指定新的重做日志文件的组和位置(不一定要和原来一样)
   GROUP 1 'H:/ORACLE/ORADATA/YDGL/REDO01.LOG'  SIZE 10M,
   GROUP 2 'H:/ORACLE/ORADATA/YDGL/REDO02.LOG'  SIZE 10M,
   GROUP 3 'H:/ORACLE/ORADATA/YDGL/REDO03.LOG'  SIZE 10M
 DATAFILE
   'H:/ORACLE/ORADATA/YDGL/SYSTEM01.DBF',
---  'H:/ORACLE/ORADATA/YDGL/UNDOTBS01.DBF',ȥ���������ռ䣨��Ϊ�ļ������ڣ�
+--  'H:/ORACLE/ORADATA/YDGL/UNDOTBS01.DBF',去除撤消表空间（因为文件不存在）
   'H:/ORACLE/ORADATA/YDGL/DRSYS01.DBF',
   'H:/ORACLE/ORADATA/YDGL/INDX01.DBF',
   'H:/ORACLE/ORADATA/YDGL/TOOLS01.DBF',
@@ -29115,26 +29115,26 @@ CHARACTER SET ZHS16GBK
 ;
 
 
-5.ʹ���ؽ��Ŀ����ļ��ָ����ݿ�
+5.使用重建的控制文件恢复数据库
 
 RECOVER DATABASE USING BACKUP CONTROLFILE;
 
 SQL> RECOVER DATABASE USING BACKUP CONTROLFILE;
-ORA-00279: ���� 133071 (�� 05/18/2008 17:46:33 ����) �����߳� 1 �Ǳ����
-ORA-00289: ����: C:/ORACLE/ORA92/RDBMS/ARC00066.001
-ORA-00280: ���� 133071 �����߳� 1 �ǰ����� # 66 ���е�
+ORA-00279: 更改 133071 (在 05/18/2008 17:46:33 生成) 对于线程 1 是必需的
+ORA-00289: 建议: C:/ORACLE/ORA92/RDBMS/ARC00066.001
+ORA-00280: 更改 133071 对于线程 1 是按序列 # 66 进行的
 
 
-ָ����־: {<RET>=suggested | filename | AUTO | CANCEL}
+指定日志: {<RET>=suggested | filename | AUTO | CANCEL}
 cancel
-���ʻָ���ȡ����
+介质恢复已取消。
 SQL>
 
 
-6.����_allow_resetlogs_corruption���������������ݿ⵽mount
+6.设置_allow_resetlogs_corruption参数，并重启数据库到mount
 
-�޸�mypfile.ora������_allow_resetlogs_corruption=true
-�����������˼�����д�������־�ļ��𻵵����ݿ�
+修改mypfile.ora，增加_allow_resetlogs_corruption=true
+这个参数的意思是允行打开重做日志文件损坏的数据库
 
 *.compatible='9.2.0.0.0'
 *.control_files='H:/oracle/oradata/ydgl/control01.ctl','H:/oracle/oradata/ydgl/control02.ctl','H:/oracle/oradata/ydgl/control03.ctl'
@@ -29154,42 +29154,42 @@ _allow_resetlogs_corruption=true
 
 
 SQL> shutdown immediate;
-ORA-01109: ���ݿ�δ��
+ORA-01109: 数据库未打开
 
 
-�Ѿ�ж�����ݿ⡣
-ORACLE �����Ѿ��رա�
+已经卸载数据库。
+ORACLE 例程已经关闭。
 SQL> startup mount pfile='c:/mypfile.ora'
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  114367248 bytes
 Fixed Size                   453392 bytes
 Variable Size              88080384 bytes
 Database Buffers           25165824 bytes
 Redo Buffers                 667648 bytes
-���ݿ�װ����ϡ�
+数据库装载完毕。
 SQL>
 
 
 
-7.ʹ��resetlogs�����ݿ�
+7.使用resetlogs打开数据库
 
 SQL> alter database open resetlogs;
 
-���ݿ��Ѹ��ġ�
+数据库已更改。
 
 
-���δִ�е�6������������������_allow_resetlogs_corruption=true�������ݿ�ʱ���������µĴ�����ʾ��
+如果未执行第6步，不设置启动参数_allow_resetlogs_corruption=true，打开数据库时则会出现如下的错误提示：
 
 SQL> alter database open resetlogs;
 alter database open resetlogs
 *
-ERROR λ�ڵ� 1 ��:
-ORA-01113: �ļ� 1 ��Ҫ���ʻָ�
-ORA-01110: �����ļ� 1: 'H:/ORACLE/ORADATA/YDGL/SYSTEM01.DBF'
+ERROR 位于第 1 行:
+ORA-01113: 文件 1 需要介质恢复
+ORA-01110: 数据文件 1: 'H:/ORACLE/ORADATA/YDGL/SYSTEM01.DBF'
 
 
-8.��鶪ʧ�ı��ռ估�����ļ�
+8.检查丢失的表空间及数据文件
 
 SQL> select a.ts#, a.name, b.file#, b.status, b.name  from ts$ a, v$datafile b where a.TS# = b.TS#(+);
 
@@ -29207,19 +29207,19 @@ SQL> select a.ts#, a.name, b.file#, b.status, b.name  from ts$ a, v$datafile b w
 8 rows selected
 
 SQL>
-���п��Կ����������ռ�UNDOTBS1����ʱ���ռ�TEMP�ļ���δ�ָ�
+从中可以看到撤消表空间UNDOTBS1及临时表空间TEMP文件还未恢复
 
-9.������ʱ���ռ�TEMP���ļ�
+9.增加临时表空间TEMP的文件
 
 SQL> ALTER TABLESPACE TEMP ADD TEMPFILE 'H:/ORACLE/ORADATA/YDGL/TEMP01.DBF' SIZE 50M  REUSE AUTOEXTEND ON NEXT 655360  MAXSIZE 1000M;
 
 Tablespace altered
 
-10.�ָ��������ռ�UNDOTBS1
+10.恢复撤消表空间UNDOTBS1
 
-���ڳ������ռ�������ļ��Ѿ�û���ˣ�����ֻ���ؽ�
+由于撤消表空间的数据文件已经没有了，所以只能重建
 
-������ɾ������ı��ռ���Ϣ��Ȼ���ٴ�����
+首先需删除残余的表空间信息，然后再创建。
 
 SQL> DROP TABLESPACE UNDOTBS1 INCLUDING CONTENTS AND DATAFILES;
 
@@ -29232,9 +29232,9 @@ Tablespace created
 SQL>
 
 
-11.����SPFILE���������ݿ�
-��mypfile.ora��ȡ���ָ�����ʱʹ�õ�_allow_resetlogs_corruption=true
-���ӳ����β���
+11.创建SPFILE，重启数据库
+从mypfile.ora中取消恢复数据时使用的_allow_resetlogs_corruption=true
+增加撤消段参数
 
 *.compatible='9.2.0.0.0'
 *.control_files='H:/oracle/oradata/ydgl/control01.ctl','H:/oracle/oradata/ydgl/control02.ctl','H:/oracle/oradata/ydgl/control03.ctl'
@@ -29251,28 +29251,28 @@ SQL>
 *.undo_tablespace='UNDOTBS1'
 
 
---����SPFILE
+--创建SPFILE
 SQL> create spfile from pfile='c:/mypfile.ora';
 
-�ļ��Ѵ�����
+文件已创建。
 
 
---�������ݿ�
+--重启数据库
 SQL> shutdown immediate;
-���ݿ��Ѿ��رա�
-�Ѿ�ж�����ݿ⡣
-ORACLE �����Ѿ��رա�
+数据库已经关闭。
+已经卸载数据库。
+ORACLE 例程已经关闭。
 
 SQL> startup;
-ORACLE �����Ѿ�������
+ORACLE 例程已经启动。
 
 Total System Global Area  114367248 bytes
 Fixed Size                   453392 bytes
 Variable Size              88080384 bytes
 Database Buffers           25165824 bytes
 Redo Buffers                 667648 bytes
-���ݿ�װ����ϡ�
-���ݿ��Ѿ��򿪡�
+数据库装载完毕。
+数据库已经打开。
 SQL> show parameter spfile;
 
 NAME                                 TYPE        VALUE
@@ -29282,7 +29282,7 @@ spfile                               string      %ORACLE_HOME%/DATABASE/SPFILE%
 SQL>
 
 
------------�ָ����
+-----------恢复完成
 
 
 
@@ -29303,31 +29303,31 @@ SQL>
 
 
 
--- ���ݿ�����
+-- 数据库升级
 alter database open resetlogs upgrade;
 
 SYS@ zh10g SQL>alter database open;
 ERROR:
-ORA-03114: δ���ӵ� ORACLE
+ORA-03114: 未连接到 ORACLE
 
 alter database open
 *
-�� 1 �г��ִ���:
+第 1 行出现错误:
 ORA-01092: ORACLE instance terminated. Disconnection forced
 ORA-00704: bootstrap process failure
 ORA-39700: database must be opened with UPGRADE option
-���� ID: 5144
-�Ự ID: 191 ���к�: 1
+进程 ID: 5144
+会话 ID: 191 序列号: 1
 SYS@ zh10g SQL>alter database open resetlogs upgrade;
 ERROR:
 ORA-04023: Object SYS.STANDARD could not be validated or authorized
 Database altered.
 
 
--- �ؽ���ʱ���ռ�
+-- 重建临时表空间
 ALTER TABLESPACE TEMP ADD TEMPFILE 'D:\APP\ADMINISTRATOR\ORADATA\ZH10G\TEMP01.DBF' SIZE 100M REUSE;
 
--- UPGRADEģʽִ��catupgrd.sql�ű�
+-- UPGRADE模式执行catupgrd.sql脚本
 spool upgrade.log
 @ /rdbms/admin/catupgrd.sql
 
@@ -29390,27 +29390,27 @@ NOTE:729909.1 - Upgrading To Oracle11g And DBUA Reports ORA-4023 On SYS.STANDARD
 
 + Please note that when using DBUA you should not make any changes to the oratab file.  If you manually made changes to the oratab file, then undo them and put the original information back.  DBUA will make changes to the oratab file at the appropriate time during the upgrade.
 
--- �޸�ORA-04023����
+-- 修复ORA-04023报错
 sqlplus / as sysdba
 drop table PUIU$DBUA;
 
 spool upgrade.log
 @ /rdbms/admin/catupgrd.sql
 
-+ �ű�ִ��ʱ��Լ��
-    + ���ƽű�ִ��ʱ�䷽����00:49:17
-        + ������־�������󣬼���checkpoint not complete����
-        + �ʵ�����ϵͳ������
++ 脚本执行时间约：
+    + 改善脚本执行时间方法：00:49:17
+        + 在线日志容量增大，减少checkpoint not complete发生
+        + 适当增加系统参数：
             SQL>alter system set java_pool_size=512M;
             SQL>alter system set shared_pool_size=800M;
-��������״̬��
+正常结束状态：
 SYS@ zh10g SQL>
 SYS@ zh10g SQL>
 SYS@ zh10g SQL>
 SYS@ zh10g SQL>shutdown immediate;
-���ݿ��Ѿ��رա�
-�Ѿ�ж�����ݿ⡣
-ORACLE �����Ѿ��رա�
+数据库已经关闭。
+已经卸载数据库。
+ORACLE 例程已经关闭。
 SYS@ zh10g SQL>
 SYS@ zh10g SQL>
 SYS@ zh10g SQL>
@@ -29444,15 +29444,15 @@ SYS@ zh10g SQL>REM bug 12337546 - Exit current sqlplus session at end of catupgr
 SYS@ zh10g SQL>REM                This forces user to start a new sqlplus session in order
 SYS@ zh10g SQL>REM                to connect to the upgraded db.
 SYS@ zh10g SQL>exit
-�� Oracle Database 11g Enterprise Edition Release 11.2.0.3.0 - 64bit Production
-With the Partitioning, OLAP, Data Mining and Real Application Testing options �Ͽ�
-Note:���ο���11gr2 Upgrade, Re-Running catupgrd.sql Causes Ora-00001 Errors��
+从 Oracle Database 11g Enterprise Edition Release 11.2.0.3.0 - 64bit Production
+With the Partitioning, OLAP, Data Mining and Real Application Testing options 断开
+Note:【参考：11gr2 Upgrade, Re-Running catupgrd.sql Causes Ora-00001 Errors】
 You canrerunthe catupgrd.sql script as many times as necessary. The firsttimeyou run the script, there should be no error messages returned. If yourerunthe script, then the ORA-00001 messageisdisplayed. You can safely ignore this message.
 
--- ��ʾ��������ժҪ��Ϣ
+-- 显示升级过程摘要信息
 @ /rdbms/admin/utlu112s.sql
 
-+ ����״̬������
++ 正常状态结束：
 SYS@ zh10g SQL>@ /rdbms/admin/utlu112s.sql
 .
 Oracle Database 11.2 Post-Upgrade Status Tool           12-04-2013 17:31:00
@@ -29461,7 +29461,7 @@ Component                               Current      Version     Elapsed Time
 Name                                    Status       Number      HH:MM:SS
 .
 Oracle Server
-.   ORA-00942: ������ͼ������
+.   ORA-00942: 表或视图不存在
 .                                         VALID      11.2.0.3.0  00:11:59
 JServer JAVA Virtual Machine
 .                                         VALID      11.2.0.3.0  00:08:01
@@ -29494,7 +29494,7 @@ Oracle Rules Manager
 Gathering Statistics
 .                                                                00:02:47
 Total Upgrade Time: 00:49:17
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
 _USER@ _CONNECT_IDENTIFIER SQL>select comp_id, version, status from DBA_registry;
 
@@ -29519,11 +29519,11 @@ CATJAVA                                                      11.2.0.3.0         
 APS                                                          11.2.0.3.0                                           VALID
 XOQ                                                          11.2.0.3.0                                           VALID
 
-��ѡ��17�С�
+已选择17行。
 
--- Ǩ��Baseline����
+-- 迁移Baseline数据
 @ /rdbms/admin/catuppst.sql
-+ �ű�ִ��ʱ��Լ��00:00:30
++ 脚本执行时间约：00:00:30
 
 SYS@ zh10g SQL>@ /rdbms/admin/catuppst.sql
 TIMESTAMP
@@ -29531,7 +29531,7 @@ TIMESTAMP
 --------------------------------------------------------
 COMP_TIMESTAMP POSTUP_BGN 2013-12-04 17:37:38
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
 This script will migrate the Baseline data on a pre-11g database
 to the 11g database.
@@ -29594,72 +29594,72 @@ Drop Renamed Baseline Table SYS."WRH$_ACTIVE_SESSION_HISTORY_BR"
 ... above, then there are no renamed      ...
 ... baseline tables in the system.        ...
 ...                                       ...
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
-�Ѵ��� 0 �С�
+已创建 0 行。
 
-�ύ��ɡ�
+提交完成。
 
-���Ѵ�����
+表已创建。
 
-�Ѵ��� 2 �С�
+已创建 2 行。
 
-�Ѹ��� 1 �С�
+已更新 1 行。
 
-�Ѹ���2�С�
+已更新2行。
 
-�Ѹ���0�С�
+已更新0行。
 
-����ɾ����
+表已删除。
 
-�ύ��ɡ�
+提交完成。
 
-�Ѹ���0�С�
+已更新0行。
 
-�ύ��ɡ�
+提交完成。
 
-�Ѹ���0�С�
+已更新0行。
 
-�ύ��ɡ�
+提交完成。
 
-�Ѹ���0�С�
+已更新0行。
 
-�ύ��ɡ�
+提交完成。
 
-�Ѵ��� 0 �С�
+已创建 0 行。
 
-�ύ��ɡ�
+提交完成。
 
-�Ѵ��� 0 �С�
+已创建 0 行。
 
-�ύ��ɡ�
+提交完成。
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 TIMESTAMP
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 --------------------------------------------------------
 COMP_TIMESTAMP POSTUP_END 2013-12-04 17:37:42
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 Generating apply and rollback scripts...
 Check the following file for errors:
 D:\app\Administrator\cfgtoollogs\catbundle\catbundle_PSU_ZH10G_GENERATE_2013Dec04_17_37_49.log
 Apply script: D:\app\Administrator\product\11.2.0\dbhome_1\rdbms\admin\catbundle_PSU_ZH10G_APPLY.sql
 Rollback script: D:\app\Administrator\product\11.2.0\dbhome_1\rdbms\admin\catbundle_PSU_ZH10G_ROLLBACK.sql
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 Executing script file...
 SYS@ zh10g SQL>COLUMN spool_file NEW_VALUE spool_file NOPRINT
 SYS@ zh10g SQL>SELECT 'D:\app\Administrator\cfgtoollogs\catbundle\' || 'catbundle_PSU_' || name || '_APPLY_' || TO_CHAR(SYSDATE, 'YYYYMonDD_hh24_mi_ss', 'NLS_DATE_LANGUAGE=''AMERICAN''') || '.log' AS
 spool_file FROM v$database;
 SYS@ zh10g SQL>SPOOL &spool_file
 SYS@ zh10g SQL>exec dbms_registry.set_session_namespace('SERVER')
-PL/SQL �����ѳɹ���ɡ�
+PL/SQL 过程已成功完成。
 SYS@ zh10g SQL>ALTER SESSION SET current_schema = SYS;
-�Ự�Ѹ��ġ�
+会话已更改。
 SYS@ zh10g SQL>PROMPT Updating registry...
 Updating registry...
 SYS@ zh10g SQL>INSERT INTO registry$history
@@ -29673,26 +29673,26 @@ SYS@ zh10g SQL>INSERT INTO registry$history
   9     0,
  10     'PSU',
  11     'Patchset 11.2.0.2.0');
-�Ѵ��� 1 �С�
+已创建 1 行。
 SYS@ zh10g SQL>COMMIT;
-�ύ��ɡ�
+提交完成。
 SYS@ zh10g SQL>SPOOL off
 SYS@ zh10g SQL>SET echo off
 Check the following log file for errors:
 D:\app\Administrator\cfgtoollogs\catbundle\catbundle_PSU_ZH10G_APPLY_2013Dec04_17_37_51.log
 
--- �ر�����Ч����
+-- 重编译无效对象
 select count(*) from dba_invalid_objects;
 
 @ /rdbms/admin/utlrp.sql
-+ �ű�ִ��ʱ��Լ��00:02:00
++ 脚本执行时间约：00:02:00
 
 SYS@ zh10g SQL>select count(*) from dba_invalid_objects;
   COUNT(*)
 ----------
       5954
 
--- ��ѯ���״̬
+-- 查询组件状态
 col comp_name for a40
 set wrap off
 select comp_name,version, statusfrom dba_registry;
@@ -29717,19 +29717,19 @@ Oracle XDK                               11.2.0.3.0                             
 Oracle Database Java Packages            11.2.0.3.0                                                   VALID
 OLAP Analytic Workspace                  11.2.0.3.0                                                   VALID
 Oracle OLAP API                          11.2.0.3.0                                                   VALID
-��ѡ��17�С�
+已选择17行。
 
 
-utlu112i.sql����ű��Ѿ�out�ˣ����µ���utlu112i_2.sql
+utlu112i.sql这个脚本已经out了，最新的是utlu112i_2.sql
 How to Download and Run Oracle's Database Pre-Upgrade Utility [ID 884522.1]
 
-�������timezone�ļ��汾������
+好像就是timezone文件版本的区别
 
 
 
-����������һ�����ʱ�����ڵ��˳�����Сʱ����Ȼû��������ݿ��close�����Ǿ���shutdown abort����ر����ݿ⡣������������ʱ�򣬷�����alertlog���д�����SMON�ı��������һ��ڳ������ϵı���������
+今天在重启一个库的时候，由于等了超过半小时，仍然没有完成数据库的close，于是就用shutdown abort命令关闭数据库。但是在起来的时候，发现在alertlog中有大量的SMON的报错，而且还在持续不断的报错出来。
 
-<--- ������������Ϣ begin here --->
+<--- 正常的启动信息 begin here --->
 Mon Sep  1 16:32:02 2008
 Starting ORACLE instance (normal)
 LICENSE_MAX_SESSION = 0
@@ -29803,9 +29803,9 @@ Mon Sep  1 16:32:07 2008
 Database mounted in Exclusive Mode.
 Completed: ALTER DATABASE   MOUNT
 Mon Sep  1 16:32:07 2008
-<--- ������������Ϣ end here --->
+<--- 正常的启动信息 end here --->
 
-<--- ��ʼ�����ݣ�������Ҫ��ʵ���ָ� begin here --->
+<--- 开始打开数据，发现需要做实例恢复 begin here --->
 ALTER DATABASE OPEN
 Mon Sep  1 16:32:08 2008
 Beginning crash recovery of 1 threads
@@ -29815,9 +29815,9 @@ Mon Sep  1 16:32:09 2008
 Completed redo scan
  27274 redo blocks read, 46702 data blocks need recovery
 Mon Sep  1 16:35:20 2008
-<--- ��ʼ�����ݣ�������Ҫ��ʵ���ָ� end --->
+<--- 开始打开数据，发现需要做实例恢复 end --->
 
-<--- ��ʼʵ���ָ� --->
+<--- 开始实例恢复 --->
 Started recovery at
  Thread 1: logseq 24462, block 231548, scn 0.0
 Mon Sep  1 16:35:20 2008
@@ -29839,7 +29839,7 @@ Thread 1 opened at log sequence 24463
   Current log# 3 seq# 24463 mem# 1: /dev/vg_ora02/rredo_256m_13
 Successful open of redo thread 1
 Mon Sep  1 16:35:33 2008
-<--- ��ʼǰ�� --->
+<--- 开始前滚 --->
 SMON: enabling cache recovery
 Mon Sep  1 16:35:33 2008
 ARC0: Evaluating archive   log 1 thread 1 sequence 24462
@@ -29848,12 +29848,12 @@ Creating archive destination LOG_ARCHIVE_DEST_1: '/arch/arch_1_24462.arc'
 Mon Sep  1 16:35:34 2008
 Successfully onlined Undo Tablespace 1.
 Mon Sep  1 16:35:34 2008
-<--- ��ʼ�ع� --->
+<--- 开始回滚 --->
 SMON: enabling tx recovery
 Mon Sep  1 16:35:34 2008
 Database Characterset is ZHS16GBK
 Mon Sep  1 16:35:34 2008
-<--- ��ʼ���ִ�����SMON���� --->
+<--- 开始出现大量的SMON报错 --->
 SMON: about to recover undo segment 60
 SMON: mark undo segment 60 as available
 SMON: about to recover undo segment 60
@@ -29873,7 +29873,7 @@ SMON: about to recover undo segment 60
 SMON: mark undo segment 60 as available
 SMON: about to recover undo segment 60
 SMON: mark undo segment 60 as available
-<--- ʵ���ָ���ɣ����ݿ�open --->
+<--- 实例恢复完成，数据库open --->
 Mon Sep  1 16:35:35 2008
 Completed: ALTER DATABASE OPEN
 Mon Sep  1 16:35:35 2008
@@ -29907,7 +29907,7 @@ SMON: about to recover undo segment 60
 SMON: mark undo segment 60 as available
 SMON: about to recover undo segment 60
 SMON: mark undo segment 60 as available
-��ʱ�����ݿ��Ѿ�open��������alertlog���д����������ı�������ѯmetalink��Note:266159.1����
+此时，数据库已经open，但是在alertlog中有大量的这样的报错。查询metalink（Note:266159.1）：
 
 Cause
 These errors do not indicate rollback segment corruption.
@@ -29922,9 +29922,9 @@ In case we require any of the offline undo segments for the instance recovery, t
 
 This is not a bug, this is the intended behavior.
 When SMON finds such offline undo segments with transactions needing recovery ,then it does what is intended to do , ie: perform the transaction recovery in batches of 100 undo records.
-����������undo segment�𻵿�����⡣��metalink�ϵķ����������澯���ٳ��֡�
+看来并不是undo segment损坏块的问题。用metalink上的方法处理，告警不再出现。
 
-Ŀǰ���ݿ��Ѿ�open�����ǻ��ǲ����õ�ǰ��undo�ˣ��½�unodtbs02��ϵͳĬ�ϵ�undo��
+目前数据库已经open，但是还是不敢用当前的undo了，新建unodtbs02到系统默认的undo。
 
 Solution
 
@@ -29957,7 +29957,7 @@ Session altered.
 SQL> alter rollback segment "_SYSSMU60$" online;
 
 Rollback segment altered.
-alterlog�в��ٱ�����
+alterlog中不再报错：
 
 $>tail -f alert_gdmocs.log
 SMON: about to recover undo segment 60
@@ -29978,9 +29978,9 @@ Mon Sep  1 16:52:33 2008
 ARC0: Evaluating archive   log 4 thread 1 sequence 24465
 ARC0: Beginning to archive log 4 thread 1 sequence 24465
 Creating archive destination LOG_ARCHIVE_DEST_1: '/arch/arch_1_24465.arc'
-���½�undotbs02��ϵͳĬ��undo�����ԣ�
+（新建undotbs02到系统默认undo过程略）
 
-���undo segment��״����
+检查undo segment的状况：
 
 SQL> select TABLESPACE_NAME,SEGMENT_NAME,status from   dba_rollback_segs;
 
@@ -29990,16 +29990,16 @@ SYSTEM                         SYSTEM                         ONLINE
 UNDOTBS1                       _SYSSMU1$                      ONLINE
 UNDOTBS1                       _SYSSMU2$                      OFFLINE
 UNDOTBS1                       _SYSSMU3$                      OFFLINE
-����
+……
 UNDOTBS1                       _SYSSMU11$                     OFFLINE
 UNDOTBS1                       _SYSSMU12$                     ONLINE
 UNDOTBS1                       _SYSSMU13$                     ONLINE
 UNDOTBS1                       _SYSSMU14$                     OFFLINE
-����
+……
 UNDOTBS1                       _SYSSMU59$                     OFFLINE
 UNDOTBS1                       _SYSSMU60$                     ONLINE
 UNDOTBS1                       _SYSSMU61$                     OFFLINE
-����
+……
 UNDOTBS2                       _SYSSMU858$                    ONLINE
 UNDOTBS2                       _SYSSMU859$                    ONLINE
 UNDOTBS2                       _SYSSMU860$                    ONLINE
@@ -30015,29 +30015,29 @@ UNDOTBS2                       _SYSSMU867$                    ONLINE
 
 
 
-analyze index ʱvalidate structure��compute statisti 2010-02-26 22:07:49
-���ࣺ Oracle
-analyze index index1 validate structure��
-analyze index index1 compute statistics��
-�ڷ���������ʱ��һ����õ����϶��������ô�����������������ʲô�أ�
-analyze index index1 validate structure���������������������ݿ��Ƿ��л��飬�Լ����ݷ����õ������ݣ������index_stats�����ж������Ƿ���Ҫ���½�����
-ʲô����index��Ҫrebuild��
-��һ��table��������DML����ʱ�������������������block�ռ���˷ѣ�������Ϊindex block�еļ�¼ֻ����ȫ����ʾΪ������ʱ�� block ���ܱ����뵽freelist��ȥ���������á�����������ҪѰ����Щ�˷ѿռ�����ص�index��
-������: 1) analyze index index_name validate structure;
+analyze index 时validate structure和compute statisti 2010-02-26 22:07:49
+分类： Oracle
+analyze index index1 validate structure：
+analyze index index1 compute statistics：
+在分析索引的时候，一般会用到以上二个命令，那么这二个命令是用来干什么呢？
+analyze index index1 validate structure：是用来分析索引的数据块是否有坏块，以及根据分析得到的数据（存放在index_stats）來判断索引是否需要重新建立。
+什么样的index需要rebuild？
+当一个table经常进行DML操作时，它的索引会存在许多block空间的浪费，这是因为index block中的记录只有在全部表示为不可用时， block 才能被加入到freelist中去被重新利用。所以我们需要寻找那些浪费空间很严重的index。
+方法是: 1) analyze index index_name validate structure;
            2) select del_lf_blk_len/lf_blk_len from index_stats where name = :index_name;
-           3) ����������20%�� �����Index�Ϳ��Ա�rebuild�ˡ�
-validate structure�ж���ģʽ�� online, offline�� Ĭ����offlineģʽ����offlineģʽ����ʱ�� �ጦ����һ��4���e������������������runϵ�y�������һ����Ӱ�졣
-��onlineģʽ��û�б�lock��Ӱ�죬������onlineģʽ����ʱ�� ����ͼindex_statsû��ͳ����Ϣ��
-analyze index index1 compute statistics��������ͳ��index�ķ�����Ϣ����ΪCBO����ġ���9i��ʼ��Oracle�Խ���ʹ��dbms_stats package���� analyze �ˡ�
+           3) 如果结果大于20%， 那你的Index就可以被rebuild了。
+validate structure有二中模式： online, offline， 默认是offline模式。以offline模式分析时， 会對表加一个4级別的锁（表共享），对run系統可能造成一定的影响。
+而online模式则没有表lock的影响，但当以online模式分析时， 在视图index_stats没有统计信息。
+analyze index index1 compute statistics：是用来统计index的分析信息，来为CBO服务的。从9i开始，Oracle以建议使用dbms_stats package代替 analyze 了。
 
 
 
 
-��Oracle���ݻָ���ORA-00600[6711]����һ��
-2010/09/01 BY MACLEAN LIU 5������
-һ��Linux�ϵ�10.2.0.4ϵͳ����־��Ƶ������ORA-00600[6711]�ڲ�����:
+【Oracle数据恢复】ORA-00600[6711]错误一例
+2010/09/01 BY MACLEAN LIU 5条评论
+一套Linux上的10.2.0.4系统，日志中频繁出现ORA-00600[6711]内部错误:
 
-����Լ��㲻��������ASKMACLEANרҵORACLE���ݿ��޸��Ŷӳ�Ա�����ָ�!
+如果自己搞不定可以找ASKMACLEAN专业ORACLE数据库修复团队成员帮您恢复!
 
 Wed Sep  1 21:24:30 2010
 Errors in file /s01/10gdb/admin/YOUYUS/bdump/youyus_smon_5622.trc:
@@ -30046,8 +30046,8 @@ Wed Sep  1 21:24:31 2010
 Non-fatal internal error happenned while SMON was doing logging scn->time mapping.
 
 
-MOS����һ������6711�ڲ�����ʮ�ּ򵥵�Note,���ĵ����Ƴ���6711�����п����ǲ�������Ϊ��(cluster)�������ֵ������Ǳ�ڵĶ������Note����û�и������Ǹô���argument���������塣
-������ʵ���ǿ��Բ³���,��Ϊ�Ǻ�corruption��صĴ�����ôʵ���Ͽ��ܹ����ļ��������޷���obj#,file#,block#��4256248��4256242 ������������Data Block Address�������ǵ���dba��������Ҳ��ָ����1�������ļ���61938���61944���ݿ飬������������Щ�������ĸ�����
+MOS上有一个关于6711内部错误十分简单的Note,该文档声称出现6711错误极有可能是部分类型为簇(cluster)的数据字典表存在潜在的讹误，这个Note甚至没有告诉我们该错误argument参数的意义。
+不过其实我们可以猜出来,因为是和corruption相关的错误，那么实际上可能关联的几个因素无非是obj#,file#,block#；4256248和4256242 两个数字像极了Data Block Address，把他们当做dba来看待，也就指向了1号数据文件的61938块和61944数据块，我们来看看这些块属于哪个对象：
 SQL> set linesize 200;
 SQL> select segment_name, segment_type
   2    from dba_extents
@@ -30058,7 +30058,7 @@ SQL> select segment_name, segment_type
 SEGMENT_NAME                                                                      SEGMENT_TYPE
 --------------------------------------------------------------------------------- ------------------
 SMON_SCN_TO_TIME                                                                  CLUSTER
-����������һ��cluster��SMON_SCN_TO_TIME��SMON_SCN_TIME���Ļ��أ�SMON_SCN_TIME�����Լ�¼���ݿ���scn��Ӧ��ʱ���������ֱ�Ӳ鿴���Դ��������ֵ��sql.bsq�ļ������Խ�һ���˽����ǵĽṹ:
+不出意料是一个cluster，SMON_SCN_TO_TIME是SMON_SCN_TIME表的基簇，SMON_SCN_TIME表用以记录数据库中scn对应的时间戳。我们直接查看用以创建数据字典的sql.bsq文件，可以进一步了解他们的结构:
 cat $ORACLE_HOME/rdbms/admin/sql.bsq|grep -A 24 "create cluster smon_scn_to_time"
 create cluster smon_scn_to_time (
   thread number                         /* thread, compatibility */
@@ -30084,7 +30084,7 @@ create unique index smon_scn_time_tim_idx on smon_scn_time(time_mp)
 
 create unique index smon_scn_time_scn_idx on smon_scn_time(scn)
 /
-�����Ͻű����Կ���������ϴ��ڶ��������������Ҫ��һ��validate��֤������Щ����:
+从以上脚本可以看到这个簇上存在多个索引，我们需要进一步validate验证所有这些对象:
 SQL> analyze table SMON_SCN_TIME validate structure;
 Table analyzed.
 
@@ -30099,14 +30099,14 @@ analyze cluster SMON_SCN_TO_TIME validate structure cascade
 *
 ERROR at line 1:
 ORA-01499: table/index cross reference failure - see trace file
-�����������Ѿ��������ˣ��������SMON_SCN_TO_TIME������smon_scn_to_time_idx���ϣ����п����Ǹ������ϳ������߼���������������Ľ������������ҳ��������ں�Ҫ������Ե����׵ö���:
+到这里问题已经很清晰了，问题出在SMON_SCN_TO_TIME的索引smon_scn_to_time_idx身上，极有可能是该索引上出现了逻辑讹误。所幸有问题的仅仅是索引，找出问题所在后要解决就显得容易得多了:
 SQL> alter index smon_scn_to_time_idx rebuild ;
 
 Index altered.
 
-/* ���������ֶ��������½���rebuild��������Ч�ģ�������rebuild��ͬʱ�澯��־���ٴγ�����ORA-00600[6711]���� !!! */
+/* 在索引出现讹误的情况下仅仅rebuild往往是无效的，在我们rebuild的同时告警日志中再次出现了ORA-00600[6711]错误 !!! */
 
-/* ������Ҫ�ĳ��װ������������drop�������ٴδ���!!! */
+/* 我们需要的彻底把有问题的索引drop掉，并再次创建!!! */
 
 SQL> drop index smon_scn_to_time_idx ;
 
@@ -30116,114 +30116,114 @@ SQL> create index smon_scn_to_time_idx on cluster smon_scn_to_time;
 
 Index created.
 
-/* �������������澯��־�в��ٳ��ִ���! * /
+/* 至此问题解决，告警日志中不再出现错误! * /
 
 /* That's great! * /
 
 
 
 
- �� ʲô�����ݿ�һ���ԣ�
-    ÿһ�����ݿ�ͷ������һ��"У���"�ֶ�
-    �����ݿ鱻д�ش���ǰ��Oracle�����¼������У���
-    ����¼������ֶΣ�����д�ش���
-    �´����ݿ鱻�����ڴ�ʱ��Oracle�����¼������ݿ��У���
-    ����У����ֶ��е�ֵ��Ƚ�
-    ����в��죬Oracle�ͻ��׳�ORA-1578
-    Ҳ���ǣ�����У����̣�
-    д��ʱ�����㲢����
-    ����ʱ�����㲢�Ƚ�
-    ͨ��У����ֶν��м�������һ���Լ�飬�������Ӳ�����ϣ���������������ȷ���
-    ���߼�һ���Լ����ǽ����������磺��¼�������Ƿ��Ӧ����¼�Ƿ񱻲����ڵ�����������
-    db_block_checksum:����һ���Լ��
-    ��ֵΪtrueʱ��Oracle���˻�����б��ռ�����ݿ����У��ͼ�飬�����redo log����У���
-    �����֮Ϊfalse,��ֻ���system���ռ�����ݿ����У��
-    Oracle���鿪���������
-    db_block_checking:�߼�һ���Լ��
-    ��ֵΪfalseʱ��ֻ���system���ռ����߼�һ���Լ��
-    ������Ӱ��Ƚϴ���DBA�Լ�Ȩ��
-    �� 4�ֹ���У��
-    �� DBV
-    ���Զ������ļ��������߼�����һ���Լ��
-    �����������������ƥ����
-    ����μ���֮ǰ�Ĳ��ͣ�
-    Oracle ����dbv��ʹ�ý���
+ ㈠ 什么是数据块一致性？
+    每一个数据块头部都有一个"校验和"字段
+    当数据块被写回磁盘前，Oracle会重新计算这个校验和
+    并记录到这个字段，最终写回磁盘
+    下次数据块被读入内存时，Oracle会重新计算数据块的校验和
+    并与校验和字段中的值相比较
+    如果有差异，Oracle就会抛出ORA-1578
+    也就是，整个校验过程：
+    写回时，计算并保存
+    读入时，计算并比较
+    通过校验和字段进行检查叫物理一致性检查，其侧重于硬件故障，并不关心内容正确与否
+    而逻辑一致性检查便是接手这任务，如：记录和索引是否对应；记录是否被不存在的事务锁定等
+    db_block_checksum:物理一致性检查
+    当值为true时，Oracle除了会对所有表空间的数据块进行校验和检查，还会对redo log块做校验和
+    如果置之为false,则只会对system表空间的数据块进行校验
+    Oracle建议开启这个参数
+    db_block_checking:逻辑一致性检查
+    当值为false时，只会对system表空间做逻辑一致性检查
+    对性能影响比较大，需DBA自己权衡
+    ㈡ 4种工具校验
+    ① DBV
+    可以对数据文件物理和逻辑进行一致性检查
+    但不会检查表和索引的匹配性
+    具体参见我之前的博客：
+    Oracle 工具dbv的使用介绍
 
-    �� analyze
-    ͬ��ִ���������߼�һ���Լ��
-    �ܹ�������������ƥ����
-    ���Ǽ������⣬��Ὣ�������USER_DUMP_DEST��trc�ļ���
-    analyze������һ�����﷨��
-    analyze table table_name validate structure cascade online��offline��
-    ע�ͣ�
-    �� cascade:��ȷ��ÿ����¼������Ӧ������
-    �� online :����һ���Լ�飬ֻ�ǲ����ռ�����ͳ����Ϣ
-    �� offline:���ռ�����ͳ����Ϣ��ֻ�Ǳ��ᱻ��ס
-    �� �����������ļ�¼�Ƿ�����ȷ����ʱ���ɰѼ������ļ�¼��rowid��������ı�invalid_rows��
-    ��֮ǰ��Ҫ���У�$ORACLE_HOME/rdbms/admin/utlvalid.sql�ű�
-    ��Ӧ���﷨��
+    ② analyze
+    同样执行物理和逻辑一致性检查
+    能够检查表和索引的匹配性
+    若是检查出问题，则会将问题放在USER_DUMP_DEST的trc文件内
+    analyze检查对象一致性语法：
+    analyze table table_name validate structure cascade online（offline）
+    注释：
+    ⑴ cascade:可确认每条记录都有相应的索引
+    ⑵ online :在线一致性检查，只是不会收集对象统计信息
+    ⑶ offline:可收集对象统计信息，只是表会被锁住
+    ⑷ 当检查分区表的记录是否在正确分区时，可把检查出来的记录的rowid放在特殊的表invalid_rows中
+    这之前需要运行：$ORACLE_HOME/rdbms/admin/utlvalid.sql脚本
+    对应的语法：
     analyze table table_name validate structure into invalid_rows;
-    �����������Ҳ�Ƚ���Ҫ���һ�ר��дһ�����ͽ��ܣ�
-    �� RMAN
-    ʹ��rman����ʱ�����Ȱ����ݿ����rman�Ķ���������Ȼ���ٿ�����rman��д������������ٴ�д������д������������
-    �ڴӶ���������д�������Ŀ��������У�rman������ݿ����һ���Լ��
-    �﷨��
+    由于这个命令也比较重要，我会专门写一个博客介绍！
+    ③ RMAN
+    使用rman备份时，是先把数据块读到rman的读缓冲区，然后再拷贝到rman的写缓冲区，最后再从写缓冲区写到物理介质上
+    在从读缓冲区到写缓冲区的拷贝过程中，rman会对数据块进行一致性检查
+    语法：
     backup check logical validate;
-    ע�ͣ�
-    �������ֻ����һ���Լ�飬�������б���
-    ���������v$database_block_corruption
-    logical:�����߼�һ���Լ��
-    validate:��������һ���Լ��
-    ���ӣ�
+    注释：
+    这个命令只进行一致性检查，并不进行备份
+    检查结果放在v$database_block_corruption
+    logical:进行逻辑一致性检查
+    validate:进行物理一致性检查
+    例子：
     backup check logical validate datafile 1;
-    ���˿��Լ�������ļ���rman�����Լ���Ѿ����ݵ��ļ�
-    �﷨��
+    除了可以检查数据文件，rman还可以检查已经备份的文件
+    语法：
     restore validate
-    ���ӣ�
-    ������ݿⱸ��
+    例子：
+    检查数据库备份
     restore validate database;
-    ��鱸�ݵĿ����ļ�
-    restore validate controlfile to '/u01/��';
-    ���鵵��־�ļ�
+    检查备份的控制文件
+    restore validate controlfile to '/u01/…';
+    检查归档日志文件
     restore validate archivelog from sequence x until sequence y;
-    �� dbms_repair
-    ���֡���ʶ���޸������ļ��еĻ���
-    ��ʹ���������ͬʱ��������ݶ�ʧ�����������������ݲ�һ�£�������Լ���ƻ�����������
-    ��ˣ�dbms_repairֻ����û�б��ݵ������ʹ�õ�һ���ֶΣ����ַ�ʽһ�㶼��������ݵĶ�ʧ
-    dbms_repair���Ĺ���ԭ���Ƚϼ򵥣��ǽ���鵽�Ļ����ע������ʹ����dml���������ÿ�
-    ͬʱ��dbms_repair�����ṩ�����ڱ��������а����ı�עΪ�����еļ�ֵ���Լ��޸�freelist��segment bitmap�Ĺ���
-    ��һ����Ҫע�⣬dbms_repair��û�н�����Ȩ��ֻ��sys�û�����ִ�С�
+    ④ dbms_repair
+    发现、标识并修改数据文件中的坏块
+    但使用这个包的同时会带来数据丢失、表和索引返回数据不一致，完整性约束破坏等其他问题
+    因此，dbms_repair只是在没有备份的情况下使用的一种手段，这种方式一般都会造成数据的丢失
+    dbms_repair包的工作原理比较简单，是将检查到的坏块标注出来，使随后的dml操作跳过该块
+    同时，dbms_repair包还提供了用于保存索引中包含的标注为坏块中的键值，以及修复freelist和segment bitmap的过程
+    有一点需要注意，dbms_repair包没有进行授权，只有sys用户可以执行。
 
 
-    �鿴�����Ƿ�ʹ�ù����������δʹ�ù����������Ϳ���ɾ����
-1.���ɼ�������Ľű��ļ���
-Java����  �ղش���
+    查看索引是否使用过，如果长期未使用过的索引，就可以删除掉
+1.生成监控索引的脚本文件：
+Java代码  收藏代码
 spool c:\index_monitor.log
 select 'alter index '||index_name||' monitoring usage;' from user_indexes;
 spool off;
-Ȼ��Ըýű��ļ��޸�һ�£���ִ�У����ɼ�������ˡ�
+然后对该脚本文件修改一下，并执行，即可监控索引了。
 
 
-�鿴�����Ƿ�ʹ�ù���
+查看索引是否使用过：
 select table_name,index_name,used from v$object_usage;
-���used�ж�Ӧ��ֵΪNO����֤��������δʹ�ù����ڼ��ӹ�����
-���ǲ��ܹ��������ݿ⣬��Ϊv$��ͼ�ᱻ���´�������ʧԭ���ļ��ӡ�
+如果used列对应的值为NO，则证明该索引未使用过。在监视过程中
+我们不能够启动数据库，因为v$视图会被重新创建，丢失原来的监视。
 
 
-Java����  �ղش���
-2.����ȡ����������Ľű��ļ���
+Java代码  收藏代码
+2.生成取消监控索引的脚本文件：
 spool c:\index_nomonitor.log
 select 'alter index '||index_name||' nomonitoring usage;' from user_indexes;
 spool off;
 
 
 
-3.�����ؽ������Ľű��ļ�
+3.生成重建索引的脚本文件
 spool /home/oracle/index_rebuild.sql
 SELECT 'ALTER INDEX '||INDEX_NAME ||' REBUILD;'FROM USER_INDEXES;
 spool off;
 
-4.���ɺϲ������Ľű��ļ�
+4.生成合并索引的脚本文件
 spool /home/oracle/index_rebuild.sql
 SELECT 'ALTER INDEX '||INDEX_NAME ||' coalesce;'FROM USER_INDEXES;
 spool off;
@@ -30231,48 +30231,48 @@ spool off;
 
 
 
-���ȷ���Ƿ���Ҫ�ؽ������أ�һ����Ϊ�����������
-1��������ȴ��ڵ���4
-2����ɾ����������Ŀռ��������Ŀ��20%
-3�������ռ�ʹ����С��50%
-�ٴβ��ò��� һ����ͼindex_stats����ͼĬ����û���κ����ݵģ���ʹ��analyze index index_name validate structure;�������ṹ����֮�󽫻������Ӧ�����ݣ�һ�����ͼ�����ṩ�������㹻����Ϣȥ���������Ƿ���Ҫ�����������ؽ���
-�鿴����ֶ���Ϣ��
+如何确定是否需要重建索引呢？一般认为有两种情况：
+1、索引深度大于等于4
+2、已删除的索引条目占总索引条目的20%
+3、索引空间使用率小于50%
+再次不得不提 一个视图index_stats该视图默认是没有任何数据的，当使用analyze index index_name validate structure;对索引结构分析之后将会填充相应的数据，一般该视图可以提供给我们足够的信息去引导我们是否需要对索引进行重建。
+查看相关字段信息：
 
 SQL> desc index_stats;
  Name                                      Null     Type
  ----------------------------------------- -------- ----------------------------
- HEIGHT                                             NUMBER  �����������߶ȣ�
- BLOCKS                                             NUMBER  ������ռ�ÿ�����
- NAME                                               VARCHAR2(30)���������֣�
- PARTITION_NAME                                     VARCHAR2(30)�������������֣�
- LF_ROWS                                            NUMBER ��Ҷ��������
- LF_BLKS                                            NUMBER  ����b��������Ҷ�ӵĿ�����
- LF_ROWS_LEN                                        NUMBER  ������Ҷ�������ĳ��ȣ�
- LF_BLK_LEN                                         NUMBER  ����һƬҶ���п��ÿռ䣩
- BR_ROWS                                            NUMBER  ����B���������ж��ٸ���֧�У�
- BR_BLKS                                            NUMBER  ����B���������ж��ٸ���֧�飩
- BR_ROWS_LEN                                        NUMBER  ����B�����������з�֧����ܳ��ȣ�
- BR_BLK_LEN                                         NUMBER  ���ڷ�֧���п��õĿռ䣩
- DEL_LF_ROWS                                        NUMBER  ����������ɾ��Ҷ��������
- DEL_LF_ROWS_LEN                                    NUMBER  ����������ɾ��Ҷ���������ܵĳ��ȣ�
- DISTINCT_KEYS                                      NUMBER  ��Ψһֵ��Ŀ����ɾ�����У�
+ HEIGHT                                             NUMBER  （代表索引高度）
+ BLOCKS                                             NUMBER  （索引占用块数）
+ NAME                                               VARCHAR2(30)（索引名字）
+ PARTITION_NAME                                     VARCHAR2(30)（分区索引名字）
+ LF_ROWS                                            NUMBER （叶子行数）
+ LF_BLKS                                            NUMBER  （在b树索引中叶子的块数）
+ LF_ROWS_LEN                                        NUMBER  （所有叶子行数的长度）
+ LF_BLK_LEN                                         NUMBER  （在一片叶子中可用空间）
+ BR_ROWS                                            NUMBER  （在B树索引中有多少个分支行）
+ BR_BLKS                                            NUMBER  （在B树索引中有多少个分支块）
+ BR_ROWS_LEN                                        NUMBER  （在B树索引中所有分支块的总长度）
+ BR_BLK_LEN                                         NUMBER  （在分支快中可用的空间）
+ DEL_LF_ROWS                                        NUMBER  （在索引中删除叶子行数）
+ DEL_LF_ROWS_LEN                                    NUMBER  （在索引中删除叶子行数的总的长度）
+ DISTINCT_KEYS                                      NUMBER  （唯一值数目包括删除的行）
  MOST_REPEATED_KEY                                  NUMBER
- BTREE_SPACE                                        NUMBER  ����ǰ�ָ��� �����ܵĴ�С�ռ䣩
- USED_SPACE                                         NUMBER  ���Ѿ�������ʹ�õĿռ��С������ɾ�������ռ䣩
- PCT_USED                                           NUMBER  �������ռ�ʹ���ʣ�
- ROWS_PER_KEY                                       NUMBER  ��ÿ����ͬ��ֵ��ƽ������������ɾ���У�
+ BTREE_SPACE                                        NUMBER  （当前分给该 索引总的大小空间）
+ USED_SPACE                                         NUMBER  （已经被索引使用的空间大小包含被删的行数空间）
+ PCT_USED                                           NUMBER  （索引空间使用率）
+ ROWS_PER_KEY                                       NUMBER  （每个不同键值的平均行数不包括删除行）
  BLKS_GETS_PER_ACCESS                               NUMBER
- PRE_ROWS                                           NUMBER  ��ǰ׺������
- PRE_ROWS_LEN                                       NUMBER  ��ǰ׺�е��ܳ��ȣ�
- OPT_CMPR_COUNT                                     NUMBER  ��ѹ�����ȣ�
+ PRE_ROWS                                           NUMBER  （前缀行数）
+ PRE_ROWS_LEN                                       NUMBER  （前缀行的总长度）
+ OPT_CMPR_COUNT                                     NUMBER  （压缩长度）
  OPT_CMPR_PCTSAVE                                   NUMBER
 
 SQL>
 
-�鿴δɾ��Ҷ������ռ�������İٷֱȹ�ʽΪ��(��lf_rows-del_lf_rows)/lf_rows)*100;
-�鿴δɾ����ռ�õĿռ�ٷֱȹ�ʽΪ������used_space-del_lf_rows_len)/btree_space)*100;
-pct_used���㹫ʽΪ����used_space/btree_space)*100
-eg��
+查看未删除叶子行数占总行数的百分比公式为：(（lf_rows-del_lf_rows)/lf_rows)*100;
+查看未删除行占用的空间百分比公式为：（（used_space-del_lf_rows_len)/btree_space)*100;
+pct_used计算公式为：（used_space/btree_space)*100
+eg：
 
 SQL> create table test as select rownum id,'Amy' text from dual connect by level<=10000;
 
@@ -30360,7 +30360,7 @@ SQL> select height,
 
 SQL>
 
-�ռ�ͳ����Ϣ��֮����Կ�����dba_indexes����Ȼ��ʾ���ڵ�����Ҷ�飬�Ż����Ӷ�ʹ�ø�������
+收集统计信息，之后可以看到在dba_indexes中依然显示存在的索引叶块，优化器从而使用该索引。
 
 SQL> exec dbms_stats.gather_table_stats('SYS','TEST',cascade=>true);
 
@@ -30395,8 +30395,8 @@ Predicate Information (identified by operation id):
 
 SQL>
 
-����ע�⣺ʹ��analyze index index_name validate structure ;��������������ʱ���������Ӧ�Ķ���ֱ��������ִ����ɣ��������������ʹ��online��������ʹ��online����������Ϣ�ֲ����¼��index_stats��ͼ�������ؽ������Ĺ����л�����ܶ��redo��־�����Կ���ʹ��nologging���������⵱�ڷ�����ɺ���ִ�в����������ô��Ӧ��del_lf_rows����ı�Ӷ�Ӱ��������ķ�����Ϣ��ȡ��
-eg��
+但是注意：使用analyze index index_name validate structure ;进行索引分析的时候会锁定相应的对象直到该命令执行完成，如果不加锁可以使用online参数，但使用online参数数据信息又不会记录到index_stats视图，且在重建索引的过程中会产生很多的redo日志，可以考虑使用nologging参数，另外当在分析完成后在执行插入操作，那么相应的del_lf_rows将会改变从而影响对索引的分析信息提取：
+eg：
 
 SQL> select * from test;
 
@@ -30467,58 +30467,58 @@ SQL> select height,
 
 SQL>
 
-�����Ͽ��Կ����������ݣ�������������֮��ʣ��Ŀռ䲻�᷵�������ݿ⣬���ǵ����������ݵ�ʱ���п�����������֮ǰ��ɾ�����ݵĿռ䣬����һ����Կ�del_lf_row�Ѿ��������ִ��󣬵�ĿǰΪֹ�ոտ�ʼɾ��9999�����ݣ�Ȼ�����һ�������ڽ��з�������ô���ڼ�Ȼ��9582����˲��ܽ�������del_lf_rows���������ؽ���������ǰ�ǵ��и��������������ôһ�����⣬˵�ǲ��Ի�����ִ��һ��sql��ǳ��Ŀ飬���ǵ�����ʽ����ȴ����������ִ�мƻ�����һ���ģ��ҵĻ��ɾ�����Ҫ�ؽ���ʽ���������������ˣ����ȷ���� ������ͬ����ִ���˴���ɾ�������������˴�����������Ƭ�����Ҳ�ѯÿ�ζ�ȡ�˴����������У�������Ƶ��ʹ�ã���ʱ���ؽ��������м�ֵ�ġ�
-�ڶ��֣��ϲ�����
-�ϲ��������ǽ������������ڵ����������п��пռ�����������飬�Ӷ��ͷ�������ռ䣬��Ƚ�����������windows�Ĵ�����Ƭ����������ע��ù��̲��Ὣ�ڳ��Ŀռ䷵�������ݿ⣬���Ǽ��뵽���пռ��б��У��Ա��´��ڽ���ʹ�á����ֲ����������������л���ʱ����־Ϊ�ֶεı����зǳ���Ҫ��ֵ�ģ���Ϊ�����Ƕ���Щ��ɾ���˴󲿷����ݣ���ô���кܶ�ռ����޷��ڽ���ʹ�õģ���ô�������ƶ�ν�ʲ�ѯ��ʱ��ͨ����ɨ�������кܶ�տ죬��ô�ϲ������ͽ��յ�����������ͷ���������Ŀ����б��С�
-���ǳ��򵥣�
+从以上可以看出两点内容，产生索引数据之后剩余的空间不会返还给数据库，但是当插入新数据的时候将有可能重新利用之前被删除数据的空间，另外一点可以看del_lf_row已经评估出现错误，到目前为止刚刚开始删除9999条数据，然后插入一条数据在进行分析，那么现在既然是9582，因此不能仅仅依靠del_lf_rows进行索引重建评估。以前记得有个朋友曾经提过这么一个问题，说是测试环境库执行一条sql会非常的块，但是导到正式环境却很慢，但是执行计划都是一样的，我的怀疑就是需要重建正式环境库的索引。因此，如果确定对 索引相同部分执行了大量删除操作，产生了大量的索引碎片，并且查询每次读取了大量的索引行，索引被频繁使用，这时候重建索引是有价值的。
+第二种：合并索引
+合并索引就是将索引段中相邻的索引块其中空闲空间进行整合重组，从而释放索引块空间，这比较类似于我们windows的磁盘碎片整理，但是注意该过程不会将腾出的空间返回与数据库，而是加入到空闲空间列表中，以便下次在进行使用。这种操作对于那种以序列或是时间日志为字段的表是有非常重要价值的，因为当我们对这些表删除了大部分数据，那么其中很多空间是无法在进行使用的，那么在我们制定谓词查询的时候通常会扫描索引中很多空快，那么合并索引就将空的索引块进行释放与索引块的空闲列表中。
+语句非常简单：
 alter index index_name coalesce;
-�ϲ��������ؽ�������ͬ�£��ϲ��������ή�������ĸ߶ȣ����Ƕ���������Ŀ�����������ϣ������ؽ����ܻή�������߶ȣ������ؽ�������Ҫ2���Ĵ��̿ռ䣬������Ҫ�洢ԭ�ȵ�������Ŀ���ݣ�����Ҫ����Ŀռ�洢�µ��� ����������ֱ���ؽ���ɲſɡ�
+合并索引与重建索引不同事，合并索引不会降低索引的高度，而是对其数据条目进行重组整合，但是重建可能会降低索引高度，另外重建索引需要2倍的磁盘空间，首先需要存储原先的索引条目数据，还需要额外的空间存储新调整 的索引数据直到重建完成才可。
 
-ע���ϲ�������һ�����߲�����
-�����֣�shrink ������
-��Ϊshrink��һ������Դ������صĹ��̣�����������̣�һ����compact��������һ����ֱ��shrink space����һ��������coalesce������Ȼ���������redo��־��ִ����󲻻��ͷſռ䣬����shrink space ����������Ƭ�����Խ��ռ��ͷŸ����ռ䣬����shrink space��Ȼ�����߿������ģ���Ȼ����������redo��־������֮��shrink space��Ҫ�������ƶ���
-eg��
+注：合并索引是一种在线操作。
+第三种：shrink 索引：
+因为shrink是一个耗资源相对严重的过程，因此两个过程，一个是compact参数，另一个是直接shrink space，第一种类似于coalesce但是相比会产生更多的redo日志，执行完后不会释放空间，但是shrink space 除了整理碎片还可以将空间释放给表空间，但是shrink space虽然是在线可以做的，依然会产生过打的redo日志。除此之外shrink space还要启动行移动。
+eg：
 alter index index_name shrink space compact;
 alter index index_name shrink space;
-ע��Shrink operations can be performed only on segments in locally managed tablespaces with automatic segment space management (ASSM).
+注：Shrink operations can be performed only on segments in locally managed tablespaces with automatic segment space management (ASSM).
 
 
 
 
 
-˫�����뻻�е�����
-���ࣺ Oracle 2013-06-03 10:38 928���Ķ� ����(0) �ղ� �ٱ�
-��PL/SQL Developer �и��Ʋ�ѯ������ı��ļ��У���ѯ�������������˫���źͻ��С�����ֵ��Ǹ��Ƴ����ļ�¼�ж�������˫���źͻ��С�������Ҹе����������ϼ򵥲���һ�£�ֻ�����������ʣ�ȴû�д𰸡�����ֻ���Լ���취�������������ˡ�
+双引号与换行的困惑
+分类： Oracle 2013-06-03 10:38 928人阅读 评论(0) 收藏 举报
+从PL/SQL Developer 中复制查询结果到文本文件中，查询结果本身看不到双引号和换行。但奇怪的是复制出来的记录中都包含了双引号和换行。这个让我感到很困惑，网上简单查了一下，只看到有人提问，却没有答案。看来只有自己想办法来解决这个问题了。
 
 
 
-ʲôԭ����ܵ��½���г���˫���źͻ��е������أ�
+什么原因可能导致结果中出现双引号和换行的问题呢？
 
-˼·���£�
+思路如下：
 
-1.       �����е����������⡣�ǲ���PL/SQL Developer, UltraEdit��������������أ�
+1.       工具中的设置有问题。是不是PL/SQL Developer, UltraEdit中有特殊的设置呢？
 
-2.       ��ѯ����Ƿ����쳣�أ����ѯ�����������˫���źͻ��У�����PL/SQL�п������أ�
-
-
+2.       查询结果是否有异常呢？如查询结果中隐藏着双引号和换行，但在PL/SQL中看不到呢？
 
 
 
-��֤��һ�����룺
-
-a)       �Ѳ�ѯ����ֱ��Ƶ�UltraEdit��csv, Notepad�о�������˫���źͻ��С�
-
-b)       �ֱ���windows��linux��sql plus������ͬ����sql ��ѯ������û��˫���źͻ��С�
-
-c)       ��ѯ�������е����ݸ��Ƴ�����������˫���źͻ��С�
-
-�ɴ˿ɼ�˫���źͻ��������ݱ����й�.
 
 
+验证第一个猜想：
 
-��֤�ڶ������룺
+a)       把查询结果分别复制到UltraEdit，csv, Notepad中均发现有双引号和换行。
 
-��oracle����dump�鿴sql�Ĳ�ѯ������£�
+b)       分别在windows和linux的sql plus中运行同样的sql 查询，发现没有双引号和换行。
+
+c)       查询其它表中的数据复制出来，看不到双引号和换行。
+
+由此可见双引号和换行与数据本身有关.
+
+
+
+验证第二个猜想：
+
+在oracle中用dump查看sql的查询结果如下：
 
 
 
@@ -30534,7 +30534,7 @@ Typ=1 Len=8: 49,53,49,46,119,97,118,10    151.wav
 
 
 
-Dump���Ľ������ʲô�����أ���chr()���鿴���¡�
+Dump出的结果代表什么含义呢？用chr()来查看以下。
 
 
 
@@ -30550,7 +30550,7 @@ CHR(49) CHR(53) CHR(49) CHR(46) CHR(119) CHR(97) CHR(118) CHR(10)
 
 
 
-ԭ��chr(10) �������С�ԭ�������ǵĻ������ڰ���ȥ���Ϳ����ˡ�
+原来chr(10) 代表换行。原来是他惹的祸，现在把它去掉就可以了。
 
 SQL>update TARCHIVE1  set FPATH=replace(FPATH,chr(10),'') WHERE ROWID='AAFTSIAARAAA9fcAAA';
 
@@ -30580,27 +30580,27 @@ Typ=1 Len=7: 49,53,49,46,119,97,118    151.wav
 
 
 
-�ڰѲ�ѯ������Ƶ��ı��ļ��У�˫���źͻ��ж������ˡ�
+在把查询结果复制到文本文件中，双引号和换行都不见了。
 
 
 
-���������������Windows�б༭�����뵽linux�µ�oracle�еġ�
+调查后发现数据是在Windows中编辑，插入到linux下的oracle中的。
 
-����windows�»س�������\r\n ����unix����\n�� ���Ե��³������������⡣
+由于windows下回车换行是\r\n ，在unix下是\n。 所以导致出现了上述问题。
 
 
-��ô֪��һ������HWM�أ�
-(1) ���ȶԱ����з�����ANALYZE TABLE <tablename> ESTIMATE/COMPUTE STATISTICS;
-(2) SELECT table_name, num_rows, blocks, empty_blocks FROM user_tables WHERE table_name = ��&tablename��;
+怎么知道一个表的HWM呢？
+(1) 首先对表进行分析：ANALYZE TABLE <tablename> ESTIMATE/COMPUTE STATISTICS;
+(2) SELECT table_name, num_rows, blocks, empty_blocks FROM user_tables WHERE table_name = ‘&tablename’;
 SQL> ANALYZE TABLE TESTHW COMPUTE STATISTICS;
 Table analyzed
 SQL> SELECT table_name, num_rows, blocks, empty_blocks FROM user_tables WHERE table_name = 'TESTHW';
 TABLE_NAME                       NUM_ROWS     BLOCKS EMPTY_BLOCKS
 ------------------------------ ---------- ---------- ------------
 TESTHW                                  0          0          128
-BLOCKS �д����ñ�������ʹ�ù������ݿ�����Ŀ����ˮ�ߡ�EMPTY_BLOCKS ����������ñ���������ˮ�����ϵ����ݿ�飬������û��ʹ�õ����ݿ顣
-ʹ�������������������ݣ���ʱ��HWM��2140 blocks����ͼ1��ʾ��
-�����Ҿ�ɾ��һЩ������ģ���һЩ��Ƭ����ʱHWM��Ȼ��2140 blocks ������HWM���кܶ�տ飬��ͼ2��ʾ��
+BLOCKS 列代表该表中曾经使用过得数据库块的数目，即水线。EMPTY_BLOCKS 代表分配给该表，但是在水线以上的数据库块，即从来没有使用的数据块。
+使用下面语句插入批量数据，此时的HWM是2140 blocks，如图1所示：
+下面我就删除一些数据以模拟出一些碎片，此时HWM仍然是2140 blocks ，但是HWM下有很多空块，如图2所示。
 declare
   i number := 0;
 begin
@@ -30622,7 +30622,7 @@ SQL> select segment_name,header_file,header_block,blocks,bytes,extents,min_exten
 SEGMENT_NA HEADER_FILE HEADER_BLOCK     BLOCKS      BYTES    EXTENTS MIN_EXTENTS MAX_EXTENTS SEGMENT_TYPE
 ---------- ----------- ------------ ---------- ---------- ---------- ----------- ----------- ------------
 TESTHW              96           12       2176   17825792         17           1  2147483645 TABLE
-��������oracle 10g��dbms_space���������Ƭ����ϸ��Ϣ����ȻҲ������dump�ļ��ķ������鿴��Ƭ��������ﲻ�����ܣ�show_space���Ĵ������������������
+下面利用oracle 10g的dbms_space包来检查碎片的详细信息，当然也可以用dump文件的方法来查看碎片情况，这里不做介绍，show_space包的代码在文章最后会给出。
 SQL> exec show_space('testhw','auto','t','y');
 Total Blocks............................2176
 Total Bytes.............................17825792
@@ -30652,8 +30652,8 @@ SQL> select 204+173+804+62+897 Total from dual;
      TOTAL
 ----------
       2140
-˵����������������֣���һ����������������ڶ�������ʵ��ʹ��������ڶ���������block֮�͵���ˮλ��ֵ�� ����е�һ��Total Blocks���Ǳ���segment��testhw�ѷ�����ܵ�block���������ڶ��е�Total Blocks��testhwʵ��100%ʹ�õ�block����
-��������������Ǿ��������ģ�һ��ȫ��ɨ���sql����Ȼ���кܶ�տ飬����sqlִ��������Ȼ����������testhw����ʵ��ʹ����897���飬������Ȼ2042�ε�����������ɨ��HWM2140�������п顣
+说明：结果分两个部分，第一部分是总体情况，第二部分是实际使用情况，第二部分所有block之和等于水位线值。 结果中第一行Total Blocks，是表（segment）testhw已分配的总的block数；倒数第二行的Total Blocks表testhw实际100%使用的block数。
+下面的例子是我们经常遇到的，一个全表扫描的sql，虽然表中很多空块，但是sql执行起来仍然很慢，如下testhw表中实际使用了897个块，但是仍然2042次的物理读，即扫描HWM2140以下所有块。
 SQL> set autotrace TRACE STAT
 SQL> select * from dbmgr.testhw where id=998;
 998 rows selected.
@@ -30671,28 +30671,28 @@ Statistics
           0  sorts (disk)
         998  rows processed
      SQL> set autotrace off
-Oracle 10g�ṩ��һ��������Ƭ�ķ�����alter table table_name shrink space�������������������У��ڴ�֮ǰҪȷ���ڸñ��Ͻ������л����� id �Ĵ�������������Ϊ�н����ƶ�������Ǩ����Щ��ͬ���Թ��ҳ�֮Ϊ���ƶ������� id ���ܻᷢ���ı䡣Ҫȷ���ñ�֧�����ƶ��������֧�֣�������ʹ������������֧������alter table table_name enable row movement����������ڿ������·����в��ռ䷵�ظ����ռ䣬��ͼ 3 ��ʾ���ñ�������δ�õĿռ䶼���ظ����ռ䣬����������ʹ�á� ��ͼ3 ��ʾ����ʱ��Ѷ���ԭ�����еĿ鷵�ظ����ݿ⣬HWM ����Ҳ��������·��䡣
+Oracle 10g提供了一个清理碎片的方法：alter table table_name shrink space，该命令将重组表中现有行，在此之前要确保在该表上禁用所有基于行 id 的触发器，这是因为行将会移动（和行迁移有些不同所以姑且称之为行移动），行 id 可能会发生改变。要确保该表支持行移动，如果不支持，您可以使用如下命令来支持它：alter table table_name enable row movement。该命令将会在块内重新分配行并空间返回给表空间，如图 3 所示，该表内所有未用的空间都返回给表空间，以让其他段使用。 如图3 所示，此时会把段中原来空闲的块返回给数据库，HWM 本身也会进行重新分配。
 
 
 
 
 
-oracle �����������������죿��ת�� 2010-02-27 13:23:04
-���ࣺ Oracle
-�ڴ�����Ǩ���У������Ĵ����ٶ��Ǹ�����Ҫ�����أ�������������������أ�
-www.dba-oracle.com �Ϸ���һ���ܲ������ĵ�����ϧ���ǣ������վ��֪��ô�޷������ˣ�ʹ����google���գ�ת�����ﱸ���ˡ���Ҫע����ǣ�ֻ��oracle ��ҵ�����֧���������д�����
+oracle 怎样让索引创建更快？（转） 2010-02-27 13:23:04
+分类： Oracle
+在大数据迁移中，索引的创建速度是个很重要的因素，如何让索引创建更快呢？
+www.dba-oracle.com 上发现一个很不错的文档，可惜的是，这个网站不知怎么无法访问了，使用了google快照，转在这里备用了。需要注意的是，只有oracle 企业版才能支持索引并行创建。
 [@more@]
-Improve Oracle indexes �C Build faster, smaller and better-balanced indexes
+Improve Oracle indexes – Build faster, smaller and better-balanced indexes
 Oracle Tips by Burleson Consulting
 June 16, 2003
 Note: For complete details on index create performance, see my book "Oracle Tuning: The Definitive Reference".
-When using the create index syntax to build an Oracle index, there are many options that can dramatically improve the speed of the creation, the space used by the index, and the height of the resulting index. Let��s review a few of these factors:
+When using the create index syntax to build an Oracle index, there are many options that can dramatically improve the speed of the creation, the space used by the index, and the height of the resulting index. Let’s review a few of these factors:
 Index create speed: performance factors
-Parallel option �C This option allows for parallel processes to scan the table. When an index is created, Oracle must first collect the symbolic key/ROWID pairs with a full-table scan. By making the full-table scan run in parallel, the index creation will run many times faster, depending on the number of CPUs, table partitioning and disk configuration. I recommend a n-1 for the degree option, where n is the number of CPUs on your Oracle server. In this example we create an index on a 36 CPU server and the index create twenty times faster:
+Parallel option – This option allows for parallel processes to scan the table. When an index is created, Oracle must first collect the symbolic key/ROWID pairs with a full-table scan. By making the full-table scan run in parallel, the index creation will run many times faster, depending on the number of CPUs, table partitioning and disk configuration. I recommend a n-1 for the degree option, where n is the number of CPUs on your Oracle server. In this example we create an index on a 36 CPU server and the index create twenty times faster:
 CREATE INDEX cust_dup_idx
 ON customer(sex, hair_color, customer_id)
 PARALLEL 35;
-Nologging option �C The nologging option bypasses the writing of the redo log, significantly improving performance. The only danger with using nologging is that you must re-run the create index syntax if you perform a roll-forward database recovery. Using nologging with create index can speed index creation by up to 30%
+Nologging option – The nologging option bypasses the writing of the redo log, significantly improving performance. The only danger with using nologging is that you must re-run the create index syntax if you perform a roll-forward database recovery. Using nologging with create index can speed index creation by up to 30%
 CREATE INDEX cust_dup_idx
 ON customer(sex, hair_color, customer_id)
 PARALLEL 35
@@ -30701,15 +30701,15 @@ The nologging option is quite convoluted and dependent on several factors.
 Database noarchivelog mode - If your database is in "noarchivelog" mode and you are no using the APPEND hint for inserts, you WILL STILL generate redo logs!
 Database archivelog mode - If you are in archivelog mode, the table must be altered to nologging mode AND the SQL must be using the APPEND hint. Else, redo WILL be generated.
 Create index: Space & structure Factors
-Compress option �C The compress option is used to repress duplication of keys in non-unique indexes. For concatenated indexes (indexes with multiple columns), the compress option can reduce the size of the index by more than half. The compress option allows you to specify the prefix length for multiple column indexes. In this example we have a non-unique index on several low cardinality columns (sex and hair_color), and a high cardinality column (customer_id):
+Compress option – The compress option is used to repress duplication of keys in non-unique indexes. For concatenated indexes (indexes with multiple columns), the compress option can reduce the size of the index by more than half. The compress option allows you to specify the prefix length for multiple column indexes. In this example we have a non-unique index on several low cardinality columns (sex and hair_color), and a high cardinality column (customer_id):
 CREATE INDEX cust_dup_idx
 ON customer(sex, hair_color, customer_id)
 PARALLEL 35
 NOLOGGING
 COMPRESS 2;
-Tablespace blocksize option �C The blocksize of the index tablespace will have a huge impact on the structure of the index. For details, read Proof that large indexes reduce IO. Here is an example of an index created in a 32k tablespace:
+Tablespace blocksize option – The blocksize of the index tablespace will have a huge impact on the structure of the index. For details, read Proof that large indexes reduce IO. Here is an example of an index created in a 32k tablespace:
 create tablespace 23k_ts
-datafile ��/u01/app/oracle/prod/oradata/32k_file.dbf��
+datafile ‘/u01/app/oracle/prod/oradata/32k_file.dbf’
 blocksize 32k;
 CREATE INDEX cust_dup_idx
 ON customer(sex, hair_color, customer_id)
@@ -30724,10 +30724,10 @@ In sum, there are many parameters that you can use to improve the performance of
 
 
 
-һ.˵��
-һ�������ҽ�һ����ѯ�Ľ������ŵ���ʱ������������ʱ���Ĵ�С����ʱ��ķ�����ͨ��ͳ��block�����㡣�����룬�˷����Ĳ�����Ҳ���Ǻܸߡ� ��������ڲ�ѯ����ִ��֮ǰ���ܹ������С��
+一.说明
+一网友问我将一个查询的结果集存放到临时表里，如果估算临时表的大小，当时想的方法是通过统计block来计算。后来想，此方法的操作性也不是很高。 最好是能在查询操作执行之前就能估算出大小。
 
-�鿴��һ��ALL_TABLES ���������и��ֶΣ�avg_row_len. ��ֵ��λΪbytes�� ����һ������ֶ�������һ�����㡣
+查看了一下ALL_TABLES 表，其中有个字段：avg_row_len. 该值单位为bytes。 可以一句这个字段来进行一个估算。
 
 AVG_ROW_LEN*
 
@@ -30739,9 +30739,9 @@ Average length of a row in the table (in bytes)
 
 http://download.Oracle.com/docs/cd/E11882_01/server.112/e17110/statviews_2117.htm#i1592091
 
-���ݶԱ���С�Ĺ��㣬�������Թ�����������ݿ�Ĵ�С�� ����Ŀ���Խ׶Σ����Ը������ж�����й��㣬�Ӷ����Թ����ϵͳ�����Ժ����ݿ�Ĵ�С��������Щ���ݿ��Թ滮�洢������Ҫע��һ�㣬Ҫ����������洢�ռ䡣 һ�㱸����Ҫ�Ŀռ���DB��2-3���� ���DB ��100G����ô�����ݵĿռ������200G���ϡ�
+根据对表大小的估算，进而可以估算出整个数据库的大小。 在项目测试阶段，可以根据所有对象进行估算，从而可以估算出系统上线以后数据库的大小，根据这些数据可以规划存储。这里要注意一点，要给备份留足存储空间。 一般备份需要的空间是DB的2-3倍。 如果DB 是100G，那么给备份的空间最好是200G以上。
 
-����dba_segments��ͼ���Բ鿴���ݿ���ռ�ô洢�ռ�Ķ���
+根据dba_segments视图可以查看数据库中占用存储空间的对象：
 
 SYS@anqing2(rac2)> select distinctsegment_type from dba_segments;
 
@@ -30779,13 +30779,13 @@ TYPE2 UNDO
 
 
 
-������Ҫ���Ǳ��������������б��������Ĵ�С�������������ӾͿ��Թ����DB�Ĵ�С�ˡ�
+这里主要就是表和索引。把所有表和索引的大小估算出来，在相加就可以估算出DB的大小了。
 
-��. ������Ĵ�С
+二. 估算表的大小
 
-���Ĵ�С=��¼��*ƽ���ֶδ�С��avg_row_len��
+表的大小=记录数*平均字段大小（avg_row_len）
 
-Avg_row_len ����ͨ������SQL ��ѯ�� �䵥λΪbytes��
+Avg_row_len 可以通过如下SQL 查询。 其单位为bytes。
 
 SYS@anqing2(rac2)> selecttable_name,avg_row_len from all_tables where table_name='T1';
 
@@ -30797,11 +30797,11 @@ TABLE_NAME                     AVG_ROW_LEN
 
 T1                                      93
 
-���T1 ��δ������Ϊ1000���У���ô���С����1000w*93bytes��
+如果T1 表未来估计为1000万行，那么其大小就是1000w*93bytes。
 
-��.������������Ĵ�С
+三.估算表上索引的大小
 
-        All_indexes ��ͼû��all_tables �ϵ�avg_row_len �ֶΣ��������ǿ���ͨ����ͼ�ͱ���С��һ�����ʽ��й��㡣 ���Ĵ�С���ǿ��Թ�������������Ĵ�С����ͨ��������ʽ��й��㡣
+        All_indexes 视图没有all_tables 上的avg_row_len 字段，不过我们可以通过视图和表大小的一个比率进行估算。 表的大小我们可以估算出来，索引的大小可以通过这个比率进行估算。
 
 SQL>create index idx_t1_created on t1(created)
 
@@ -30817,7 +30817,7 @@ T1              TABLE                 6291456        768
 
 IDX_T1_CREATED  INDEX                 2097152        256
 
-���������ͱ��ı��ʣ�
+计算索引和表的比率：
 
 SYS@anqing2(rac2)> select (2097152/6291456)*100,(256/768)*100 from dual;
 
@@ -30827,65 +30827,65 @@ SYS@anqing2(rac2)> select (2097152/6291456)*100,(256/768)*100 from dual;
 
           33.3333333    33.3333333
 
-��bytes �� blocks �ı�����һ�����������Ǳ���33%�� ��ô���������Ժ�Ĵ�С��1000M����ô��Ӧ��������С����1000M*33%=330M��
+从bytes 和 blocks 的比率是一样，即索引是表的33%。 那么如果估算表以后的大小是1000M，那么对应的索引大小就是1000M*33%=330M。
 
-�����б��������Ĵ�С�������������������ݿ��С�Ĺ���ֵ��
-
-
+把所有表和索引的大小加起来，就是整个数据库大小的估算值。
 
 
-oracle��rowid��rownumber
+
+
+oracle的rowid和rownumber
 http://blog.163.com/jun_ai_ni_13 ... 055201002611117259/
-һ��ʲô��α��RowID��
+一，什么是伪列RowID？
 
-1,������һ���������ͣ�Ψһ��ʶһ����¼����λ�õ�һ��id������64λ�����18���ַ���ʾ��
+1,首先是一种数据类型，唯一标识一条记录物理位置的一个id，基于64位编码的18个字符显示。
 
-2,δ�洢�ڱ��У����Դӱ��в�ѯ������֧�ֲ��룬���£�ɾ�����ǵ�ֵ��
+2,未存储在表中，可以从表中查询，但不支持插入，更新，删除它们的值。
 
-����RowID����;
+二，RowID的用途
 
-1,�ڿ�����ʹ��Ƶ��Ӧ����ͦ��ģ��ر���һЩupdate�����ʹ�ø���Ƶ��������oracle ERP�д󲿷ݵ���ͼ�������rowid����ֶΡ�
+1,在开发中使用频率应该是挺多的，特别在一些update语句中使用更加频繁。所以oracle ERP中大部份的视图都会加入rowid这个字段。
 
-   ��һЩcursor����ʱҲ�ٲ��˼���rowid�������������ڿ��������У��������ӵı��ܶ࣬�ټ��ϳ���ĸ��ƣ���ʱ������rowid��Ӧ������һ������rowid��������ʱ���̳�����
+   在一些cursor定义时也少不了加入rowid。但往往我们在开发过程中，由于连接的表很多，再加上程序的复制，有时忽略了rowid对应的是那一个表中rowid，所以有时过程出错，
 
-   �������Ϻܶ�ʱ��ȥ��������������Ȼ��updateʱ����rowid���Ǵ˱���rowid,�����ڷ��ֺܶ�εĴ���ʱ������rowid�����ˣ�������һ��Ҫע��rowid��ƥ��
+   往往发上很多时间去查错，最后查出来既然是update时带的rowid并非此表的rowid,所以在发现很多次的错误时，重视rowid起来了，开发中一定要注意rowid的匹配
 
-2����������ķ�ʽ���ʱ��е�һ�С�
+2，能以做快的方式访问表中的一行。
 
-3������ʾ����������δ洢�ġ�
+3，能显示表的行是如何存储的。
 
-4����Ϊ����Ψһ��ʶ��
-����RowID�����
+4，作为表中唯一标识。
+三，RowID的组成
 
-rowidȷ����ÿ����¼����Oracle�е���һ�����ݶ��������ļ����顢���ϡ�
+rowid确定了每条记录是在Oracle中的哪一个数据对象，数据文件、块、行上。
 
-ROWID �ĸ�ʽ���£�
+ROWID 的格式如下：
 
-   ���ݶ�����        �ļ����        ����            �б��
+   数据对象编号        文件编号        块编号            行编号
 
    OOOOOO             FFF                BBBBBB    RRR
 
-   �� data_object_id# + rfile# + block# + row#   ��ɣ�ռ��10��bytes�Ŀռ䣬rowid����ʾ��ʽ������64λ�����18���ַ���ʾ����ʵrowid�Ĵ洢��ʽ�ǣ�10 ���ֽڼ�80λ�洢���������ݶ�������Ҫ32 λ������ļ������Ҫ10 λ��������Ҫ22��λ�б����Ҫ16 λ���ɴˣ����ǿ��Եó�:
+   由 data_object_id# + rfile# + block# + row#   组成，占用10个bytes的空间，rowid的显示方式：基于64位编码的18个字符显示，其实rowid的存储方式是：10 个字节即80位存储，其中数据对象编号需要32 位，相关文件编号需要10 位，块编号需要22，位行编号需要16 位，由此，我们可以得出:
 
-2bit��object number��ÿ�����ݿ������4G������
-10bit��file number��ÿ�����������1022���ļ���2���ļ�Ԥ����
-22bit��block number��ÿ���ļ������4M��BLOCK
-16bit��row number��ÿ��BLOCK�����64K��ROWS
+2bit的object number，每个数据库最多有4G个对象
+10bit的file number，每个对象最多有1022个文件（2个文件预留）
+22bit的block number，每个文件最多有4M个BLOCK
+16bit的row number，每个BLOCK最多有64K个ROWS
 
-   ����ÿ�����ռ䲻�ܳ���1023�� �����ļ���
-�ģ�RowID��Ӧ��
+   所以每个表空间不能超过1023个 数据文件。
+四，RowID的应用
 
-1�����Һ�ɾ���ظ���¼
+1，查找和删除重复记录
 
-   ����ͼ�Կ���е�ĳһ�л��д���Ψһ����ʱ��
+   当试图对库表中的某一列或几列创建唯一索引时，
 
-   ϵͳ��ʾ ORA-01452 �����ܴ���Ψһ�����������ظ���¼��
+   系统提示 ORA-01452 ：不能创建唯一索引，发现重复记录。
 
     /*conn scott/tiger
 
     Create table empa as select * from emp;
 
-    �����ظ���¼
+    插入重复记录
 
     insert into empa select * from emp where empno = 7369;
 
@@ -30895,21 +30895,21 @@ ROWID �ĸ�ʽ���£�
 
     */
 
-   �����ظ���¼�ļ��ַ�����
+   查找重复记录的几种方法：
 
-    ���Ҵ����ظ���¼
+    查找大量重复记录
 
     select empno from empa group by empno having count(*) >1;
 
     Select * From empa Where ROWID Not In(Select Min(ROWID) From empa Group By empno);
 
-    ���������ظ���¼
+    查找少量重复记录
 
     select * from empa a where rowid<>(select max(rowid) from empa where empno=a.empno );
 
-   ɾ���ظ���¼�ļ��ַ�����
+   删除重复记录的几种方法：
 
-    (1).�������д����ظ���¼�����(���Ͻ���������ʱ�����������Ч�ʻ�ܸ�)��
+    (1).适用于有大量重复记录的情况(列上建有索引的时候，用以下语句效率会很高)：
 
     Delete empa Where empno In (Select empno From empa Group By empno Having Count(*) > 1)
 
@@ -30921,31 +30921,31 @@ ROWID �ĸ�ʽ���£�
 
 
 
-    (2).�������������ظ���¼�����(ע�⣬�����д����ظ���¼����������������Ч�ʻ�ܵ�)��
+    (2).适用于有少量重复记录的情况(注意，对于有大量重复记录的情况，用以下语句效率会很低)：
 
     Delete empa a where rowid<>(select max(rowid) from empa where empno=a.empno );
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
-ע�⣺rownum��1��ʼ��
+注意：rownum从1开始；
 
-           rownum���ռ�¼����ʱ��˳�����¼����������order by���Ӿ�ʱһ��Ҫע�Ⱑ��
+           rownum按照记录插入时的顺序给记录排序，所以有order by的子句时一定要注意啊！
 
-           ʹ��ʱrownum��order by�ֶ��Ƿ�Ϊ������ʲôӰ�죿
+           使用时rownum，order by字段是否为主键有什么影响？
 
-           �Ӳ�ѯ��rownum rn����rn�õ����ѯ�е��������������У�
+           子查询中rownum rn，而rn用到外查询中到底是怎样的序列？
 
-            ��id�����ǰ��մ�С�����˳�����ģ�select���û��group by ��order by���Ӿ�ʱ��rownum��˳���id˳�����һ�¡�
+            若id主键是按照从小到大的顺序插入的，select语句没有group by 和order by的子句时，rownum的顺序和id顺序基本一致。
 
-���� Oracle �� rownum ���⣬�ܶ����϶�˵��֧��>,>=,=,between...and��ֻ�������Ϸ���(<��<=��!=)������˵��>,>=,=,between..and ʱ����ʾSQL�﷨���󣬶��Ǿ����ǲ鲻��һ����¼������������ƺ���Ī������Ľ��������ʵ��ֻҪ���������� rownum α�е�����Ͳ�Ӧ�øе����棬ͬ����α�У�rownum �� rowid ����Щ��һ��������������˵��
+对于 Oracle 的 rownum 问题，很多资料都说不支持>,>=,=,between...and，只能用以上符号(<、<=、!=)，并非说用>,>=,=,between..and 时会提示SQL语法错误，而是经常是查不出一条记录来，还会出现似乎是莫名其妙的结果来，其实您只要理解好了这个 rownum 伪列的意义就不应该感到惊奇，同样是伪列，rownum 与 rowid 可有些不一样，下面以例子说明
 
-����ĳ���� t1(c1) �� 20 ����¼
+假设某个表 t1(c1) 有 20 条记录
 
-����� select rownum,c1 from t1 where rownum < 10, ֻҪ����С�ںţ�������Ľ�������׵���һ�������ڸ������ܴ��һ�£�Ӧ�ò������κ����ʵġ�
+如果用 select rownum,c1 from t1 where rownum < 10, 只要是用小于号，查出来的结果很容易地与一般理解在概念上能达成一致，应该不会有任何疑问的。
 
-������� select rownum,c1 from t1 where rownum > 10 (���д�������Ĳ�ѯ��䣬��ʱ��������ͷ����Ӧ������õ����к���10����¼)����ͻᷢ�֣���ʾ�����Ľ��Ҫ����ʧ���ˣ�Ҳ�������ỳ���ǲ�˭ɾ��һЩ��¼��Ȼ��鿴��¼������Ȼ�� 20 �������������ǳ������أ�
+可如果用 select rownum,c1 from t1 where rownum > 10 (如果写下这样的查询语句，这时候在您的头脑中应该是想得到表中后面10条记录)，你就会发现，显示出来的结果要让您失望了，也许您还会怀疑是不谁删了一些记录，然后查看记录数，仍然是 20 条啊？那问题是出在哪呢？
 
-�Ⱥú����� rownum ������ɡ���ΪROWNUM�ǶԽ�����ӵ�һ��α�У����Ȳ鵽�����֮���ټ���ȥ��һ���� (ǿ������Ҫ�н����)���򵥵�˵ rownum �ǶԷ���������������кš������Ǵ�1��ʼ����ġ�������ѡ���Ľ��������û��1��������������1��ֵ��������û�취�����õ�����Ľ������
+先好好理解 rownum 的意义吧。因为ROWNUM是对结果集加的一个伪列，即先查到结果集之后再加上去的一个列 (强调：先要有结果集)。简单的说 rownum 是对符合条件结果的序列号。它总是从1开始排起的。所以你选出的结果不可能没有1，而有其他大于1的值。所以您没办法期望得到下面的结果集：
 
 11 aaaaaaaa
 
@@ -30955,53 +30955,53 @@ ROWID �ĸ�ʽ���£�
 
 .................
 
-rownum >10 û�м�¼����Ϊ��һ��������ȥ���Ļ����ڶ�����ROWNUM�ֳ���1��������Զû�����������ļ�¼�����߿����������⣺
+rownum >10 没有记录，因为第一条不满足去掉的话，第二条的ROWNUM又成了1，所以永远没有满足条件的记录。或者可以这样理解：
 
-ROWNUM��һ�����У���oracle���ݿ�������ļ��򻺳����ж�ȡ���ݵ�˳����ȡ�õ�һ����¼��rownumֵΪ1���ڶ���Ϊ2���������ơ��������>,>=,=,between...and��Щ��������Ϊ�ӻ������������ļ��еõ��ĵ�һ����¼��rownumΪ1����ɾ��������ȡ��������������rownum����1���ֱ�ɾ�����������ƣ���û�������ݡ�
+ROWNUM是一个序列，是oracle数据库从数据文件或缓冲区中读取数据的顺序。它取得第一条记录则rownum值为1，第二条为2，依次类推。如果你用>,>=,=,between...and这些条件，因为从缓冲区或数据文件中得到的第一条记录的rownum为1，则被删除，接着取下条，可是它的rownum还是1，又被删除，依次类推，便没有了数据。
 
-�������ϴӲ�ͬ���潨�������Ķ� rownum �ĸ�������ǿ�������ʶʹ�� rownum �ļ�������
+有了以上从不同方面建立起来的对 rownum 的概念，那我们可以来认识使用 rownum 的几种现像
 
-1. select rownum,c1 from t1 where rownum != 10 Ϊ���Ƿ���ǰ9�������أ����� select rownum,c1 from tablename where rownum < 10 ���صĽ������һ�����أ�
+1. select rownum,c1 from t1 where rownum != 10 为何是返回前9条数据呢？它与 select rownum,c1 from tablename where rownum < 10 返回的结果集是一样的呢？
 
-      ��Ϊ���ڲ�ѯ�����������ʾ��� 9 ����¼��֮��ļ�¼Ҳ���� != 10,���� >=10,����ֻ��ʾǰ��9����¼��Ҳ�����������⣬rownum Ϊ9��ļ�¼�� rownumΪ10��������Ϊ !=10������ȥ��������¼���ϣ�rownum����10��Ҳȥ���������ȥҲ��ֻ����ʾǰ��9����¼�ˡ�
+      因为是在查询到结果集后，显示完第 9 条记录后，之后的记录也都是 != 10,或者 >=10,所以只显示前面9条记录。也可以这样理解，rownum 为9后的记录的 rownum为10，因条件为 !=10，所以去掉，其后记录补上，rownum又是10，也去掉，如果下去也就只会显示前面9条记录了。
 
-2. Ϊʲô rownum >1 ʱ�鲻��һ����¼���� rownum >0 �� rownum >=1 ȴ����ʾ���еļ�¼��
+2. 为什么 rownum >1 时查不到一条记录，而 rownum >0 或 rownum >=1 却总显示所有的记录？
 
-      ��Ϊ rownum ���ڲ�ѯ���Ľ���������ȥ�ģ������Ǵ�1��ʼ��
+      因为 rownum 是在查询到的结果集后加上去的，它总是从1开始。
 
-3. Ϊʲô between 1 and 10 ���� between 0 and 10 �ܲ鵽��������� between 2 and 10 ȴ�ò��������
+3. 为什么 between 1 and 10 或者 between 0 and 10 能查到结果，而用 between 2 and 10 却得不到结果？
 
-       ԭ��ͬ��һ������Ϊ rownum ���Ǵ� 1 ��ʼ�����Ͽ��Կ������κ�ʱ����� rownum = 1 ������¼�����ǲ��Եģ����ڽ�������ǲ��ɻ�ȱ�ģ�����rownum=1 �������¥��һ�㲻�ܴ��ڣ�������� rownum ����Ҫ������ 1 ��
+       原因同上一样，因为 rownum 总是从 1 开始。从上可以看出，任何时候想把 rownum = 1 这条记录抛弃是不对的，它在结果集中是不可或缺的，少了rownum=1 就像空中楼阁一般不能存在，所以你的 rownum 条件要包含到 1 。
 
-�����������Ҫ�� rownum > 10 ���������Ļ�����Ҫ��Ƕ�����,�� rownum �����ɣ�Ȼ��������в�ѯ��
+但如果就是想要用 rownum > 10 这种条件的话话就要用嵌套语句,把 rownum 先生成，然后对他进行查询。
 
 select *
 
-from (selet rownum as rn��t1.* from a where ...)
+from (selet rownum as rn，t1.* from a where ...)
 
-where rn >10һ������жԽ�������з�ҳ������ô�ɵġ�
+where rn >10一般代码中对结果集进行分页就是这么干的。
 
-���⣺rowid �� rownum �䶼����Ϊα�У������ǵĴ��ڷ�ʽ�ǲ�һ���ģ�rowid ����˵���������ڵģ���ʾ��¼�ڱ��ռ��е�Ψһλ��ID����DB��Ψһ��ֻҪ��¼û���ᶯ����rowid�ǲ���ġ�rowid ����ڱ���˵������е�һ���У������� rowid Ϊ�����Ͳ����� rownum��Щ���������
+另外：rowid 与 rownum 虽都被称为伪列，但它们的存在方式是不一样的，rowid 可以说是物理存在的，表示记录在表空间中的唯一位置ID，在DB中唯一。只要记录没被搬动过，rowid是不变的。rowid 相对于表来说又像表中的一般列，所以以 rowid 为条件就不会有 rownum那些情况发生。
 
-���⻹Ҫע�⣺rownum�������κλ�����������Ϊǰ׺��
+另外还要注意：rownum不能以任何基表的名称作为前缀。
 
-����rownum��˵����oracleϵͳ˳�����Ϊ�Ӳ�ѯ���ص��еı�ţ����صĵ�һ�з������1���ڶ�����2���������ƣ����α�ֶο����������Ʋ�ѯ���ص�����������rownum�������κα���������Ϊǰ׺��
+对于rownum来说它是oracle系统顺序分配为从查询返回的行的编号，返回的第一行分配的是1，第二行是2，依此类推，这个伪字段可以用于限制查询返回的总行数，且rownum不能以任何表的名称作为前缀。
 
-(1) rownum ���ڵ���ĳֵ�Ĳ�ѯ����
+(1) rownum 对于等于某值的查询条件
 
-���ϣ���ҵ�ѧ�����е�һ��ѧ������Ϣ������ʹ��rownum=1��Ϊ�������������ҵ�ѧ�����еڶ���ѧ������Ϣ��ʹ��rownum=2����鲻�����ݡ���Ϊrownum���Ǵ�1��ʼ������1���ϵ���Ȼ����rownum�������ж���ʱ��Ϊ����false�����������޷��鵽rownum = n��n>1����Ȼ������
+如果希望找到学生表中第一条学生的信息，可以使用rownum=1作为条件。但是想找到学生表中第二条学生的信息，使用rownum=2结果查不到数据。因为rownum都是从1开始，但是1以上的自然数在rownum做等于判断是时认为都是false条件，所以无法查到rownum = n（n>1的自然数）。
 
-SQL> select rownum,id,name from student where rownum=1;�������������Ʒ��ؼ�¼�����ĵط�����֤���������磺��ʽ�α꣩
+SQL> select rownum,id,name from student where rownum=1;（可以用在限制返回记录条数的地方，保证不出错，如：隐式游标）
 
 SQL> select rownum,id,name from student where rownum =2;
 
     ROWNUM ID     NAME
 
-��2��rownum���ڴ���ĳֵ�Ĳ�ѯ����
+（2）rownum对于大于某值的查询条件
 
-   ������ҵ��ӵڶ��м�¼�Ժ�ļ�¼����ʹ��rownum>2�ǲ鲻����¼�ģ�ԭ��������rownum��һ�����Ǵ�1��ʼ��α�У�Oracle ��Ϊrownum> n(n>1����Ȼ��)�����������ɲ����������Բ鲻����¼��
+   如果想找到从第二行记录以后的记录，当使用rownum>2是查不出记录的，原因是由于rownum是一个总是从1开始的伪列，Oracle 认为rownum> n(n>1的自然数)这种条件依旧不成立，所以查不到记录。
 
-���ҵ��ڶ����Ժ�ļ�¼��ʹ�����µ��Ӳ�ѯ�����������ע���Ӳ�ѯ�е�rownum����Ҫ�б����������ǲ�������¼����������Ϊrownum����ĳ�������У������������Ļ����޷�֪��rownum���Ӳ�ѯ���л�������ѯ���С�
+查找到第二行以后的记录可使用以下的子查询方法来解决。注意子查询中的rownum必须要有别名，否则还是不会查出记录来，这是因为rownum不是某个表的列，如果不起别名的话，无法知道rownum是子查询的列还是主查询的列。
 
 SQL>select * from(select rownum no ,id,name from student) where no>2;
 
@@ -31009,13 +31009,13 @@ SQL>select * from(select rownum no ,id,name from student) where no>2;
 
 ---------- ------ ---------------------------------------------------
 
-         3 200003 ����
+         3 200003 李三
 
-         4 200004 ����
+         4 200004 赵四
 
-��3��rownum����С��ĳֵ�Ĳ�ѯ����
+（3）rownum对于小于某值的查询条件
 
-rownum����rownum<n��(n>1����Ȼ������������Ϊ�ǳ����ģ����Կ����ҵ���¼��
+rownum对于rownum<n（(n>1的自然数）的条件认为是成立的，所以可以找到记录。
 
 SQL> select rownum,id,name from student where rownum <3;
 
@@ -31023,11 +31023,11 @@ SQL> select rownum,id,name from student where rownum <3;
 
 ---------- ------ ---------------------------------------------------
 
-        1 200001 ��һ
+        1 200001 张一
 
-        2 200002 ����
+        2 200002 王二
 
-��ѯrownum��ĳ��������ݣ�����ʹ���Ӳ�ѯ������Ҫ��ѯrownum�ڵڶ��е�������֮������ݣ������ڶ��к͵��������ݣ���ô����ֻ��д������䣬����������С�ڵ������ļ�¼�У�Ȼ��������ѯ���ж��µ�rownum�ı����д��ڵ��ڶ��ļ�¼�С����������Ĳ������ڴ����ݼ���Ӱ���ٶȡ�
+查询rownum在某区间的数据，必须使用子查询。例如要查询rownum在第二行到第三行之间的数据，包括第二行和第三行数据，那么我们只能写以下语句，先让它返回小于等于三的记录行，然后在主查询中判断新的rownum的别名列大于等于二的记录行。但是这样的操作会在大数据集中影响速度。
 
 SQL> select * from (select rownum no,id,name from student where rownum<=3 ) where no >=2;
 
@@ -31035,13 +31035,13 @@ SQL> select * from (select rownum no,id,name from student where rownum<=3 ) wher
 
 ---------- ------ ---------------------------------------------------
 
-         2 200002 ����
+         2 200002 王二
 
-         3 200003 ����
+         3 200003 李三
 
-��4��rownum������
+（4）rownum和排序
 
-Oracle�е�rownum������ȡ���ݵ�ʱ���������ţ��������ָ�����������ȥָ����rowmun�����ݾͱ���ע���ˡ�
+Oracle中的rownum的是在取数据的时候产生的序号，所以想对指定排序的数据去指定的rowmun行数据就必须注意了。
 
 SQL> select rownum ,id,name from student order by name;
 
@@ -31049,15 +31049,15 @@ SQL> select rownum ,id,name from student order by name;
 
 ---------- ------ ---------------------------------------------------
 
-         3 200003 ����
+         3 200003 李三
 
-         2 200002 ����
+         2 200002 王二
 
-         1 200001 ��һ
+         1 200001 张一
 
-         4 200004 ����
+         4 200004 赵四
 
-���Կ�����rownum�����ǰ���name�������ɵ���š�ϵͳ�ǰ��ռ�¼����ʱ��˳�����¼�ŵĺţ�rowidҲ��˳�����ġ�Ϊ�˽��������⣬����ʹ���Ӳ�ѯ��
+可以看出，rownum并不是按照name列来生成的序号。系统是按照记录插入时的顺序给记录排的号，rowid也是顺序分配的。为了解决这个问题，必须使用子查询；
 
 SQL> select rownum ,id,name from (select * from student order by name);
 
@@ -31065,40 +31065,40 @@ SQL> select rownum ,id,name from (select * from student order by name);
 
 ---------- ------ ---------------------------------------------------
 
-         1 200003 ����
+         1 200003 李三
 
-         2 200002 ����
+         2 200002 王二
 
-         3 200001 ��һ
+         3 200001 张一
 
-         4 200004 ����
+         4 200004 赵四
 
-�����ͳ��˰�name���򣬲�����rownum�����ȷ��ţ���С����
+这样就成了按name排序，并且用rownum标出正确序号（有小到大）
 
-�����ڹ�������һ�ϰ�������¼�ı�����jspҳ������Ըñ����з�ҳ��ʾ���㿼����rownum�����������Ǿ��巽��(ÿҳ��ʾ20��)��
+笔者在工作中有一上百万条记录的表，在jsp页面中需对该表进行分页显示，便考虑用rownum来作，下面是具体方法(每页显示20条)：
 
-��select * from tabname where rownum<20 order by name" ��ȴ����oracleȴ���ܰ��Լ�����Ը��ִ�У����������ȡ20����¼��Ȼ����order by������ѯoracle,˵rownumȷʵ�����������õĻ���ֻ�����Ӳ�ѯ��ʵ�������򣬺�rownum���������£�
+“select * from tabname where rownum<20 order by name" 但却发现oracle却不能按自己的意愿来执行，而是先随便取20条记录，然后再order by，后经咨询oracle,说rownum确实就这样，想用的话，只能用子查询来实现先排序，后rownum，方法如下：
 
-"select * from (select * from tabname order by name) where rownum<20",������һ����Ч�ʻ�ͺܶࡣ
-�󾭱������飬ֻ����order by ���ֶ��ϼ�����������������oracle�Ȱ����ֶ�����Ȼ����rownum���������䣺    ��select * from tabname where rownum<20 order by name"
+"select * from (select * from tabname order by name) where rownum<20",但这样一来，效率会低很多。
+后经笔者试验，只需在order by 的字段上加主键或索引即可让oracle先按该字段排序，然后再rownum；方法不变：    “select * from tabname where rownum<20 order by name"
 
-ȡ��ĳ���е�N�����
+取得某列中第N大的行
 
 select column_name from
 
 (select table_name.*,dense_rank() over (order by column desc) rank from table_name)
 
-where rank = &N��
+where rank = &N；
 
-����Ҫ����ǰ5����¼��
+假如要返回前5条记录：
 
-select * from tablename where rownum<6;(����rownum <= 5 ����rownum != 6)
+select * from tablename where rownum<6;(或是rownum <= 5 或是rownum != 6)
 
-����Ҫ���ص�5-9����¼��
+假如要返回第5-9条记录：
 
 select * from tablename
 
-where ��
+where …
 
 and rownum<10
 
@@ -31106,21 +31106,21 @@ minus
 
 select * from tablename
 
-where ��
+where …
 
 and rownum<5
 
 order by name
 
-ѡ���������name������ʾ�����(��ѡ������)
+选出结果后用name排序显示结果。(先选再排序)
 
-ע�⣺ֻ�������Ϸ���(<��<=��!=)��
+注意：只能用以上符号(<、<=、!=)。
 
-select * from tablename where rownum != 10;���ص���ǰ������¼��
+select * from tablename where rownum != 10;返回的是前９条记录。
 
-�����ã�>,>=,=,Between...and������rownum��һ�����Ǵ�1��ʼ��α�У�Oracle ��Ϊ����������������
+不能用：>,>=,=,Between...and。由于rownum是一个总是从1开始的伪列，Oracle 认为这种条件不成立。
 
-���⣬����������죺
+另外，这个方法更快：
 
 select * from (
 
@@ -31132,43 +31132,43 @@ order by name )
 
 where r > 10
 
-����ȡ����11-20����¼!(��ѡ��������ѡ)
+这样取出第11-20条记录!(先选再排序再选)
 
-Ҫ��������ѡ������selectǶ�ף��ڲ��������ѡ��
+要先排序再选则须用select嵌套：内层排序外层选。
 
-rownum�����Ž�������ɵģ�һ�����ɣ��Ͳ���仯�ˣ�ͬʱ,���ɵĽ�������εݼӵģ�û��1����Զ������2!
+rownum是随着结果集生成的，一旦生成，就不会变化了；同时,生成的结果是依次递加的，没有1就永远不会有2!
 
-rownum ���ڲ�ѯ���ϲ����Ĺ����в�����α�У��������where�����д��� rownum �����Ļ�����:
+rownum 是在查询集合产生的过程中产生的伪列，并且如果where条件中存在 rownum 条件的话，则:
 
-1�� �����ж������ǳ�������
+1： 假如判定条件是常量，则：
 
-ֻ�� rownum = 1, <= ����1 ����Ȼ���� = ����1 ������û�н���ģ�����һ����Ҳ��û�н����
+只能 rownum = 1, <= 大于1 的自然数， = 大于1 的数是没有结果的；大于一个数也是没有结果的
 
-�� ������һ�� rownum ������������ʱ���� ��ѯ���� this is stop key��һ�������㣬ϵͳ���ü�¼���˵�������һ����¼��rownum������������Ժ���ľͲ����������¼��this is stop key����
+即 当出现一个 rownum 不满足条件的时候则 查询结束 this is stop key（一个不满足，系统将该记录过滤掉，则下一条记录的rownum还是这个，所以后面的就不再有满足记录，this is stop key）；
 
-2�� �����ж�ֵ���ǳ�������
+2： 假如判定值不是常量，则：
 
-�������� = var , ��ֻ�е� var Ϊ1 ��ʱ����������������ʱ�򲻴��� stop key ,�������full scan ,��ÿ����������where���������ݽ����ж���ѡ��һ�к����ȥѡrownum=2���С���
+若条件是 = var , 则只有当 var 为1 的时候才满足条件，这个时候不存在 stop key ,必须进行full scan ,对每个满足其他where条件的数据进行判定，选出一行后才能去选rownum=2的行……
 
-����ժ�ԡ��й�ITʵ���ҡ�
+以下摘自《中国IT实验室》
 
-1.��oracle��ʵ��select top n
+1.在oracle中实现select top n
 
-   ����oracle��֧��select top��䣬������oracle�о�������order by��rownum�������ʵ��select top n�Ĳ�ѯ��
+   由于oracle不支持select top语句，所以在oracle中经常是用order by跟rownum的组合来实现select top n的查询。
 
-�򵥵�˵��ʵ�ַ���������ʾ��
+简单地说，实现方法如下所示：
 
-select�������������������from
+select　列名１．．．列名ｎ　from
 
-(select�������������������from ���� order by ������������������)
+(select　列名１．．．列名ｎ　from 表名 order by 列名１．．．列名ｎ)
 
-where rownum<=n�������¼����
+where rownum<=n（抽出记录数）
 
 order by rownum asc
 
-   ����ٸ����Ӽ�˵��һ�¡�
+   下面举个例子简单说明一下。
 
-�˿ͱ�customer(id,name)���������ݣ�
+顾客表customer(id,name)有如下数据：
 
 ID NAME
 
@@ -31192,7 +31192,7 @@ ID NAME
 
    10 last
 
-   ��NAME����ĸ˳���ǰ�����˿͵�SQL���������ʾ��
+   则按NAME的字母顺抽出前三个顾客的SQL语句如下所示：
 
 select * from
 
@@ -31202,7 +31202,7 @@ select * from
 
    order by rownum asc
 
-   ������Ϊ��
+   输出结果为：
 
    ID NAME
 
@@ -31214,9 +31214,9 @@ select * from
 
 
 
-   Oracleɾ���ظ���¼�ļ��ַ�ʽ
+   Oracle删除重复记录的几种方式
 
-�����һ���ļ���ε������ݿ⣬���ܻ������ظ���¼����ô����Щ��������ɾ���ظ���¼�أ�
+如果把一个文件多次导入数据库，可能会引入重复记录，那么有哪些方法可以删除重复记录呢？
 
     REATE TABLE tbl_test(
          SER_NO NUMBER,
@@ -31231,14 +31231,14 @@ select * from
     INSERT INTO tbl_test VALUES(3, 'ccccc', 2005, 'zzz');
     INSERT INTO tbl_test VALUES(2, 'bbbbb', 2005, 'yyy');
 
-1.Using MIN(rowid) ��õķ�����������������Ļ�ִ�л�ܳ�ʱ��
+1.Using MIN(rowid) 最常用的方法，但是数据量大的话执行会很长时间
 
     DELETE FROM tbl_test
           WHERE ROWID NOT IN (SELECT   MIN (ROWID)
                                   FROM tbl_test
                               GROUP BY ser_no, fst_nm, deptid, cmnt);
 
-2.Using MIN(rowid) & Join ����һ�����
+2.Using MIN(rowid) & Join 跟第一条差不多
 
     DELETE FROM tbl_test t
           WHERE t.ROWID NOT IN (SELECT MIN (b.ROWID)
@@ -31266,12 +31266,12 @@ select * from
     FROM tbl_test b WHERE a.ser_no = b.ser_no AND a.fst_nm = b.fst_nm AND a.deptid = b.deptid AND a.cmnt  = b.cmnt AND
     a.ROWID  > b.ROWID);
 
-5. Using Analytic Fucntions: ���ڴ����������Ч�ķ���
+5. Using Analytic Fucntions: 对于大表这是最有效的方法
 
     DELETE FROM tbl_test WHERE ROWID IN (SELECT rid FROM (SELECT ROWID rid,
     ROW_NUMBER () OVER (PARTITION BY ser_no, fst_nm, deptid, cmnt ORDER BY ROWID) rn FROM tbl_test)WHERE rn <> 1);
 
-6. CREATE-DROP-RENAME ����Դʹ�ñȽϺ������ر���ڴ�������������Ҫ�ع�����������undo��־��Ϣ��
+6. CREATE-DROP-RENAME 对资源使用比较合理，特别对于大表。但是如果需要回滚则会产生大量undo日志信息。
 
     CREATE  TABLE tbl_test1 NOLOGGING AS SELECT tbl_test .*
     FROM tbl_test tbl_test WHERE ROWID IN (SELECT rid
@@ -31284,14 +31284,14 @@ select * from
 
 
 
-     ϵͳ��֧��ʹ��DBMS_XMLDOM��DBMS_XMLPARSER�Ĵ洢���̵Ľ������ 2005-03-25 08:21:38
-���ࣺ Web����
-������Ŀ�ֳ���������Ѷ����װ��Oracle 9.2.0.5���ݿⲻ֧��DBMS_XMLDOM, DBMS_XMLPARSER����
-����������ǵ�һ��ʹ�õ��������������д洢���̲��������������������Ѱ�ٺ����飬���ڷ�������
-���ڡ������ǽ�����̣�
-1 ����XDB�û���Ϊ����XDB�û����Ƚ���XDB���ռ䣩�����Ҹ�XDB�û�����connect, resourceȨ�ޡ�
-2 ����/ORACLE_HOME/rdbms/admin/catqm.sql�ű������иýű�ʱ����Ҫ����xdb�û������룬ȱʡ���ռ����ƣ�ȱʡ��ʱ���ռ� ���ƣ���
-3 �ű����гɹ������±���DBMS_XMLDOM, DBMS_XMLPARSER���ڵİ������⼴�õ������
+     系统不支持使用DBMS_XMLDOM，DBMS_XMLPARSER的存储过程的解决方法 2005-03-25 08:21:38
+分类： Web开发
+初到项目现场，华南咨讯给安装的Oracle 9.2.0.5数据库不支持DBMS_XMLDOM, DBMS_XMLPARSER包，
+结果导致我们的一个使用到这两个包的所有存储过程不能正常工作。经过苦苦寻觅和试验，终于发现问题
+所在。如下是解决过程：
+1 建立XDB用户（为建立XDB用户，先建立XDB表空间），并且给XDB用户授予connect, resource权限。
+2 运行/ORACLE_HOME/rdbms/admin/catqm.sql脚本（运行该脚本时，需要输入xdb用户的密码，缺省表空间名称，缺省临时表空间 名称）。
+3 脚本运行成功后，重新编译DBMS_XMLDOM, DBMS_XMLPARSER所在的包，问题即得到解决。
 [@more@]
 
 CREATE OR REPLACE DIRECTORY xml_dir AS '/paic/viptmp/oradata/dkf_smi_ext';
@@ -31304,7 +31304,7 @@ CREATE SEQUENCE seq_filename
     START WITH 10000
     NOCYCLE;
 
-[sql] view plaincopy��CODE�ϲ鿴����Ƭ�������ҵĴ���Ƭ
+[sql] view plaincopy在CODE上查看代码片派生到我的代码片
 DECLARE
     v_filename  Varchar2(50)  := 'Empmsg_table000.xml';
     xml_str     clob;
@@ -31384,17 +31384,17 @@ create or replace function dump_csv(p_query     in varchar2,
  oracle9i
 sqlplus /nolog
 conn peng/peng@mispeng
-������
+报错：
 SQL> conn peng/peng
-���� PRODUCT_USER_PROFILE ʱ����
-����: δ���ز�Ʒ�û���Ҫ�ļ���Ϣ��
-����Ҫ�� PUPBLD.SQL ��Ϊ SYSTEM ����
-�����ӡ�
+访问 PRODUCT_USER_PROFILE 时出错
+警告: 未加载产品用户概要文件信息！
+您需要将 PUPBLD.SQL 作为 SYSTEM 运行
+已连接。
 SQL> conn peng/peng@mispeng
-�����ӡ�
-������pl/sql �û�peng��½��ʱ�򣬲��ᱨ����
-����취��
-���ҵ�pupbld.sql·��
+已连接。
+但是用pl/sql 用户peng登陆的时候，不会报错。
+解决办法：
+先找到pupbld.sql路径
 $ORACLE_HOME/sqlplus/admin/pupbld.sql
 @$ORACLE_HOME/sqlplus/admin/pupbld.sql
 [@more@]
